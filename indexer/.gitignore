@@ -2,6 +2,6 @@ build
 data
 generated
 subgraph.yaml
-.env
+.env*
 !.env.example
 node_modules
