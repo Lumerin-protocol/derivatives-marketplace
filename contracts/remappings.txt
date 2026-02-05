@@ -1,0 +1,5 @@
+@openzeppelin/contracts/=node_modules/@openzeppelin/contracts/
+@openzeppelin/contracts-upgradeable/=node_modules/@openzeppelin/contracts-upgradeable/
+@chainlink/contracts/=node_modules/@chainlink/contracts/
+hashprice-oracle/=node_modules/hashprice-oracle/
+solidity-linked-list/=node_modules/solidity-linked-list/

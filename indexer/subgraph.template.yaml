@@ -1,0 +1,60 @@
+# Use subgraph.template.yaml to add changes to the subgraph.yaml file
+# Variables are substituted via envsubst from environment variables
+specVersion: 1.3.0
+indexerHints:
+  prune: auto
+schema:
+  file: ./schema.graphql
+dataSources:
+  - kind: ethereum
+    name: Futures
+    network: "${NETWORK}"
+    source:
+      address: "${FUTURES_ADDRESS}"
+      startBlock: ${START_BLOCK_FUTURES}
+      abi: Futures
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      entities:
+        - Futures
+        - Participant
+        - Position
+        - Order
+      abis:
+        - name: Futures
+          file: ../contracts/abi/Futures.json
+      eventHandlers:
+        - event: Initialized(uint64)
+          handler: handleInitialized
+        - event: Upgraded(indexed address)
+          handler: handleUpgraded
+        - event: PositionCreated(indexed bytes32,indexed address,indexed address,uint256,uint256,uint256,string,bytes32)
+          handler: handlePositionCreated
+        - event: PositionClosed(indexed bytes32)
+          handler: handlePositionClosed
+        - event: PositionExited(indexed bytes32,indexed address,int256)
+          handler: handlePositionExited
+        - event: PositionDeliveryClosed(indexed bytes32,indexed address)
+          handler: handlePositionDeliveryClosed
+        - event: OrderCreated(indexed bytes32,indexed address,string,uint256,uint256,bool)
+          handler: handleOrderCreated
+        - event: OrderClosed(indexed bytes32,indexed address)
+          handler: handleOrderClosed
+        - event: Transfer(indexed address,indexed address,uint256)
+          handler: handleTransfer
+        - event: OrderFeeUpdated(uint256)
+          handler: handleOrderFeeUpdated
+        - event: PositionPaid(indexed bytes32)
+          handler: handlePositionPaid
+        - event: PositionPaymentReceived(indexed bytes32)
+          handler: handlePositionPaymentReceived
+        - event: ValidatorURLUpdated(string)
+          handler: handleValidatorURLUpdated
+      file: ./src/futures.ts
+# features:
+#   - grafting
+# graft:
+#   base: QmSagdeMzbrcwppgzTwsJk4uhKSXT5wXRDxWC3Bt1i4sQg
+#   block: 213834223
