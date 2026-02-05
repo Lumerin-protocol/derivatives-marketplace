@@ -1,0 +1,1 @@
+# Location for Smart Contracts (should be self-contained)

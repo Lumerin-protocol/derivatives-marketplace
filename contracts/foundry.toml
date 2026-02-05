@@ -1,0 +1,9 @@
+[fmt] # See https://book.getfoundry.sh/reference/config/formatter
+int_types = "long"
+line_length = 120
+tab_width = 4
+bracket_spacing = true
+multiline_func_header = "attributes_first"
+number_underscore = "thousands"
+quote_style = "double"
+ignore = ['./script/**/*']
