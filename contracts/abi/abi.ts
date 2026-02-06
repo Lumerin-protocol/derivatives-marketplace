@@ -280,7 +280,7 @@ export const perpsSimpleAbi = [
         indexed: true,
       },
     ],
-    name: 'OrderClosed',
+    name: 'OrderCancelled',
   },
   {
     type: 'event',
@@ -337,7 +337,20 @@ export const perpsSimpleAbi = [
         indexed: true,
       },
       {
-        name: 'matchedOrderId',
+        name: 'participant',
+        internalType: 'address',
+        type: 'address',
+        indexed: true,
+      },
+    ],
+    name: 'OrderFilled',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'makerOrderId',
         internalType: 'bytes32',
         type: 'bytes32',
         indexed: true,
@@ -352,10 +365,16 @@ export const perpsSimpleAbi = [
         name: 'seller',
         internalType: 'address',
         type: 'address',
-        indexed: false,
+        indexed: true,
       },
       {
         name: 'price',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+      {
+        name: 'quantity',
         internalType: 'uint256',
         type: 'uint256',
         indexed: false,
@@ -485,26 +504,6 @@ export const perpsSimpleAbi = [
     type: 'event',
     anonymous: false,
     inputs: [
-      { name: 'user', internalType: 'address', type: 'address', indexed: true },
-      {
-        name: 'netQuantity',
-        internalType: 'int256',
-        type: 'int256',
-        indexed: false,
-      },
-      {
-        name: 'aggregatedEntryPrice',
-        internalType: 'uint256',
-        type: 'uint256',
-        indexed: false,
-      },
-    ],
-    name: 'PositionUpdated',
-  },
-  {
-    type: 'event',
-    anonymous: false,
-    inputs: [
       { name: 'from', internalType: 'address', type: 'address', indexed: true },
       { name: 'to', internalType: 'address', type: 'address', indexed: true },
       {
@@ -587,7 +586,7 @@ export const perpsSimpleAbi = [
   {
     type: 'function',
     inputs: [{ name: '_orderId', internalType: 'bytes32', type: 'bytes32' }],
-    name: 'closeOrder',
+    name: 'cancelOrder',
     outputs: [],
     stateMutability: 'nonpayable',
   },

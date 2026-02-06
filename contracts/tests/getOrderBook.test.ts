@@ -69,7 +69,7 @@ describe("PerpsSimple - Order Book View Functions", function () {
       for (const orderId of orders) {
         const order = await perps.read.getOrder([orderId]);
         if (order.price === marketPrice - tick) {
-          await perps.write.closeOrder([orderId], { account: buyer.account });
+          await perps.write.cancelOrder([orderId], { account: buyer.account });
           break;
         }
       }

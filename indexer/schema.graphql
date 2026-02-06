@@ -1,102 +1,174 @@
-# Futures Contract Root Entity
-type Futures @entity(immutable: false) {
-  "Use id=0"
+# Root entity for contract-wide state and stats
+type Perps @entity(immutable: false) {
+  "Singleton entity, use id=0"
   id: Int8!
-  initializedBlockNumber: BigInt!
-  initializeTimestamp: BigInt!
 
-  "Contract configuration parameters"
+  # Contract addresses
+  contractAddress: Bytes!
+  collateralToken: Bytes!
+  priceOracle: Bytes!
+
+  # Configuration
+  marginPercent: BigInt!
+  maintenanceMarginPercent: BigInt!
+  liquidationFee: BigInt!
   minimumPriceIncrement: BigInt!
   orderFee: BigInt!
-  liquidationMarginPercent: Int!
-  speedHps: BigInt!
-  deliveryDurationDays: Int!
-  deliveryIntervalDays: Int!
-  futureDeliveryDatesCount: Int!
-  firstFutureDeliveryDate: BigInt!
-  breachPenaltyRatePerDay: BigInt!
-  validatorAddress: Bytes!
-  hashrateOracleAddress: Bytes!
-  tokenAddress: Bytes!
-  futuresAddress: Bytes!
-  validatorURL: String!
 
-  "Number of contracts including archived"
-  contractCount: Int!
-  "Number of not archived contracts"
-  contractActiveCount: Int!
-
-  # purchase stats
-  purchaseCount: Int!
-  closeoutCount: Int!
-}
-
-# Futures Contract Entities
-type Participant @entity(immutable: false) {
-  id: Bytes!
-  address: Bytes!
-  positions: [Position!]!
-  orders: [Order!]!
+  # Pool balances
+  reservePoolBalance: BigInt!
+  collectedFeesBalance: BigInt!
 
   # Stats
-  positionCount: Int!
-  orderCount: Int!
+  totalUsers: Int!
+  totalOrders: Int!
+  activeOrders: Int!
+  totalTrades: Int!
   totalVolume: BigInt!
+  totalLiquidations: Int!
 
-  # Balance tracking
-  balance: BigInt!
+  # Timestamps
+  initializedAt: BigInt!
+  lastUpdatedAt: BigInt!
+}
+
+# User entity with positions and collateral
+type User @entity(immutable: false) {
+  id: Bytes! # user address
+  address: Bytes!
+
+  # Collateral
+  collateralBalance: BigInt!
   totalDeposited: BigInt!
   totalWithdrawn: BigInt!
-  lastBalanceUpdate: BigInt!
+
+  # Position state (current net position)
+  netQuantity: BigInt!
+  aggregatedEntryPrice: BigInt!
+
+  # Stats
+  orderCount: Int!
+  activeOrderCount: Int!
+  tradeCount: Int!
+  realizedPnl: BigInt!
+
+  # Relations
+  orders: [Order!]! @derivedFrom(field: "user")
+  trades: [Trade!]!
+  positionHistory: [PositionSnapshot!]! @derivedFrom(field: "user")
+  positionCloses: [PositionClose!]! @derivedFrom(field: "user")
+  collateralEvents: [CollateralEvent!]! @derivedFrom(field: "user")
+  liquidationsAsUser: [Liquidation!]! @derivedFrom(field: "user")
+  liquidationsAsLiquidator: [Liquidation!]! @derivedFrom(field: "liquidator")
+
+  # Timestamps
+  createdAt: BigInt!
+  lastActivityAt: BigInt!
 }
 
+# Order in the order book
 type Order @entity(immutable: false) {
-  id: Bytes!
-  participant: Participant!
-  pricePerDay: BigInt!
-  deliveryAt: BigInt!
-  isBuy: Boolean!
-  timestamp: BigInt!
-  blockNumber: BigInt!
-  transactionHash: Bytes!
-  destURL: String!
-
-  # Status
-  isActive: Boolean!
-  closedAt: BigInt
-  closedBy: Bytes
-}
-
-type Position @entity(immutable: false) {
-  id: Bytes!
-  seller: Participant!
-  buyer: Participant!
-  sellPricePerDay: BigInt!
-  buyPricePerDay: BigInt!
-  deliveryAt: BigInt!
-  timestamp: BigInt!
-  blockNumber: BigInt!
-  transactionHash: Bytes!
-  orderId: Bytes!
-  destURL: String!
-
-  # PnL
-  sellerPnl: BigInt
-  buyerPnl: BigInt
-
-  # Status
-  isActive: Boolean!
-  closedAt: BigInt
-  closedBy: Bytes
-  isPaid: Boolean!
-}
-
-# Delivery Date Orders - tracks buy/sell counts per price level for each delivery date
-type DeliveryDateOrder @entity(immutable: false) {
-  "ID format: {deliveryDate}-{price}"
-  id: String!
-  deliveryDate: BigInt!
+  id: Bytes! # orderId
+  user: User!
   price: BigInt!
-  buyOrdersCount: Int!
-  sellOrdersCount: Int!
+  quantity: BigInt! # current remaining quantity (absolute value)
+  originalQuantity: BigInt! # original quantity when created
+  isBuy: Boolean! # true = long/buy, false = short/sell
+  # Status
+  status: OrderStatus!
+  filledQuantity: BigInt!
+
+  # Metadata
+  createdAt: BigInt!
+  updatedAt: BigInt!
+  closedAt: BigInt
+  blockNumber: BigInt!
+  transactionHash: Bytes!
+}
+
+enum OrderStatus {
+  ACTIVE
+  FILLED
+  CANCELLED
+  PARTIAL
+}
+
+# Trade (matched order)
+type Trade @entity(immutable: true) {
+  id: Bytes! # tx hash + log index
+  makerOrderId: Bytes!
+  buyer: User!
+  seller: User!
+  price: BigInt!
+  quantity: BigInt!
+  volume: BigInt! # price * quantity
+  # Metadata
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  transactionHash: Bytes!
+}
+
+# Position snapshot after each trade (from PositionTrade event)
+type PositionSnapshot @entity(immutable: true) {
+  id: Bytes! # tx hash + log index
+  user: User!
+  tradePrice: BigInt!
+  tradeQuantity: BigInt! # signed: positive = bought, negative = sold
+  netQuantityAfter: BigInt! # signed: positive = long, negative = short
+  aggregatedEntryPriceAfter: BigInt!
+
+  # Metadata
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  transactionHash: Bytes!
+}
+
+# Position close event (full or partial)
+type PositionClose @entity(immutable: true) {
+  id: Bytes! # tx hash + log index
+  user: User!
+  quantityClosed: BigInt! # signed
+  pnl: BigInt! # signed: positive = profit, negative = loss
+  # Metadata
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  transactionHash: Bytes!
+}
+
+# Liquidation event
+type Liquidation @entity(immutable: true) {
+  id: Bytes! # tx hash + log index
+  user: User!
+  liquidator: User!
+  positionSize: BigInt! # signed
+  pnl: BigInt! # signed
+  liquidatorFee: BigInt!
+
+  # Metadata
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  transactionHash: Bytes!
+}
+
+# Collateral event (deposit or withdrawal)
+type CollateralEvent @entity(immutable: true) {
+  id: Bytes! # tx hash + log index
+  user: User!
+  amount: BigInt!
+  isDeposit: Boolean!
+
+  # Metadata
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  transactionHash: Bytes!
+}
+
+# Order book price level aggregation
+type PriceLevel @entity(immutable: false) {
+  "ID format: {price}-{side} where side is 'bid' or 'ask'"
+  id: String!
+  price: BigInt!
+  isBid: Boolean!
+  totalQuantity: BigInt!
+  orderCount: Int!
 }

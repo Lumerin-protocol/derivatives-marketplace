@@ -1,9 +1,9 @@
 {
-  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "$schema": "./contracts/node_modules/@biomejs/biome/configuration_schema.json",
   "overrides": [
     {
       "includes": [
-        "subgraph/src"
+        "indexer/src/**"
       ],
       "linter": {
         "rules": {
@@ -11,7 +11,8 @@
             "noForEach": "off"
           },
           "style": {
-            "useImportType": "off"
+            "useImportType": "off",
+            "useTemplate": "off"
           },
           "suspicious": {
             "noShadowRestrictedNames": "off"

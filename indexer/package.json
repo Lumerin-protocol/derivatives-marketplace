@@ -1,28 +1,27 @@
 {
-  "name": "futures",
+  "name": "perps-indexer",
   "license": "UNLICENSED",
   "scripts": {
-    "clean": "rm -rf data generated build",
-    "codegen": "graph codegen",
+    "clean": "rm -rf data generated build subgraph.yaml",
+    "codegen": "yarn prepare-local && graph codegen",
     "prepare:env": "envsubst < subgraph.template.yaml > subgraph.yaml",
     "prepare-local": "set -a && source .env && set +a && envsubst < subgraph.template.yaml > subgraph.yaml",
     "build": "graph build",
-    "deploy": "graph deploy --node https://api.studio.thegraph.com/deploy/ futures",
-    "create-local": "graph create --node http://localhost:8020/ futures",
-    "remove-local": "graph remove --node http://localhost:8020/ futures",
-    "deploy-local": "graph deploy --node http://localhost:8020/ --ipfs http://localhost:5001 --version-label 0 futures",
-    "setup-local": "yarn prepare-local && yarn codegen && yarn build && yarn create-local && yarn deploy-local",
+    "deploy": "graph deploy --node https://api.studio.thegraph.com/deploy/ perps",
+    "create-local": "graph create --node http://localhost:8020/ perps",
+    "remove-local": "graph remove --node http://localhost:8020/ perps",
+    "deploy-local": "graph deploy --node http://localhost:8020/ --ipfs http://localhost:5001 --version-label 0 perps",
+    "setup-local": "pnpm prepare-local && pnpm codegen && pnpm build && pnpm create-local && pnpm deploy-local",
     "test": "graph test",
     "indexer": "docker-compose up"
   },
   "dependencies": {
-    "@graphprotocol/graph-ts": "0.37.0",
-    "graphql": "^16.11.0",
-    "graphql-request": "^7.2.0",
-    "viem": "^2.37.9"
+    "@graphprotocol/graph-ts": "0.37.0"
   },
   "devDependencies": {
     "@graphprotocol/graph-cli": "^0.98.1",
+    "graphql": "^16.11.0",
+    "graphql-request": "^7.2.0",
     "matchstick-as": "0.6.0",
     "typescript": "^5.9.3"
   }

@@ -1,17 +1,17 @@
 {
   "localhost": {
-    "Futures": {
-      "address": "0x84ea74d481ee0a5332c457a4d796187f6ba67feb"
+    "PerpsSimple": {
+      "address": "0x0000000000000000000000000000000000000000"
     }
   },
   "arbitrum-sepolia": {
-    "Futures": {
-      "address": "0x74e3ab04fad3ba6534125f7aeae698a9cf94b4f5"
+    "PerpsSimple": {
+      "address": "0x0000000000000000000000000000000000000000"
     }
   },
   "arbitrum": {
-    "Futures": {
-      "address": "0xec76867e96d942282fc7aafe3f778de34d41a311"
+    "PerpsSimple": {
+      "address": "0x0000000000000000000000000000000000000000"
     }
   }
 }

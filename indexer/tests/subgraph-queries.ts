@@ -1,122 +1,213 @@
 import { gql } from "graphql-request";
 
-export const hashrateIndexQuery = gql`
-  query HashpriceIndex($from: BigInt!, $to: BigInt!) {
-    hashrateIndexes(
-      where: { updatedAt_gt: $from, updatedAt_lte: $to }
-      orderBy: updatedAt
-      orderDirection: asc
-    ) {
-      hashesForBTC
-      hashesForToken
-      id
-      updatedAt
+// Get contract stats
+export const PerpsStatsQuery = gql`
+  query PerpsStats {
+    perps(id: 0) {
+      contractAddress
+      collateralToken
+      priceOracle
+      marginPercent
+      maintenanceMarginPercent
+      liquidationFee
+      minimumPriceIncrement
+      orderFee
+      reservePoolBalance
+      collectedFeesBalance
+      totalUsers
+      totalOrders
+      activeOrders
+      totalTrades
+      totalVolume
+      totalLiquidations
+      initializedAt
+      lastUpdatedAt
     }
   }
 `;
 
-export const ParticipantQuery = gql`
-  query Participant(
-    $participantAddress: ID!
-    $posOffset: Int!
-    $posLimit: Int!
-    $orderOffset: Int!
-    $orderLimit: Int!
-  ) {
-    participant(id: $participantAddress) {
+// Get user details with orders and positions
+export const UserQuery = gql`
+  query User($address: ID!) {
+    user(id: $address) {
       address
-      balance
-      lastBalanceUpdate
-      orderCount
+      collateralBalance
       totalDeposited
-      totalVolume
       totalWithdrawn
-      positions(first: $posLimit, skip: $posOffset, orderBy: timestamp, orderDirection: desc) {
-        transactionHash
-        timestamp
-        startTime
-        price
-        isActive
+      netQuantity
+      aggregatedEntryPrice
+      orderCount
+      activeOrderCount
+      tradeCount
+      realizedPnl
+      createdAt
+      lastActivityAt
+    }
+  }
+`;
+
+// Get user's active orders
+export const UserOrdersQuery = gql`
+  query UserOrders($address: ID!, $first: Int!, $skip: Int!) {
+    user(id: $address) {
+      orders(
+        first: $first
+        skip: $skip
+        orderBy: createdAt
+        orderDirection: desc
+        where: { status: "ACTIVE" }
+      ) {
         id
-        closedBy
-        closedAt
-        offsetPositionId
+        price
+        quantity
+        originalQuantity
+        isBuy
+        status
+        filledQuantity
+        createdAt
+      }
+    }
+  }
+`;
+
+// Get user's trades
+export const UserTradesQuery = gql`
+  query UserTrades($address: ID!, $first: Int!, $skip: Int!) {
+    user(id: $address) {
+      trades(first: $first, skip: $skip, orderBy: timestamp, orderDirection: desc) {
+        id
+        makerOrderId
         buyer {
           address
         }
         seller {
           address
         }
-      }
-      orders(first: $orderLimit, skip: $orderOffset, orderBy: timestamp, orderDirection: desc) {
-        closedAt
-        closedBy
-        deliveryDate
-        id
-        isActive
-        isBuy
-        participant {
-          address
-        }
         price
+        quantity
+        volume
         timestamp
       }
     }
   }
 `;
 
-const DeliveryDatesQuery = gql`
-  query DeliveryDates($now: BigInt!) {
-    deliveryDates(where: { deliveryDate_gte: $now }, orderBy: deliveryDate, orderDirection: asc) {
-      deliveryDate
-      id
+// Get user's position history
+export const UserPositionHistoryQuery = gql`
+  query UserPositionHistory($address: ID!, $first: Int!, $skip: Int!) {
+    user(id: $address) {
+      positionHistory(first: $first, skip: $skip, orderBy: timestamp, orderDirection: desc) {
+        id
+        tradePrice
+        tradeQuantity
+        netQuantityAfter
+        aggregatedEntryPriceAfter
+        timestamp
+      }
     }
   }
 `;
 
-const OrderBookQuery = gql`
-  query OrderBook($deliveryDate: BigInt!) {
-    orders(where: { deliveryDate: $deliveryDate }, orderBy: price, orderDirection: desc) {
+// Get recent trades
+export const RecentTradesQuery = gql`
+  query RecentTrades($first: Int!, $skip: Int!) {
+    trades(first: $first, skip: $skip, orderBy: timestamp, orderDirection: desc) {
       id
-      price
-      deliveryDate
-      participant {
+      buyer {
         address
       }
-      isBuy
+      seller {
+        address
+      }
+      price
+      quantity
+      volume
+      timestamp
+      blockNumber
+      transactionHash
     }
   }
 `;
 
-const PositionBookQuery = gql`
-  query PositionBook($deliveryDate: BigInt!) {
-    positions(where: { startTime: $deliveryDate }) {
+// Get order book (price levels)
+export const OrderBookQuery = gql`
+  query OrderBook {
+    priceLevels(where: { orderCount_gt: 0 }, orderBy: price, orderDirection: desc) {
       id
       price
-      startTime
+      isBid
+      totalQuantity
+      orderCount
     }
   }
 `;
 
-// Last sell/buy order - derived from order book query result
+// Get active orders at a price level
+export const OrdersAtPriceQuery = gql`
+  query OrdersAtPrice($price: BigInt!, $isBuy: Boolean!, $first: Int!) {
+    orders(
+      where: { price: $price, isBuy: $isBuy, status: "ACTIVE" }
+      first: $first
+      orderBy: createdAt
+      orderDirection: asc
+    ) {
+      id
+      user {
+        address
+      }
+      quantity
+      createdAt
+    }
+  }
+`;
 
-// Total open interest - derived from position book query result
+// Get recent liquidations
+export const RecentLiquidationsQuery = gql`
+  query RecentLiquidations($first: Int!, $skip: Int!) {
+    liquidations(first: $first, skip: $skip, orderBy: timestamp, orderDirection: desc) {
+      id
+      user {
+        address
+      }
+      liquidator {
+        address
+      }
+      positionSize
+      pnl
+      liquidatorFee
+      timestamp
+    }
+  }
+`;
 
-const ContractSpecsQuery = gql`
-  query ContractSpecs {
-    futures(id: "0") {
-      buyerLiquidationMarginPercent
-      closeoutCount
-      contractActiveCount
-      contractCount
-      deliveryDurationSeconds
-      hashrateOracleAddress
-      priceLadderStep
-      purchaseCount
-      sellerLiquidationMarginPercent
-      speedHps
-      tokenAddress
-      validatorAddress
+// Get top traders by realized PnL
+export const TopTradersQuery = gql`
+  query TopTraders($first: Int!) {
+    users(first: $first, orderBy: realizedPnl, orderDirection: desc, where: { tradeCount_gt: 0 }) {
+      address
+      realizedPnl
+      tradeCount
+      netQuantity
+      collateralBalance
+    }
+  }
+`;
+
+// Get users with open positions
+export const OpenPositionsQuery = gql`
+  query OpenPositions($first: Int!, $skip: Int!) {
+    users(
+      first: $first
+      skip: $skip
+      where: { netQuantity_not: 0 }
+      orderBy: lastActivityAt
+      orderDirection: desc
+    ) {
+      address
+      netQuantity
+      aggregatedEntryPrice
+      collateralBalance
+      realizedPnl
     }
   }
 `;

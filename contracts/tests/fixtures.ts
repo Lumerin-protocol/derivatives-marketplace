@@ -8,7 +8,6 @@ export async function deployPerpsFixture() {
   const pc = await viem.getPublicClient();
   const tc = await viem.getTestClient();
   const topUpBalanceUSDC = parseUnits("100000", 6); // 100,000 USDC for testing
-
   // Deploy USDC Mock
   const _usdcMock = await viem.deployContract("contracts/USDCMock.sol:USDCMock", []);
   const usdcMock = await viem.getContractAt(
@@ -40,7 +39,7 @@ export async function deployPerpsFixture() {
   // Deploy PerpsSimple contract
   const perpsImpl = await viem.deployContract("contracts/PerpsSimple.sol:PerpsSimple", []);
   const perpsProxy = await viem.deployContract("ERC1967Proxy", [
-    perpsImpl.address,
+    perpsImpl.address as `0x${string}`,
     encodeFunctionData({
       abi: perpsImpl.abi,
       functionName: "initialize",

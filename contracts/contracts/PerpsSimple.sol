@@ -10,22 +10,7 @@ import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/I
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import { ERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
-
-/// @title AggregatorV3Interface
-/// @notice Chainlink-style price oracle interface
-interface AggregatorV3Interface {
-    function decimals() external view returns (uint8);
-    function description() external view returns (string memory);
-    function version() external view returns (uint256);
-    function getRoundData(uint80 _roundId)
-        external
-        view
-        returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound);
-    function latestRoundData()
-        external
-        view
-        returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound);
-}
+import { AggregatorV3Interface } from "./AggregatorV3Interface.sol";
 
 /// @title PerpsSimple
 /// @notice Simple perpetual trading contract with on-chain order book
@@ -90,12 +75,12 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
 
     // Events
     event OrderCreated(bytes32 indexed orderId, address indexed participant, uint256 price, int256 quantity);
-    event OrderClosed(bytes32 indexed orderId, address indexed participant);
+    event OrderFilled(bytes32 indexed orderId, address indexed participant);
+    event OrderCancelled(bytes32 indexed orderId, address indexed participant);
     event OrderUpdated(bytes32 indexed orderId, address indexed participant, int256 newQuantity);
     event OrderMatched(
-        bytes32 indexed orderId, bytes32 indexed matchedOrderId, address indexed buyer, address seller, uint256 price
+        bytes32 indexed makerOrderId, address indexed buyer, address indexed seller, uint256 price, uint256 quantity
     );
-    event PositionUpdated(address indexed user, int256 netQuantity, uint256 aggregatedEntryPrice);
     event PositionTrade(
         address indexed user,
         uint256 tradePrice,
@@ -295,7 +280,8 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
                 _remainingQty = _reduceQuantity(_remainingQty, offsetAmt);
 
                 if (order.quantity == 0) {
-                    _closeOrder(orderId, order);
+                    _removeOrder(orderId, order);
+                    emit OrderFilled(orderId, _user);
                 } else {
                     emit OrderUpdated(orderId, _user, order.quantity);
                 }
@@ -373,7 +359,8 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         _order.quantity = _reduceQuantity(_order.quantity, matchAmt);
 
         if (_order.quantity == 0) {
-            _closeOrder(_orderId, _order);
+            _removeOrder(_orderId, _order);
+            emit OrderFilled(_orderId, _order.participant);
         } else {
             emit OrderUpdated(_orderId, _order.participant, _order.quantity);
         }
@@ -416,19 +403,20 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         return _quantity > 0 ? _quantity - int256(_reduction) : _quantity + int256(_reduction);
     }
 
-    /// @notice Close an order
-    /// @param _orderId Order ID to close
-    function closeOrder(bytes32 _orderId) external {
+    /// @notice Cancel an order
+    /// @param _orderId Order ID to cancel
+    function cancelOrder(bytes32 _orderId) external {
         Order memory order = orders[_orderId];
         if (order.participant != _msgSender()) {
             revert OrderNotBelongToSender();
         }
 
-        _closeOrder(_orderId, order);
+        _removeOrder(_orderId, order);
+        emit OrderCancelled(_orderId, order.participant);
     }
 
-    /// @notice Close an order (internal)
-    function _closeOrder(bytes32 _orderId, Order memory order) private {
+    /// @notice Remove an order from the book (internal)
+    function _removeOrder(bytes32 _orderId, Order memory order) private {
         bool isBid = order.quantity > 0;
         StructuredLinkedList.List storage orderQueue = _priceOrderIds(order.price, isBid);
         orderQueue.remove(uint256(_orderId));
@@ -444,8 +432,6 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
 
         // Remove price level if no more orders at this price
         _removePriceLevelIfEmpty(order.price, isBid);
-
-        emit OrderClosed(_orderId, order.participant);
     }
 
     /// @notice Create a new order
@@ -485,7 +471,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         // Update seller's position (short: negative quantity)
         _updateUserPosition(seller, -absQty, _price);
 
-        emit OrderMatched(bytes32(0), matchedOrderId, buyer, seller, _price);
+        emit OrderMatched(matchedOrderId, buyer, seller, _price, uint256(absQty));
     }
 
     /// @notice Update a user's net position with aggregated entry price
@@ -501,7 +487,6 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             usersWithPositions.add(_user);
 
             emit PositionTrade(_user, _tradePrice, _quantity, newNetQuantity, _tradePrice);
-            emit PositionUpdated(_user, newNetQuantity, _tradePrice);
             return;
         }
 
@@ -519,7 +504,6 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             position.netQuantity = newNetQuantity;
 
             emit PositionTrade(_user, _tradePrice, _quantity, newNetQuantity, position.aggregatedEntryPrice);
-            emit PositionUpdated(_user, newNetQuantity, position.aggregatedEntryPrice);
         } else {
             // Opposite direction - offset position and settle reduced amount
             if (absQuantity >= oldAbsQuantity) {
@@ -534,7 +518,6 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
                     position.aggregatedEntryPrice = _tradePrice;
 
                     emit PositionTrade(_user, _tradePrice, _quantity, position.netQuantity, _tradePrice);
-                    emit PositionUpdated(_user, position.netQuantity, _tradePrice);
                 } else {
                     // Fully offset - close position
                     delete positions[_user];
@@ -551,7 +534,6 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
 
                 emit PositionTrade(_user, _tradePrice, _quantity, newNetQuantity, position.aggregatedEntryPrice);
                 emit PositionClosed(_user, reducedQuantity, pnl);
-                emit PositionUpdated(_user, newNetQuantity, position.aggregatedEntryPrice);
             }
         }
     }

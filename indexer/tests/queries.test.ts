@@ -1,71 +1,77 @@
 import { request } from "graphql-request";
-import { hashrateIndexQuery } from "./subgraph-queries.ts";
+import {
+  PerpsStatsQuery,
+  UserQuery,
+  UserOrdersQuery,
+  RecentTradesQuery,
+  OrderBookQuery,
+  OpenPositionsQuery,
+} from "./subgraph-queries";
 
-const config = {
-  SUBGRAPH_URL: "http://localhost:8000/subgraphs/name/marketplace",
-};
+const SUBGRAPH_URL = process.env.SUBGRAPH_URL || "http://localhost:8000/subgraphs/name/perps";
 
-type HashrateIndexRes = {
-  hashrateIndexes: {
-    hashesForBTC: string;
-    hashesForToken: string;
-    updatedAt: string;
-    id: number;
-  }[];
-};
+async function testPerpsStats() {
+  console.log("\n=== Perps Stats ===");
+  const result = await request(SUBGRAPH_URL, PerpsStatsQuery);
+  console.log(JSON.stringify(result, null, 2));
+}
 
-async function convertHashrateIndexToUsd() {
-  const req: HashrateIndexRes = await request(config.SUBGRAPH_URL, hashrateIndexQuery, {
-    from: "0",
-    to: "1000000000000000000",
+async function testUser(address: string) {
+  console.log(`\n=== User ${address} ===`);
+  const result = await request(SUBGRAPH_URL, UserQuery, { address });
+  console.log(JSON.stringify(result, null, 2));
+}
+
+async function testUserOrders(address: string) {
+  console.log(`\n=== User Orders ${address} ===`);
+  const result = await request(SUBGRAPH_URL, UserOrdersQuery, {
+    address,
+    first: 10,
+    skip: 0,
   });
+  console.log(JSON.stringify(result, null, 2));
+}
 
-  // for our contract on marketplace: 100 TH/s for 30 days
-  const contractHPS = 100n * 10n ** 12n;
-  const contractDuration = 30n * 24n * 3600n;
+async function testRecentTrades() {
+  console.log("\n=== Recent Trades ===");
+  const result = await request(SUBGRAPH_URL, RecentTradesQuery, {
+    first: 10,
+    skip: 0,
+  });
+  console.log(JSON.stringify(result, null, 2));
+}
 
-  // for luxor hashtate index 1 PH/s for 24 hours
-  // const contractHPS = 1000n * 10n ** 12n;
-  // const contractDuration = 24n * 3600n;
+async function testOrderBook() {
+  console.log("\n=== Order Book ===");
+  const result = await request(SUBGRAPH_URL, OrderBookQuery);
+  console.log(JSON.stringify(result, null, 2));
+}
 
-  const data = req.hashrateIndexes.map((item) => {
-    if (item.hashesForToken === "0") {
-      return {
-        updatedAt: item.updatedAt,
-        priceToken: 0n,
-        priceBTC: 0n,
-        id: item.id,
-      };
+async function testOpenPositions() {
+  console.log("\n=== Open Positions ===");
+  const result = await request(SUBGRAPH_URL, OpenPositionsQuery, {
+    first: 10,
+    skip: 0,
+  });
+  console.log(JSON.stringify(result, null, 2));
+}
+
+async function main() {
+  try {
+    await testPerpsStats();
+    await testRecentTrades();
+    await testOrderBook();
+    await testOpenPositions();
+
+    // Test with a specific user address if provided
+    const userAddress = process.argv[2];
+    if (userAddress) {
+      await testUser(userAddress);
+      await testUserOrders(userAddress);
     }
-
-    return {
-      updatedAt: item.updatedAt,
-      id: item.id,
-      ...hashrateIndexToCurrency(
-        contractHPS,
-        contractDuration,
-        BigInt(item.hashesForBTC),
-        BigInt(item.hashesForToken)
-      ),
-    };
-  });
-
-  console.log(data);
+  } catch (error) {
+    console.error("Error:", error);
+  }
 }
 
-convertHashrateIndexToUsd();
-
-function hashrateIndexToCurrency(
-  contractHPS: bigint,
-  contractDurationSeconds: bigint,
-  hashesForBTC: bigint,
-  hashesForToken: bigint
-) {
-  const hashes = contractHPS * contractDurationSeconds;
-  const priceToken = hashes / hashesForToken;
-  const priceBTC = hashes / hashesForBTC;
-  return {
-    priceToken,
-    priceBTC,
-  };
-}
+main();

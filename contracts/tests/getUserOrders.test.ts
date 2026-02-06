@@ -32,7 +32,7 @@ describe("PerpsSimple - getUserOrders", function () {
     const initialCount = ordersBefore.length;
 
     // Close one order
-    await perps.write.closeOrder([ordersBefore[0]], { account: buyer.account });
+    await perps.write.cancelOrder([ordersBefore[0]], { account: buyer.account });
 
     const ordersAfter = await perps.read.getUserOrders([buyer.account.address]);
     expect(ordersAfter.length).to.equal(initialCount - 1);
