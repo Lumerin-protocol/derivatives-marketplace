@@ -1,165 +1,208 @@
-# PerpsSimple Subgraph
+# Perps Indexer
 
-This subgraph indexes the PerpsSimple perpetual trading contract to track orders, trades, positions, and user activity.
+A Graph Protocol subgraph that indexes the `PerpsSimple` contract, turning on-chain events into a queryable GraphQL API for orders, trades, positions, collateral, and liquidation data.
 
-## Entities
+## Schema
 
-### Core Entities
+### Entities
 
-- **Perps**: Singleton entity for contract-wide state and configuration
-  - Contract addresses (collateral token, price oracle)
-  - Configuration (margin %, liquidation fee, order fee, price increment)
-  - Global stats (total users, orders, trades, volume, liquidations)
+| Entity | Mutability | Description |
+| --- | --- | --- |
+| **Perps** | mutable | Singleton (id=0). Contract config, pool balances, and global stats (total users/orders/trades/volume/liquidations). |
+| **User** | mutable | Per-address account: collateral balance, net position, order/trade counts, realized PnL, and relations to all other entities. |
+| **Order** | mutable | An order on the book. Tracks price, quantity, buy/sell side, status (`ACTIVE` / `FILLED` / `CANCELLED` / `PARTIAL`), and fill progress. |
+| **Trade** | immutable | A matched trade between a buyer and seller with price, quantity, volume, and the maker order reference. |
+| **PositionSnapshot** | immutable | Position state after each trade: trade price/quantity and resulting net position with entry price. |
+| **PositionClose** | immutable | Emitted when a position is fully or partially closed: quantity closed and realized PnL. |
+| **Liquidation** | immutable | Liquidation event: user, liquidator, position size, PnL, and liquidator fee. |
+| **CollateralEvent** | immutable | Deposit or withdrawal of collateral. |
+| **PriceLevel** | mutable | Aggregated order book level: total quantity and order count at a given price and side (bid/ask). |
 
-- **User**: Tracks user accounts and their activity
-  - Collateral balance and deposit/withdrawal history
-  - Current net position (quantity and entry price)
-  - Order and trade counts
-  - Realized PnL
+### Event Handlers
 
-- **Order**: Active orders in the order book
-  - Price, quantity, buy/sell direction
-  - Status (ACTIVE, FILLED, CANCELLED, PARTIAL)
-  - Fill progress
+The subgraph listens to all `PerpsSimple` contract events:
 
-- **Trade**: Matched trades between users
-  - Buyer, seller, price, quantity, volume
-  - Maker order reference
+- **Order events** — `OrderCreated`, `OrderFilled`, `OrderCancelled`, `OrderUpdated`, `OrderMatched`
+- **Position events** — `PositionTrade`, `PositionClosed`, `PositionLiquidated`
+- **Collateral events** — `CollateralAdded`, `CollateralRemoved`
+- **Config events** — `OrderFeeUpdated`, `MarginPercentUpdated`, `MaintenanceMarginPercentUpdated`, `LiquidationFeeUpdated`, `MinimumPriceIncrementUpdated`
+- **Lifecycle events** — `Initialized`
 
-- **PositionSnapshot**: Position state after each trade
-  - Trade details and resulting position state
+On initialization, the handler also reads current contract state (addresses, config, balances) via `try_*` calls to populate the `Perps` singleton.
 
-- **PositionClose**: Position close events
-  - Quantity closed and realized PnL
+## Local Development
 
-- **Liquidation**: Liquidation events
-  - User, liquidator, position size, PnL, fee
+### Prerequisites
 
-- **CollateralEvent**: Deposit and withdrawal events
+- Docker (for graph-node, IPFS, and Postgres)
+- pnpm
+- A running Ethereum node (local or remote) for graph-node to connect to
 
-- **PriceLevel**: Order book aggregation by price level
-  - Total quantity and order count per price
+### 1. Configure environment
 
-## Event Handlers
+```bash
+cp .env.example .env
+```
 
-### Order Events
+Edit `.env` with your values:
 
-- `OrderCreated`: New order added to book
-- `OrderFilled`: Order fully matched
-- `OrderCancelled`: Order cancelled by user
-- `OrderUpdated`: Order partially filled
-- `OrderMatched`: Trade executed between buyer and seller
+```
+NETWORK=arbitrum-sepolia
+PERPS_ADDRESS=0x...
+PERPS_START_BLOCK=123456
+SUBGRAPH_ETH_NODE=arbitrum-sepolia:https://arb-sepolia.g.alchemy.com/v2/YOUR_KEY
+```
 
-### Position Events
+`SUBGRAPH_ETH_NODE` is the `ethereum` connection string for graph-node in `network:url` format.
 
-- `PositionTrade`: Position updated after trade
-- `PositionClosed`: Position fully or partially closed with PnL
-- `PositionLiquidated`: Position liquidated
+### 2. Start infrastructure
 
-### Collateral Events
+```bash
+pnpm indexer   # docker-compose up (graph-node + IPFS + Postgres)
+```
 
-- `CollateralAdded`: User deposited collateral
-- `CollateralRemoved`: User withdrew collateral
+This starts:
+- **graph-node** on ports 8000 (GraphQL), 8001 (WebSocket), 8020 (JSON-RPC admin), 8030 (index status), 8040 (metrics)
+- **IPFS** on port 5001
+- **Postgres** on port 5432
 
-### Config Events
+### 3. Build and deploy
 
-- `OrderFeeUpdated`, `MarginPercentUpdated`, `MaintenanceMarginPercentUpdated`
-- `LiquidationFeeUpdated`, `MinimumPriceIncrementUpdated`
+```bash
+pnpm setup-local
+```
 
-## Setup
+This runs the full pipeline: template substitution, codegen, build, create, and deploy. Alternatively, step by step:
 
-1. Copy `.env.example` to `.env` and configure:
+```bash
+pnpm prepare-local    # Substitute env vars into subgraph.yaml
+pnpm codegen          # Generate AssemblyScript types from schema + ABI
+pnpm build            # Compile the subgraph
+pnpm create-local     # Register subgraph name with graph-node
+pnpm deploy-local     # Deploy to local graph-node
+```
 
-   ```
-   SUBGRAPH_NETWORK=arbitrum-sepolia
-   PERPS_ADDRESS=0x...
-   PERPS_START_BLOCK=123456
-   ```
+### 4. Query
 
-2. Generate code and build:
+The GraphQL endpoint is available at:
 
-   ```bash
-   pnpm install
-   pnpm prepare-local
-   pnpm codegen
-   pnpm build
-   ```
+```
+http://localhost:8000/subgraphs/name/perps
+```
 
-3. Deploy locally:
-   ```bash
-   pnpm indexer          # Start graph-node via docker
-   pnpm create-local     # Create subgraph
-   pnpm deploy-local     # Deploy subgraph
-   ```
+## Available Scripts
+
+| Script | Description |
+| --- | --- |
+| `pnpm indexer` | Start graph-node + IPFS + Postgres via Docker Compose |
+| `pnpm setup-local` | Full local pipeline: prepare, codegen, build, create, deploy |
+| `pnpm prepare-local` | Substitute `.env` vars into `subgraph.yaml` from template |
+| `pnpm codegen` | Generate AssemblyScript types |
+| `pnpm build` | Compile the subgraph |
+| `pnpm create-local` | Register subgraph with local graph-node |
+| `pnpm deploy-local` | Deploy subgraph to local graph-node |
+| `pnpm remove-local` | Remove subgraph from local graph-node |
+| `pnpm deploy` | Deploy to The Graph Studio (hosted) |
+| `pnpm test` | Run Matchstick unit tests |
+| `pnpm clean` | Remove generated files, build artifacts, and data |
+
+## Configuration
+
+The subgraph manifest is generated from `subgraph.template.yaml` using `envsubst`. The template contains placeholders for:
+
+- `${SUBGRAPH_NETWORK}` — target network name
+- `${PERPS_ADDRESS}` — deployed contract address
+- `${PERPS_START_BLOCK}` — block to start indexing from
+
+The ABI is read from `../contracts/abi/PerpsSimple.json`, so the contracts package must be built first.
 
 ## Example Queries
 
+**Contract stats:**
+
 ```graphql
-# Get contract stats
 {
   perps(id: 0) {
     totalUsers
+    totalOrders
+    activeOrders
     totalTrades
     totalVolume
-    activeOrders
+    totalLiquidations
+    reservePoolBalance
+    collectedFeesBalance
   }
 }
+```
 
-# Get user with positions and orders
+**User portfolio:**
+
+```graphql
 {
   user(id: "0x...") {
     collateralBalance
     netQuantity
     aggregatedEntryPrice
     realizedPnl
-    orders(where: { status: "ACTIVE" }) {
-      price
-      quantity
-      isBuy
-    }
+    activeOrderCount
+    tradeCount
   }
 }
+```
 
-# Get recent trades
-{
-  trades(orderBy: timestamp, orderDirection: desc, first: 50) {
-    buyer {
-      address
-    }
-    seller {
-      address
-    }
-    price
-    quantity
-    volume
-    timestamp
-  }
-}
+**Order book depth:**
 
-# Get order book depth
+```graphql
 {
-  priceLevels(where: { orderCount_gt: 0 }, orderBy: price) {
+  priceLevels(where: { orderCount_gt: 0 }, orderBy: price, orderDirection: desc) {
     price
     isBid
     totalQuantity
     orderCount
   }
 }
+```
 
-# Get user's trade history
+**Recent trades:**
+
+```graphql
 {
-  user(id: "0x...") {
-    trades {
-      buyer {
-        address
-      }
-      seller {
-        address
-      }
-      price
-      quantity
-      timestamp
-    }
+  trades(first: 50, orderBy: timestamp, orderDirection: desc) {
+    buyer { address }
+    seller { address }
+    price
+    quantity
+    volume
+    timestamp
   }
 }
 ```
+
+**Open positions:**
+
+```graphql
+{
+  users(where: { netQuantity_not: 0 }, orderBy: lastActivityAt, orderDirection: desc) {
+    address
+    netQuantity
+    aggregatedEntryPrice
+    collateralBalance
+    realizedPnl
+  }
+}
+```
+
+**Top traders by realized PnL:**
+
+```graphql
+{
+  users(first: 10, orderBy: realizedPnl, orderDirection: desc, where: { tradeCount_gt: 0 }) {
+    address
+    realizedPnl
+    tradeCount
+    netQuantity
+  }
+}
+```
+
+A full set of reusable queries is available in `tests/subgraph-queries.ts`. The test runner in `tests/queries.test.ts` can be used to smoke-test the subgraph against a running instance.
