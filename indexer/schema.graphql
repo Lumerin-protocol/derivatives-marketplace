@@ -9,8 +9,8 @@ type Perps @entity(immutable: false) {
   priceOracle: Bytes!
 
   # Configuration
-  marginPercent: BigInt!
-  maintenanceMarginPercent: BigInt!
+  marginPercent: Int!
+  maintenanceMarginPercent: Int!
   liquidationFee: BigInt!
   minimumPriceIncrement: BigInt!
   orderFee: BigInt!

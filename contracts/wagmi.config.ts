@@ -7,8 +7,8 @@ export default defineConfig({
       artifacts: "./artifacts/contracts",
       project: ".",
       commands: {
-        build: "yarn hardhat compile",
-        rebuild: "yarn hardhat compile",
+        build: "pnpm hardhat compile",
+        rebuild: "pnpm hardhat compile",
       },
     }),
   ],

@@ -335,9 +335,9 @@
     "inputs": [
       {
         "indexed": false,
-        "internalType": "uint256",
+        "internalType": "uint8",
         "name": "newMaintenanceMarginPercent",
-        "type": "uint256"
+        "type": "uint8"
       }
     ],
     "name": "MaintenanceMarginPercentUpdated",
@@ -348,9 +348,9 @@
     "inputs": [
       {
         "indexed": false,
-        "internalType": "uint256",
+        "internalType": "uint8",
         "name": "newMarginPercent",
-        "type": "uint256"
+        "type": "uint8"
       }
     ],
     "name": "MarginPercentUpdated",
@@ -1151,14 +1151,14 @@
         "type": "address"
       },
       {
-        "internalType": "uint256",
+        "internalType": "uint8",
         "name": "_marginPercent",
-        "type": "uint256"
+        "type": "uint8"
       },
       {
-        "internalType": "uint256",
+        "internalType": "uint8",
         "name": "_maintenanceMarginPercent",
-        "type": "uint256"
+        "type": "uint8"
       },
       {
         "internalType": "uint256",
@@ -1226,9 +1226,9 @@
     "name": "maintenanceMarginPercent",
     "outputs": [
       {
-        "internalType": "uint256",
+        "internalType": "uint8",
         "name": "",
-        "type": "uint256"
+        "type": "uint8"
       }
     ],
     "stateMutability": "view",
@@ -1239,9 +1239,9 @@
     "name": "marginPercent",
     "outputs": [
       {
-        "internalType": "uint256",
+        "internalType": "uint8",
         "name": "",
-        "type": "uint256"
+        "type": "uint8"
       }
     ],
     "stateMutability": "view",
@@ -1374,9 +1374,9 @@
   {
     "inputs": [
       {
-        "internalType": "uint256",
+        "internalType": "uint8",
         "name": "_maintenanceMarginPercent",
-        "type": "uint256"
+        "type": "uint8"
       }
     ],
     "name": "setMaintenanceMarginPercent",
@@ -1387,9 +1387,9 @@
   {
     "inputs": [
       {
-        "internalType": "uint256",
+        "internalType": "uint8",
         "name": "_marginPercent",
-        "type": "uint256"
+        "type": "uint8"
       }
     ],
     "name": "setMarginPercent",

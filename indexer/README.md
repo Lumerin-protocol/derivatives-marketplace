@@ -7,39 +7,32 @@ This subgraph indexes the PerpsSimple perpetual trading contract to track orders
 ### Core Entities
 
 - **Perps**: Singleton entity for contract-wide state and configuration
-
   - Contract addresses (collateral token, price oracle)
   - Configuration (margin %, liquidation fee, order fee, price increment)
   - Global stats (total users, orders, trades, volume, liquidations)
 
 - **User**: Tracks user accounts and their activity
-
   - Collateral balance and deposit/withdrawal history
   - Current net position (quantity and entry price)
   - Order and trade counts
   - Realized PnL
 
 - **Order**: Active orders in the order book
-
   - Price, quantity, buy/sell direction
   - Status (ACTIVE, FILLED, CANCELLED, PARTIAL)
   - Fill progress
 
 - **Trade**: Matched trades between users
-
   - Buyer, seller, price, quantity, volume
   - Maker order reference
 
 - **PositionSnapshot**: Position state after each trade
-
   - Trade details and resulting position state
 
 - **PositionClose**: Position close events
-
   - Quantity closed and realized PnL
 
 - **Liquidation**: Liquidation events
-
   - User, liquidator, position size, PnL, fee
 
 - **CollateralEvent**: Deposit and withdrawal events
@@ -78,9 +71,9 @@ This subgraph indexes the PerpsSimple perpetual trading contract to track orders
 1. Copy `.env.example` to `.env` and configure:
 
    ```
-   NETWORK=arbitrum-sepolia
+   SUBGRAPH_NETWORK=arbitrum-sepolia
    PERPS_ADDRESS=0x...
-   START_BLOCK=123456
+   PERPS_START_BLOCK=123456
    ```
 
 2. Generate code and build:

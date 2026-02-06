@@ -9,12 +9,12 @@
   },
   "scripts": {
     "format:sol": "forge fmt ./contracts/**/*.sol",
-    "test": "yarn hardhat --network hardhat test ./tests/*",
-    "test-coverage": "SOLIDITY_COVERAGE=true yarn hardhat coverage",
-    "compile": "yarn wagmi generate",
+    "test": "hardhat --network hardhat test ./tests/*",
+    "test-coverage": "SOLIDITY_COVERAGE=true hardhat coverage",
+    "compile": "wagmi generate",
     "clean": "rm -rf abi artifacts cache abi",
-    "aderyn": "yarn run aderyn",
-    "deploy-local": "yarn hardhat run scripts/deploy-local.ts"
+    "aderyn": "aderyn",
+    "deploy-local": "hardhat run scripts/deploy-local.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.2.4",
@@ -62,5 +62,6 @@
     "viem": "^2.42.1",
     "wait-on": "^7.2.0",
     "web3": "^1.7.4"
-  }
+  },
+  "packageManager": "pnpm@10.28.1"
 }

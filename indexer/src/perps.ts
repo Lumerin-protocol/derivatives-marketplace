@@ -41,8 +41,8 @@ function getOrCreatePerps(): Perps {
     perps.contractAddress = dataSource.address();
     perps.collateralToken = Bytes.empty();
     perps.priceOracle = Bytes.empty();
-    perps.marginPercent = BigInt.zero();
-    perps.maintenanceMarginPercent = BigInt.zero();
+    perps.marginPercent = 0;
+    perps.maintenanceMarginPercent = 0;
     perps.liquidationFee = BigInt.zero();
     perps.minimumPriceIncrement = BigInt.zero();
     perps.orderFee = BigInt.zero();
@@ -546,7 +546,7 @@ export function handleMarginPercentUpdated(event: MarginPercentUpdated): void {
 }
 
 export function handleMaintenanceMarginPercentUpdated(
-  event: MaintenanceMarginPercentUpdated
+  event: MaintenanceMarginPercentUpdated,
 ): void {
   log.info("Maintenance margin percent updated: {}", [
     event.params.newMaintenanceMarginPercent.toString(),

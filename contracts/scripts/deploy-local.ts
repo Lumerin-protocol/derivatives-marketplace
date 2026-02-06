@@ -14,7 +14,7 @@ async function main() {
   const { owner, seller, buyer, buyer2 } = accounts;
 
   // Add collateral for each participant
-  const collateralPerUser = parseUnits("500000", config.tokenDecimals);
+  const collateralPerUser = parseUnits("1000", config.tokenDecimals);
   await perps.write.addCollateral([collateralPerUser], { account: seller.account });
   await perps.write.addCollateral([collateralPerUser], { account: buyer.account });
   await perps.write.addCollateral([collateralPerUser], { account: buyer2.account });
@@ -38,6 +38,37 @@ async function main() {
   await perps.write.createOrder([marketPrice, -4n * qty], { account: seller.account });
   await perps.write.createOrder([marketPrice, 4n * qty], { account: buyer.account });
 
+  // --- Fetch all data ---
+  const accountLabels: [string, typeof seller][] = [
+    ["Seller", seller],
+    ["Buyer", buyer],
+    ["Buyer2", buyer2],
+  ];
+  const maxLevels = 10n;
+
+  const [[bids, asks], positions, balances, ownerBal, reserve, fees, userOrderIds] =
+    await Promise.all([
+      perps.read.getOrderBookPrices([maxLevels]),
+      Promise.all(
+        accountLabels.map(([, account]) => perps.read.getUserPosition([account.account.address])),
+      ),
+      Promise.all(
+        accountLabels.map(([, account]) => usdcMock.read.balanceOf([account.account.address])),
+      ),
+      usdcMock.read.balanceOf([owner.account.address]),
+      perps.read.reservePoolBalance(),
+      perps.read.collectedFeesBalance(),
+      Promise.all(
+        accountLabels.map(([, account]) => perps.read.getUserOrders([account.account.address])),
+      ),
+    ]);
+
+  const userOrders = await Promise.all(
+    userOrderIds.map((orderIds) =>
+      Promise.all(orderIds.map((orderId) => perps.read.getOrder([orderId]))),
+    ),
+  );
+
   // --- Print all information ---
   console.log("Deployment completed successfully!\n");
   console.log("=== ACCOUNTS ===");
@@ -59,27 +90,27 @@ async function main() {
   console.log(
     "Liquidation fee:       ",
     formatUnits(config.liquidationFee, config.tokenDecimals),
-    "USDC"
+    "USDC",
   );
   console.log(
     "Min price increment:   ",
     formatUnits(config.minimumPriceIncrement, config.tokenDecimals),
-    "USDC"
+    "USDC",
   );
   console.log(
     "Order fee:             ",
     formatUnits(config.orderFee, config.tokenDecimals),
-    "USDC"
+    "USDC",
   );
   console.log(
     "Reserve pool deposit:  ",
     formatUnits(config.collateralAmount, config.tokenDecimals),
-    "USDC"
+    "USDC",
   );
   console.log(
-    "Oracle BTC price:      ",
+    "Oracle hashprice:      ",
     formatUnits(config.oracle.price, config.oracle.decimals),
-    "USDC"
+    "USDC",
   );
   console.log();
 
@@ -89,9 +120,6 @@ async function main() {
   console.log("Best bid:      ", formatUnits(marketPrice - tick, config.tokenDecimals), "USDC");
   console.log();
 
-  // Order book (top levels)
-  const maxLevels = 10n;
-  const [bids, asks] = await perps.read.getOrderBookPrices([maxLevels]);
   console.log("=== ORDER BOOK (prices) ===");
   console.log("Bids (price, level):");
   for (const [i, p] of bids.entries()) {
@@ -103,60 +131,49 @@ async function main() {
   }
   console.log();
 
-  // User orders with details
-  const accountLabels: [string, typeof seller][] = [
-    ["Seller", seller],
-    ["Buyer", buyer],
-    ["Buyer2", buyer2],
-  ];
   console.log("=== USER ORDERS ===");
-  for (const [label, account] of accountLabels) {
-    const orderIds = await perps.read.getUserOrders([account.account.address]);
+  for (const [idx, [label, account]] of accountLabels.entries()) {
+    const orderIds = userOrderIds[idx];
+    const orders = userOrders[idx];
     console.log(`${label} (${account.account.address}): ${orderIds.length} order(s)`);
-    for (const orderId of orderIds) {
-      const order = await perps.read.getOrder([orderId]);
+    for (const [j, orderId] of orderIds.entries()) {
+      const order = orders[j];
       const side = order.quantity >= 0n ? "BUY" : "SELL";
       console.log(
         `  - ${orderId.slice(0, 10)}... | ${side} | price: ${formatUnits(
           order.price,
-          config.tokenDecimals
-        )} | qty: ${formatUnits(order.quantity >= 0n ? order.quantity : -order.quantity, 6)}`
+          config.tokenDecimals,
+        )} | qty: ${formatUnits(order.quantity >= 0n ? order.quantity : -order.quantity, 6)}`,
       );
     }
   }
   console.log();
 
-  // User positions
   console.log("=== USER POSITIONS ===");
-  for (const [label, account] of accountLabels) {
-    const position = await perps.read.getUserPosition([account.account.address]);
+  for (const [idx, [label, account]] of accountLabels.entries()) {
+    const position = positions[idx];
     const hasPosition = position.netQuantity !== 0n;
     console.log(
       `${label} (${account.account.address}): ${
         hasPosition
           ? `${position.netQuantity >= 0n ? "LONG" : "SHORT"} ${formatUnits(
               position.netQuantity >= 0n ? position.netQuantity : -position.netQuantity,
-              6
+              6,
             )} @ avg ${formatUnits(position.aggregatedEntryPrice, config.tokenDecimals)} USDC`
           : "no position"
-      }`
+      }`,
     );
   }
   console.log();
 
-  // Balances
   console.log("=== USDC BALANCES ===");
-  for (const [label, account] of accountLabels) {
-    const bal = await usdcMock.read.balanceOf([account.account.address]);
-    console.log(`${label}: ${formatUnits(bal, config.tokenDecimals)} USDC`);
+  for (const [idx, [label]] of accountLabels.entries()) {
+    console.log(`${label}: ${formatUnits(balances[idx], config.tokenDecimals)} USDC`);
   }
-  const ownerBal = await usdcMock.read.balanceOf([owner.account.address]);
   console.log(`Owner: ${formatUnits(ownerBal, config.tokenDecimals)} USDC`);
   console.log();
 
   console.log("=== RESERVE & FEES ===");
-  const reserve = await perps.read.reservePoolBalance();
-  const fees = await perps.read.collectedFeesBalance();
   console.log("Reserve pool: ", formatUnits(reserve, config.tokenDecimals), "USDC");
   console.log("Collected fees:", formatUnits(fees, config.tokenDecimals), "USDC");
   console.log();

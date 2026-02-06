@@ -13,7 +13,6 @@ services:
     extra_hosts:
       - localhost:host-gateway
     env_file:
-      - ../.env
       - .env
     environment:
       postgres_host: postgres

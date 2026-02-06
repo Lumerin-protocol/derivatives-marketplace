@@ -8,10 +8,10 @@ schema:
 dataSources:
   - kind: ethereum
     name: PerpsSimple
-    network: "${NETWORK}"
+    network: "${SUBGRAPH_NETWORK}"
     source:
       address: "${PERPS_ADDRESS}"
-      startBlock: ${START_BLOCK}
+      startBlock: ${PERPS_START_BLOCK}
       abi: PerpsSimple
     mapping:
       kind: ethereum/events
@@ -57,9 +57,9 @@ dataSources:
         # Config events
         - event: OrderFeeUpdated(uint256)
           handler: handleOrderFeeUpdated
-        - event: MarginPercentUpdated(uint256)
+        - event: MarginPercentUpdated(uint8)
           handler: handleMarginPercentUpdated
-        - event: MaintenanceMarginPercentUpdated(uint256)
+        - event: MaintenanceMarginPercentUpdated(uint8)
           handler: handleMaintenanceMarginPercentUpdated
         - event: LiquidationFeeUpdated(uint256)
           handler: handleLiquidationFeeUpdated

@@ -30,8 +30,8 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     // State variables
     IERC20 public collateralToken;
     AggregatorV3Interface public priceOracle;
-    uint256 public marginPercent; // Initial margin requirement as percentage (e.g., 10 = 10%)
-    uint256 public maintenanceMarginPercent; // Maintenance margin percentage (e.g., 5 = 5%)
+    uint8 public marginPercent; // Initial margin requirement as percentage (e.g., 10 = 10%)
+    uint8 public maintenanceMarginPercent; // Maintenance margin percentage (e.g., 5 = 5%)
     uint256 public liquidationFee; // Liquidation fee in collateral token units
     uint8 private tokenDecimals;
     uint8 private oracleDecimals;
@@ -92,8 +92,8 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     event CollateralAdded(address indexed user, uint256 amount);
     event CollateralRemoved(address indexed user, uint256 amount);
     event OrderFeeUpdated(uint256 newFee);
-    event MarginPercentUpdated(uint256 newMarginPercent);
-    event MaintenanceMarginPercentUpdated(uint256 newMaintenanceMarginPercent);
+    event MarginPercentUpdated(uint8 newMarginPercent);
+    event MaintenanceMarginPercentUpdated(uint8 newMaintenanceMarginPercent);
     event LiquidationFeeUpdated(uint256 newLiquidationFee);
     event PositionLiquidated(
         address indexed user, address indexed liquidator, int256 positionSize, int256 pnl, uint256 liquidatorFee
@@ -129,8 +129,8 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     function initialize(
         IERC20Metadata _collateralToken,
         AggregatorV3Interface _priceOracle,
-        uint256 _marginPercent,
-        uint256 _maintenanceMarginPercent,
+        uint8 _marginPercent,
+        uint8 _maintenanceMarginPercent,
         uint256 _liquidationFee,
         uint256 _minimumPriceIncrement
     ) external initializer {
@@ -958,7 +958,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     }
 
     /// @notice Set the margin requirement percentage
-    function setMarginPercent(uint256 _marginPercent) external onlyOwner {
+    function setMarginPercent(uint8 _marginPercent) external onlyOwner {
         if (_marginPercent == 0 || _marginPercent > 100) {
             revert InvalidMarginPercent();
         }
@@ -970,7 +970,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     }
 
     /// @notice Set the maintenance margin requirement percentage
-    function setMaintenanceMarginPercent(uint256 _maintenanceMarginPercent) external onlyOwner {
+    function setMaintenanceMarginPercent(uint8 _maintenanceMarginPercent) external onlyOwner {
         if (_maintenanceMarginPercent == 0 || _maintenanceMarginPercent >= marginPercent) {
             revert InvalidMarginPercent();
         }
