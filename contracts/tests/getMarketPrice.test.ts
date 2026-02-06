@@ -2,25 +2,28 @@ import { expect } from "chai";
 import { loadFixture, time } from "@nomicfoundation/hardhat-network-helpers";
 import { parseUnits } from "viem";
 import { deployPerpsFixture } from "./fixtures";
+import { roundToNearest } from "../lib/round";
 
 describe("PerpsSimple - getMarketPrice", function () {
   it("should return the oracle price", async function () {
     const { contracts, config } = await loadFixture(deployPerpsFixture);
-    const { perps, priceOracle } = contracts;
+    const { perps } = contracts;
 
+    const expectedPrice = roundToNearest(config.oracle.price, config.minimumPriceIncrement);
     const marketPrice = await perps.read.getMarketPrice();
-    expect(marketPrice).to.equal(config.oracle.btcPrice);
+    expect(marketPrice).to.equal(expectedPrice);
   });
 
   it("should return updated price when oracle changes", async function () {
-    const { contracts } = await loadFixture(deployPerpsFixture);
+    const { contracts, config } = await loadFixture(deployPerpsFixture);
     const { perps, priceOracle } = contracts;
 
-    const newPrice = parseUnits("90000", 6);
-    await priceOracle.write.setPrice([newPrice, 6n]);
+    const newPrice = config.oracle.price + config.minimumPriceIncrement;
+    await priceOracle.write.setPrice([newPrice, config.oracle.decimals]);
+    const expectedPrice = roundToNearest(newPrice, config.minimumPriceIncrement);
 
     const marketPrice = await perps.read.getMarketPrice();
-    expect(marketPrice).to.equal(newPrice);
+    expect(marketPrice).to.equal(expectedPrice);
   });
 
   it("should revert when oracle price is stale", async function () {

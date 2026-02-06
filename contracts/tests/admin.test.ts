@@ -250,6 +250,7 @@ describe("PerpsSimple - Admin Functions", function () {
 
       // Create an order to generate fees
       const marketPrice = await perps.read.getMarketPrice();
+      console.log(marketPrice.toString(), config.minimumPriceIncrement.toString());
       await perps.write.createOrder(
         [marketPrice - config.minimumPriceIncrement, parseUnits("1", 6)],
         { account: buyer.account }

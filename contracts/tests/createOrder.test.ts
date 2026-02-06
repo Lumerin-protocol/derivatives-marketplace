@@ -238,14 +238,17 @@ describe("PerpsSimple - createOrder", function () {
 
   describe("Margin Requirements", function () {
     it("should revert when insufficient margin for order", async function () {
-      const { contracts, accounts } = await loadFixture(deployPerpsWithCollateralFixture);
+      const { contracts, accounts, config } = await loadFixture(deployPerpsWithCollateralFixture);
       const { perps } = contracts;
       const { buyer } = accounts;
 
       const marketPrice = await perps.read.getMarketPrice();
-      // Very large quantity that exceeds available collateral
-      // At $84,524 price with 10% margin, 1000 BTC would need $8.4M margin
-      const quantity = parseUnits("1000", 6); // 1000 BTC - way more than 50k collateral can support
+      const maxQuantity =
+        ((config.collateralPerUser - config.orderFee) *
+          100n *
+          10n ** BigInt(config.quantityDecimals)) /
+        (marketPrice * config.marginPercent);
+      const quantity = maxQuantity * 2n;
 
       await expect(
         perps.write.createOrder([marketPrice, BigInt(quantity)], {

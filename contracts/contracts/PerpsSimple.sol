@@ -182,12 +182,10 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         }
 
         // Convert oracle price to collateral token decimals
-        uint256 price = uint256(answer);
-        if (oracleDecimals > tokenDecimals) {
-            price = price / (10 ** (oracleDecimals - tokenDecimals));
-        } else if (oracleDecimals < tokenDecimals) {
-            price = price * (10 ** (tokenDecimals - oracleDecimals));
-        }
+        uint256 price = _scaleDecimals(uint256(answer), oracleDecimals, tokenDecimals);
+
+        // Round to nearest minimumPriceIncrement
+        price = _roundToNearest(price, minimumPriceIncrement);
 
         return price;
     }
@@ -1026,6 +1024,21 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         // Burn ERC20 tokens from contract before withdrawing collateral
         _burn(address(this), _amount);
         collateralToken.safeTransfer(_msgSender(), _amount);
+    }
+
+    /// @notice Scale a value from one decimal precision to another
+    function _scaleDecimals(uint256 _value, uint8 _fromDecimals, uint8 _toDecimals) private pure returns (uint256) {
+        if (_fromDecimals > _toDecimals) {
+            return _value / (10 ** (_fromDecimals - _toDecimals));
+        } else if (_fromDecimals < _toDecimals) {
+            return _value * (10 ** (_toDecimals - _fromDecimals));
+        }
+        return _value;
+    }
+
+    /// @notice Round a value to the nearest multiple of an increment
+    function _roundToNearest(uint256 _value, uint256 _increment) private pure returns (uint256) {
+        return (_value + _increment / 2) / _increment * _increment;
     }
 
     /// @notice Get ERC20 decimals
