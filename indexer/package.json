@@ -5,7 +5,7 @@
     "clean": "rm -rf data generated build subgraph.yaml",
     "codegen": "pnpm prepare-local && graph codegen",
     "prepare:env": "envsubst < subgraph.template.yaml > subgraph.yaml",
-    "prepare-local": "set -a && source .env && set +a && envsubst < subgraph.template.yaml > subgraph.yaml",
+    "prepare-local": "set -a && source ../.env && set +a && envsubst < subgraph.template.yaml > subgraph.yaml",
     "build": "graph build",
     "deploy": "graph deploy --node https://api.studio.thegraph.com/deploy/ perps",
     "create-local": "graph create --node http://localhost:8020/ perps",
@@ -13,7 +13,7 @@
     "deploy-local": "graph deploy --node http://localhost:8020/ --ipfs http://localhost:5001 --version-label 0 perps",
     "setup-local": "pnpm prepare-local && pnpm codegen && pnpm build && pnpm create-local && pnpm deploy-local",
     "test": "graph test",
-    "indexer": "docker-compose up"
+    "indexer": "docker-compose up --env-file ../.env"
   },
   "dependencies": {
     "@graphprotocol/graph-ts": "0.37.0"

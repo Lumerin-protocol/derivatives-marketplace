@@ -1,17 +1,19 @@
 import type { HardhatUserConfig } from "hardhat/config";
+import dotenv from "dotenv";
 
 import "solidity-coverage";
 import "@nomiclabs/hardhat-ethers";
 import "@nomicfoundation/hardhat-verify";
 import "@openzeppelin/hardhat-upgrades";
 import "hardhat-abi-exporter";
-import "dotenv/config";
 import "@nomicfoundation/hardhat-viem";
 import "hardhat-storage-layout";
 import "hardhat-gas-reporter";
 
 import chai from "chai";
 import chaiAsPromised from "chai-as-promised";
+
+dotenv.config({ path: "../.env" });
 
 chai.use(chaiAsPromised);
 

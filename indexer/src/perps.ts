@@ -15,7 +15,6 @@ import {
   MarginPercentUpdated,
   MaintenanceMarginPercentUpdated,
   LiquidationFeeUpdated,
-  MinimumPriceIncrementUpdated,
   PerpsSimple as PerpsContract,
 } from "../generated/PerpsSimple/PerpsSimple";
 import {
@@ -30,8 +29,6 @@ import {
   PriceLevel,
 } from "../generated/schema";
 
-const QUANTITY_DECIMALS = 6;
-
 // ============ Helper Functions ============
 
 function getOrCreatePerps(): Perps {
@@ -42,6 +39,7 @@ function getOrCreatePerps(): Perps {
     perps.collateralToken = Bytes.empty();
     perps.priceOracle = Bytes.empty();
     perps.marginPercent = 0;
+    perps.quantityDecimals = 0;
     perps.maintenanceMarginPercent = 0;
     perps.liquidationFee = BigInt.zero();
     perps.minimumPriceIncrement = BigInt.zero();
@@ -106,6 +104,11 @@ function loadPerpsFromContract(perps: Perps): void {
   const collectedFeesBalance = contract.try_collectedFeesBalance();
   if (!collectedFeesBalance.reverted) {
     perps.collectedFeesBalance = collectedFeesBalance.value;
+  }
+
+  const quantityDecimals = contract.try_QUANTITY_DECIMALS();
+  if (!quantityDecimals.reverted) {
+    perps.quantityDecimals = quantityDecimals.value;
   }
 }
 
@@ -338,9 +341,7 @@ export function handleOrderMatched(event: OrderMatched): void {
   const buyer = getOrCreateUser(event.params.buyer, event.block.timestamp);
   const seller = getOrCreateUser(event.params.seller, event.block.timestamp);
 
-  const volume = event.params.price
-    .times(event.params.quantity)
-    .div(BigInt.fromI32(10).pow(QUANTITY_DECIMALS as u8));
+  const volume = event.params.price.times(event.params.quantity);
 
   // Create trade
   const tradeId = createEventId(event.transaction.hash, event.logIndex);
@@ -561,14 +562,6 @@ export function handleLiquidationFeeUpdated(event: LiquidationFeeUpdated): void 
   log.info("Liquidation fee updated: {}", [event.params.newLiquidationFee.toString()]);
   const perps = getOrCreatePerps();
   perps.liquidationFee = event.params.newLiquidationFee;
-  perps.lastUpdatedAt = event.block.timestamp;
-  perps.save();
-}
-
-export function handleMinimumPriceIncrementUpdated(event: MinimumPriceIncrementUpdated): void {
-  log.info("Minimum price increment updated: {}", [event.params.newIncrement.toString()]);
-  const perps = getOrCreatePerps();
-  perps.minimumPriceIncrement = event.params.newIncrement;
   perps.lastUpdatedAt = event.block.timestamp;
   perps.save();
 }

@@ -12,15 +12,13 @@ services:
       - postgres
     extra_hosts:
       - localhost:host-gateway
-    env_file:
-      - .env
     environment:
       postgres_host: postgres
       postgres_user: graph-node
       postgres_pass: let-me-in
       postgres_db: graph-node
       ipfs: "ipfs:5001"
-      ethereum: "${SUBGRAPH_ETH_NODE}"
+      ethereum: "${NETWORK}:${ETH_NODE_ADDRESS}"
       GRAPH_LOG: debug
   ipfs:
     image: ipfs/kubo:v0.17.0

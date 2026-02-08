@@ -8,11 +8,14 @@ type Perps @entity(immutable: false) {
   collateralToken: Bytes!
   priceOracle: Bytes!
 
+  # Constants
+  quantityDecimals: Int!
+  minimumPriceIncrement: BigInt!
+
   # Configuration
   marginPercent: Int!
   maintenanceMarginPercent: Int!
   liquidationFee: BigInt!
-  minimumPriceIncrement: BigInt!
   orderFee: BigInt!
 
   # Pool balances

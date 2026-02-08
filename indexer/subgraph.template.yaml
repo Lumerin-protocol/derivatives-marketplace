@@ -8,7 +8,7 @@ schema:
 dataSources:
   - kind: ethereum
     name: PerpsSimple
-    network: "${SUBGRAPH_NETWORK}"
+    network: "${NETWORK}"
     source:
       address: "${PERPS_ADDRESS}"
       startBlock: ${PERPS_START_BLOCK}
@@ -63,8 +63,6 @@ dataSources:
           handler: handleMaintenanceMarginPercentUpdated
         - event: LiquidationFeeUpdated(uint256)
           handler: handleLiquidationFeeUpdated
-        - event: MinimumPriceIncrementUpdated(uint256)
-          handler: handleMinimumPriceIncrementUpdated
         # Upgradeable events
         - event: Initialized(uint64)
           handler: handleInitialized

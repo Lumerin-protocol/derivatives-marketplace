@@ -59,6 +59,7 @@ indexer/            Graph Protocol subgraph
 - [pnpm](https://pnpm.io/)
 - [Foundry](https://book.getfoundry.sh/) (for Solidity formatting)
 - Docker (for local subgraph development)
+- .env file in the root of the project with filled in environment variables
 
 ### Contracts
 
@@ -76,7 +77,6 @@ pnpm deploy-local      # Deploy to local Hardhat network
 ```bash
 cd indexer
 pnpm install
-cp .env.example .env   # Configure environment variables
 pnpm indexer            # Start graph-node via Docker
 pnpm setup-local       # Codegen, build, create & deploy subgraph
 ```
