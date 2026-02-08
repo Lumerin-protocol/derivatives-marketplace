@@ -26,6 +26,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     uint256 private constant MAX_ORACLE_STALENESS = 3600; // 1 hour
     uint8 public constant MAX_ORDERS_PER_PARTICIPANT = 100;
     uint8 public constant QUANTITY_DECIMALS = 6;
+    uint256 public immutable minimumPriceIncrement; // Minimum price increment for orders
 
     // State variables
     IERC20 public collateralToken;
@@ -35,7 +36,6 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     uint256 public liquidationFee; // Liquidation fee in collateral token units
     uint8 private tokenDecimals;
     uint8 private oracleDecimals;
-    uint256 public minimumPriceIncrement; // Minimum price increment for orders
     uint256 public orderFee; // Fee for creating an order
     uint256 private nonce = 0; // Nonce for order IDs
 
@@ -98,7 +98,6 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     event PositionLiquidated(
         address indexed user, address indexed liquidator, int256 positionSize, int256 pnl, uint256 liquidatorFee
     );
-    event MinimumPriceIncrementUpdated(uint256 newIncrement);
 
     // Errors
     error InvalidPrice();
@@ -115,8 +114,12 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     error InsufficientReservePool();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() {
+    constructor(uint256 _minimumPriceIncrement) {
         _disableInitializers();
+        if (_minimumPriceIncrement == 0) {
+            revert InvalidPrice();
+        }
+        minimumPriceIncrement = _minimumPriceIncrement;
     }
 
     /// @notice Initialize the contract
@@ -124,15 +127,11 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     /// @param _priceOracle The Chainlink-style price oracle
     /// @param _marginPercent Initial margin requirement percentage (e.g., 10 = 10%)
     /// @param _maintenanceMarginPercent Maintenance margin percentage (e.g., 5 = 5%), must be < marginPercent
-    /// @param _liquidationFee Liquidation fee in collateral token units
-    /// @param _minimumPriceIncrement Minimum price increment for orders
     function initialize(
         IERC20Metadata _collateralToken,
         AggregatorV3Interface _priceOracle,
         uint8 _marginPercent,
-        uint8 _maintenanceMarginPercent,
-        uint256 _liquidationFee,
-        uint256 _minimumPriceIncrement
+        uint8 _maintenanceMarginPercent
     ) external initializer {
         if (address(_priceOracle) == address(0)) {
             revert InvalidOracle();
@@ -142,9 +141,6 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         }
         if (_maintenanceMarginPercent == 0 || _maintenanceMarginPercent >= _marginPercent) {
             revert InvalidMarginPercent();
-        }
-        if (_minimumPriceIncrement == 0) {
-            revert InvalidPrice();
         }
 
         __ERC20_init(
@@ -159,8 +155,6 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         oracleDecimals = _priceOracle.decimals();
         marginPercent = _marginPercent;
         maintenanceMarginPercent = _maintenanceMarginPercent;
-        liquidationFee = _liquidationFee;
-        minimumPriceIncrement = _minimumPriceIncrement;
     }
 
     /// @notice Authorize upgrade (only owner)
@@ -988,15 +982,6 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     function setOrderFee(uint256 _orderFee) external onlyOwner {
         orderFee = _orderFee;
         emit OrderFeeUpdated(_orderFee);
-    }
-
-    /// @notice Set minimum price increment
-    function setMinimumPriceIncrement(uint256 _increment) external onlyOwner {
-        if (_increment == 0) {
-            revert InvalidPrice();
-        }
-        minimumPriceIncrement = _increment;
-        emit MinimumPriceIncrementUpdated(_increment);
     }
 
     /// @notice Withdraw collected fees

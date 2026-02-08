@@ -3,9 +3,9 @@ import type { HardhatUserConfig } from "hardhat/config";
 
 // #TODO put to default config content from base config and introduce a new config file hardhat-network.config.ts
 
-// if (!process.env.ETH_NODE_ADDRESS) {
-//   throw new Error("ETH_NODE_ADDRESS env variable is not set");
-// }
+if (!process.env.ETH_NODE_ADDRESS) {
+  throw new Error("ETH_NODE_ADDRESS env variable is not set");
+}
 
 // if (!process.env.OWNER_PRIVATEKEY) {
 //   throw new Error("OWNER_PRIVATEKEY env variable is not set");
@@ -22,7 +22,7 @@ const config: HardhatUserConfig = {
     default: {
       url: process.env.ETH_NODE_ADDRESS,
       accounts: [
-        process.env.OWNER_PRIVATEKEY!,
+        process.env.DEPLOYER_PRIVATEKEY!,
         ...(process.env.PROPOSER_PRIVATEKEY ? [process.env.PROPOSER_PRIVATEKEY] : []),
       ],
       gasPrice: "auto",
@@ -31,6 +31,7 @@ const config: HardhatUserConfig = {
   },
   etherscan: {
     apiKey: process.env.ETHERSCAN_API_KEY!,
+    enabled: true,
     // FOR BLOCKSCOUT
     //
     // apiKey: {

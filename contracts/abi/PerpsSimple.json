@@ -1,6 +1,12 @@
 [
   {
-    "inputs": [],
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_minimumPriceIncrement",
+        "type": "uint256"
+      }
+    ],
     "stateMutability": "nonpayable",
     "type": "constructor"
   },
@@ -354,19 +360,6 @@
       }
     ],
     "name": "MarginPercentUpdated",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "newIncrement",
-        "type": "uint256"
-      }
-    ],
-    "name": "MinimumPriceIncrementUpdated",
     "type": "event"
   },
   {
@@ -1159,16 +1152,6 @@
         "internalType": "uint8",
         "name": "_maintenanceMarginPercent",
         "type": "uint8"
-      },
-      {
-        "internalType": "uint256",
-        "name": "_liquidationFee",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "_minimumPriceIncrement",
-        "type": "uint256"
       }
     ],
     "name": "initialize",
@@ -1393,19 +1376,6 @@
       }
     ],
     "name": "setMarginPercent",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "_increment",
-        "type": "uint256"
-      }
-    ],
-    "name": "setMinimumPriceIncrement",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"

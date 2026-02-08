@@ -57,7 +57,17 @@ export const aggregatorV3InterfaceAbi = [
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 export const perpsSimpleAbi = [
-  { type: 'constructor', inputs: [], stateMutability: 'nonpayable' },
+  {
+    type: 'constructor',
+    inputs: [
+      {
+        name: '_minimumPriceIncrement',
+        internalType: 'uint256',
+        type: 'uint256',
+      },
+    ],
+    stateMutability: 'nonpayable',
+  },
   {
     type: 'error',
     inputs: [{ name: 'target', internalType: 'address', type: 'address' }],
@@ -230,8 +240,8 @@ export const perpsSimpleAbi = [
     inputs: [
       {
         name: 'newMaintenanceMarginPercent',
-        internalType: 'uint256',
-        type: 'uint256',
+        internalType: 'uint8',
+        type: 'uint8',
         indexed: false,
       },
     ],
@@ -243,25 +253,12 @@ export const perpsSimpleAbi = [
     inputs: [
       {
         name: 'newMarginPercent',
-        internalType: 'uint256',
-        type: 'uint256',
+        internalType: 'uint8',
+        type: 'uint8',
         indexed: false,
       },
     ],
     name: 'MarginPercentUpdated',
-  },
-  {
-    type: 'event',
-    anonymous: false,
-    inputs: [
-      {
-        name: 'newIncrement',
-        internalType: 'uint256',
-        type: 'uint256',
-        indexed: false,
-      },
-    ],
-    name: 'MinimumPriceIncrementUpdated',
   },
   {
     type: 'event',
@@ -766,17 +763,11 @@ export const perpsSimpleAbi = [
         internalType: 'contract AggregatorV3Interface',
         type: 'address',
       },
-      { name: '_marginPercent', internalType: 'uint256', type: 'uint256' },
+      { name: '_marginPercent', internalType: 'uint8', type: 'uint8' },
       {
         name: '_maintenanceMarginPercent',
-        internalType: 'uint256',
-        type: 'uint256',
-      },
-      { name: '_liquidationFee', internalType: 'uint256', type: 'uint256' },
-      {
-        name: '_minimumPriceIncrement',
-        internalType: 'uint256',
-        type: 'uint256',
+        internalType: 'uint8',
+        type: 'uint8',
       },
     ],
     name: 'initialize',
@@ -808,14 +799,14 @@ export const perpsSimpleAbi = [
     type: 'function',
     inputs: [],
     name: 'maintenanceMarginPercent',
-    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    outputs: [{ name: '', internalType: 'uint8', type: 'uint8' }],
     stateMutability: 'view',
   },
   {
     type: 'function',
     inputs: [],
     name: 'marginPercent',
-    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    outputs: [{ name: '', internalType: 'uint8', type: 'uint8' }],
     stateMutability: 'view',
   },
   {
@@ -901,8 +892,8 @@ export const perpsSimpleAbi = [
     inputs: [
       {
         name: '_maintenanceMarginPercent',
-        internalType: 'uint256',
-        type: 'uint256',
+        internalType: 'uint8',
+        type: 'uint8',
       },
     ],
     name: 'setMaintenanceMarginPercent',
@@ -911,17 +902,8 @@ export const perpsSimpleAbi = [
   },
   {
     type: 'function',
-    inputs: [
-      { name: '_marginPercent', internalType: 'uint256', type: 'uint256' },
-    ],
+    inputs: [{ name: '_marginPercent', internalType: 'uint8', type: 'uint8' }],
     name: 'setMarginPercent',
-    outputs: [],
-    stateMutability: 'nonpayable',
-  },
-  {
-    type: 'function',
-    inputs: [{ name: '_increment', internalType: 'uint256', type: 'uint256' }],
-    name: 'setMinimumPriceIncrement',
     outputs: [],
     stateMutability: 'nonpayable',
   },

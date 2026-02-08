@@ -5,6 +5,6 @@ export async function verifyContract(address: string, constructorArgs?: any[]) {
     address,
     constructorArguments: constructorArgs,
   }).catch((err) => {
-    console.error(err);
+    console.log(err);
   });
 }
