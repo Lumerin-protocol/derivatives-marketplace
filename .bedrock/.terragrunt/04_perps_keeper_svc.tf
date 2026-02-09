@@ -185,8 +185,42 @@ resource "aws_ecs_task_definition" "perpskeeper_use1" {
           name  = "LOG_LEVEL"
           value = "info"
         },
+        {
+          name  = "ETH_PRICE_FEED_ADDRESS"
+          value = var.perpskeeper_service.eth_price_feed_address
+        },
+        {
+          name  = "KEEPER_POLL_INTERVAL_MS"
+          value = var.perpskeeper_service.keeper_poll_interval_ms
+        },
+        {
+          name  = "KEEPER_RESYNC_INTERVAL_MS"
+          value = var.perpskeeper_service.keeper_resync_interval_ms
+        },
+        {
+          name  = "KEEPER_DRY_RUN"
+          value = var.perpskeeper_service.keeper_dry_run
+        },
+        {
+          name  = "KEEPER_MIN_PROFIT_MARGIN"
+          value = var.perpskeeper_service.keeper_min_profit_margin
+        },
+        {
+          name  = "KEEPER_HEALTH_PORT"
+          value = var.perpskeeper_service.keeper_health_port
+        }
       ]
-
+      secrets = [
+        {
+          name  = "KEEPER_PRIVATE_KEY"
+          valueFrom = "${aws_secretsmanager_secret.perps_keeper.arn}:keeper_private_key::"
+        },
+        {
+          name  = "ETH_NODE_ADDRESS"
+          valueFrom = "${aws_secretsmanager_secret.perps_keeper.arn}:eth_node_address::"
+        }
+      ]
+      
       logConfiguration = {
         logDriver = "awslogs"
         options = {
