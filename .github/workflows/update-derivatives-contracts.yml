@@ -1,0 +1,75 @@
+name: Update Derivatives Contracts
+
+on:
+  push:
+    branches:
+      - dev
+      - stg
+      - main
+
+    paths:
+      - '.github/workflows/update-derivatives-contracts.yml'
+      - 'contracts/contracts/PerpsSimple.sol'
+
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment (dev=DEV, stg=STG, main=LMN/PROD)'
+        required: true
+        type: choice
+        options:
+          - dev
+          - stg
+          - main
+
+concurrency:
+  group: ci-derivatives-contracts-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  update-derivatives:
+    name: Update derivatives contracts
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || github.ref_name }}
+    defaults:
+      run:
+        working-directory: contracts
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || github.ref }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+          cache-dependency-path: contracts/yarn.lock
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Run update script
+        run: yarn hardhat --config hardhat-prod.config.ts run scripts/update-derivatives.ts --network default
+        env:
+          COLLATERAL_TOKEN_ADDRESS: ${{ vars.COLLATERAL_TOKEN_ADDRESS }}
+          LIQUIDATION_FEE: ${{ vars.LIQUIDATION_FEE }}
+          MAINTENANCE_MARGIN_PERCENT: ${{ vars.MAINTENANCE_MARGIN_PERCENT }}
+          MARGIN_PERCENT: ${{ vars.MARGIN_PERCENT }}
+          MINIMUM_PRICE_INCREMENT: ${{ vars.MINIMUM_PRICE_INCREMENT }}
+          NETWORK: ${{ vars.NETWORK }}
+          ORDER_FEE: ${{ vars.ORDER_FEE }}
+          PERPS_ADDRESS: ${{ vars.PERPS_ADDRESS }}
+          PERPS_START_BLOCK: ${{ vars.PERPS_START_BLOCK }}
+          PRICE_ORACLE_ADDRESS: ${{ vars.PRICE_ORACLE_ADDRESS }}
+          DEPLOYER_PRIVATEKEY: ${{ secrets.DEPLOYER_PRIVATEKEY }}
+          ETH_NODE_ADDRESS: ${{ secrets.ETH_NODE_ADDRESS }}
+          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
