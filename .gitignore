@@ -1,4 +1,57 @@
-.env*
+# Logs
+logs
+*.log
+
+# Environment files
+.env
+.env.*
 !.env.example
-node_modules
+
+# Binary folders
+dist
+bin
+proxy-router
+output
+
+# IDE / Editor
+.vscode
+
+# macOS
 .DS_Store
+
+# Terraform / Terragrunt
+.terraform
+.terraform.lock.hcl
+.terragrunt-cache
+*.out
+*.plan
+secret.tfvars
+secret.*
+# Hardhat files
+/cache
+/artifacts
+
+# TypeChain files
+/typechain
+/typechain-types
+
+# solidity-coverage files
+/coverage
+/coverage.json
+
+# generated code
+/build-go
+/build-js
+*.tmp
+/abi
+
+# tests
+/test-temp
+
+# hide any .internal.md files (LOcal AI discussion notes)
+*.internal.md
+
+# dependencies
+node_modules/
+.pnp/
+.pnp.js

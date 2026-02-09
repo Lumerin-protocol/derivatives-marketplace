@@ -1,0 +1,21 @@
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Secrets
+secret.*
+
+# IDE / Editor
+.vscode
+
+# macOS
+.DS_Store
+
+# Terraform / Terragrunt
+.terraform
+.terraform.lock.hcl
+.terragrunt-cache
+*.out
+*.plan
+*.zip
