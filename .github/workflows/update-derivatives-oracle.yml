@@ -95,6 +95,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'pnpm'
+          cache-dependency-path: indexer/pnpm-lock.yaml
 
       - name: Set environment outputs
         id: env
@@ -246,6 +247,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'pnpm'
+          cache-dependency-path: indexer/pnpm-lock.yaml
 
       - name: Install dependencies
         working-directory: ./indexer
