@@ -1,4 +1,4 @@
-name: Update Derivatives Oracle
+name: Update Derivatives Oracle Graph
 
 on:
   push:
