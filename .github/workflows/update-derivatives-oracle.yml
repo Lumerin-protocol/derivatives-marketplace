@@ -84,12 +84,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.1
+          run_install: false
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'yarn'
-          cache-dependency-path: indexer/yarn.lock
+          cache: 'pnpm'
 
       - name: Set environment outputs
         id: env
@@ -122,14 +127,14 @@ jobs:
         working-directory: ./indexer
         run: |
           echo "📦 Installing dependencies..."
-          yarn install --frozen-lockfile
+          pnpm install --frozen-lockfile
 
       - name: Build contracts and generate ABIs
         working-directory: ./contracts
         run: |
           echo "🔨 Compiling smart contracts..."
-          yarn install --frozen-lockfile
-          yarn hardhat compile
+          pnpm install --frozen-lockfile
+          pnpm hardhat compile
           echo "✅ Contracts compiled and ABIs generated"
 
       - name: Prepare subgraph configuration
@@ -159,7 +164,7 @@ jobs:
           echo "   Perps Address: ${PERPS_ADDRESS}"
           echo "   Perps Start Block: ${PERPS_START_BLOCK}"
           echo "   Price Oracle Address: ${PRICE_ORACLE_ADDRESS}"  
-          yarn prepare:env
+          pnpm prepare:env
           
           echo "✅ Subgraph configuration ready"
           echo "📄 Generated subgraph.yaml:"
@@ -169,14 +174,14 @@ jobs:
         working-directory: ./indexer
         run: |
           echo "🔨 Generating AssemblyScript types..."
-          yarn codegen
+          pnpm codegen
           echo "✅ Code generation complete"
 
       - name: Build subgraph
         working-directory: ./indexer
         run: |
           echo "🔨 Building subgraph..."
-          yarn build
+          pnpm build
           echo "✅ Build complete"
 
       - name: Upload build artifacts
@@ -230,18 +235,23 @@ jobs:
           name: subgraph-build
           path: .
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.1
+          run_install: false
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'yarn'
-          cache-dependency-path: indexer/yarn.lock
+          cache: 'pnpm'
 
       - name: Install dependencies
         working-directory: ./indexer
         run: |
           echo "📦 Installing dependencies for deployment..."
-          yarn install --frozen-lockfile
+          pnpm install --frozen-lockfile
 
       # Upload to ephemeral IPFS node (no rate limits!)
       - name: Upload to local IPFS
