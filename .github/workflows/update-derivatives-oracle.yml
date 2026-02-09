@@ -6,7 +6,6 @@ on:
       - dev
       - stg
       - main
-      - 'cicd/**'
 
     paths:
       - 'indexer/**'
@@ -175,7 +174,7 @@ jobs:
         working-directory: ./indexer
         run: |
           echo "🔨 Generating AssemblyScript types..."
-          pnpm codegen
+          npx graph codegen
           echo "✅ Code generation complete"
 
       - name: Build subgraph
