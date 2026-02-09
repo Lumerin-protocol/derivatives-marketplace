@@ -145,7 +145,7 @@ jobs:
           PERPS_ADDRESS: ${{ vars.PERPS_ADDRESS }}
           PERPS_START_BLOCK: ${{ vars.PERPS_START_BLOCK }}
           PRICE_ORACLE_ADDRESS: ${{ vars.PRICE_ORACLE_ADDRESS }}
-          ETH_NODE_ADDRESS: ${{ vars.ETH_NODE_ADDRESS }}
+          ETH_NODE_ADDRESS: ${{ secrets.ETH_NODE_ADDRESS }}
 
         run: |
           echo "⚙️ Preparing subgraph for ${{ needs.setup.outputs.environment }}..."
