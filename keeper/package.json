@@ -8,9 +8,10 @@
   },
   "scripts": {
     "dev": "node --env-file=../.env src/index.ts | pino-pretty",
+    "dev:dry": "DRY_RUN=true node --env-file=../.env src/index.ts | pino-pretty",
     "start": "node --env-file=../.env src/index.ts",
-    "start:dry": "DRY_RUN=true node --env-file=../.env src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "docker": "docker build -t perps-keeper . && docker run --rm --env-file ../.env perps-keeper"
   },
   "dependencies": {
     "pino": "^10.3.1",
