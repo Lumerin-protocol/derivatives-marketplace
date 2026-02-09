@@ -1,0 +1,59 @@
+name: Infrastructure Update Notification
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - '.bedrock/**'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  Notify-Infra-Update:
+    runs-on: ubuntu-latest
+    name: Notify Infrastructure Changes
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get changed files
+        id: changes
+        run: |
+          # Get list of changed files in .bedrock directory
+          # Use HEAD^..HEAD to handle merge commits (compares against first parent)
+          CHANGED_FILES=$(git diff --name-only HEAD^..HEAD -- .bedrock/ | head -10)
+          CHANGED_COUNT=$(git diff --name-only HEAD^..HEAD -- .bedrock/ | wc -l | tr -d ' ')
+          
+          # Build a compact list of changed paths
+          if [ "$CHANGED_COUNT" -gt 0 ]; then
+            CHANGED_LIST=$(echo "$CHANGED_FILES" | sed 's/^/• `/' | sed 's/$/`/')
+            
+            if [ "$CHANGED_COUNT" -gt 10 ]; then
+              CHANGED_LIST=$(printf "%s\n• _...and %d more files_" "$CHANGED_LIST" "$((CHANGED_COUNT - 10))")
+            fi
+          else
+            CHANGED_LIST="• _No files detected_"
+          fi
+          
+          # Build the additional info markdown
+          INFO_TEXT=$(printf "*Changed Files (%s):*\n%s" "$CHANGED_COUNT" "$CHANGED_LIST")
+          
+          # Use heredoc to preserve newlines in output
+          echo "info<<EOF" >> $GITHUB_OUTPUT
+          echo "$INFO_TEXT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Send Slack notification
+        uses: ./.github/actions/slack-notify
+        with:
+          status: 'updated'
+          environment: 'infra'
+          service_name: 'Infrastructure (Terraform)'
+          version: ${{ github.ref_name }}
+          slack_webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          additional_info: ${{ steps.changes.outputs.info }}
