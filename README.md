@@ -31,7 +31,7 @@ On-chain perpetual futures trading platform with an order book model, built on A
 
 **Indexer** (`indexer/`) — A Graph Protocol subgraph that listens to contract events and builds a queryable GraphQL API. It tracks the order book, trade history, user positions, collateral events, and aggregated stats. The frontend and any off-chain services consume data from here instead of reading contract state directly. See [`indexer/README.md`](indexer/README.md) for schema and query examples.
 
-**Keepers** (planned) — Off-chain liquidation bots that monitor user positions via the subgraph or direct contract reads. When a position's collateral drops below maintenance margin, keepers call `liquidate(user)` on-chain to close the position and earn the liquidation fee. Not yet implemented.
+**Keeper** (`keeper/`) — An off-chain liquidation bot that monitors user positions via a built-in mini-indexer (no subgraph dependency). It watches contract events in real-time to track positions and balances locally, pre-computes the liquidation price for each user, and polls the oracle price. When the market price crosses a user's liquidation threshold, the keeper verifies on-chain and executes the `liquidate(user)` call to earn the liquidation fee. Built with Node.js, TypeScript, and viem.
 
 **Frontend** (planned) — React-based trading UI for placing orders, managing collateral, and viewing positions and trade history. Will be added to this repo, reusing the existing futures UI codebase. Communicates with the contract via wagmi/viem for writes and the subgraph for reads.
 
@@ -42,20 +42,21 @@ On-chain perpetual futures trading platform with an order book model, built on A
 3. **Matching engine** executes on-chain when `createOrder` is called. Matched trades settle immediately: positions are updated and PnL flows through the reserve pool.
 4. **Subgraph** indexes all emitted events into structured entities (orders, trades, positions, price levels, etc.) and serves them over GraphQL.
 5. **Frontend** queries the subgraph for order book depth, trade history, and portfolio data to render the UI.
-6. **Keepers** (planned) poll for under-collateralized positions and submit liquidation transactions.
+6. **Keeper** watches contract events to track positions and balances locally, pre-computes liquidation prices, and executes liquidations when the oracle price crosses a threshold.
 
 ## Repository Structure
 
 ```
 contracts/          Solidity smart contracts (Hardhat + Foundry)
 indexer/            Graph Protocol subgraph
+keeper/             Liquidation keeper bot (Node.js + viem)
 ```
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js 20.x
+- Node.js 20.x (contracts/indexer) or 22.x (keeper)
 - [pnpm](https://pnpm.io/)
 - [Foundry](https://book.getfoundry.sh/) (for Solidity formatting)
 - Docker (for local subgraph development)
@@ -81,6 +82,18 @@ pnpm indexer            # Start graph-node via Docker
 pnpm setup-local       # Codegen, build, create & deploy subgraph
 ```
 
+### Keeper
+
+```bash
+cd keeper
+pnpm install
+pnpm start             # Run keeper (reads ../.env)
+pnpm start:dry         # Dry-run mode (simulate without executing)
+pnpm typecheck         # Type-check TypeScript
+```
+
+Add `KEEPER_PRIVATE_KEY` to the root `.env` file. See [`keeper/.env.example`](keeper/.env.example) for all keeper-specific configuration.
+
 See [`contracts/README.md`](contracts/README.md) and [`indexer/README.md`](indexer/README.md) for more details.
 
 ## Tech Stack
@@ -91,7 +104,7 @@ See [`contracts/README.md`](contracts/README.md) and [`indexer/README.md`](index
 | Oracle    | Hashprice Oracle (Chainlink AggregatorV3 iface) |
 | Indexer   | The Graph, AssemblyScript                       |
 | Frontend  | React, wagmi, viem (planned)                    |
-| Keepers   | Off-chain liquidation bots (planned)            |
+| Keeper    | Node.js 22, TypeScript, viem                    |
 | Tooling   | pnpm, TypeScript, Biome                         |
 | Network   | Arbitrum                                        |
 
