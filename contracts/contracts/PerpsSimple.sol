@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import { IERC20Permit } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import { StructuredLinkedList } from "solidity-linked-list/contracts/StructuredLinkedList.sol";
 import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
@@ -159,6 +160,12 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
 
     /// @notice Authorize upgrade (only owner)
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
+
+    /// @dev TODO: Remove this function before going to production
+    function DANGER_setCollateralToken(IERC20Metadata _collateralToken) external onlyOwner {
+        collateralToken = _collateralToken;
+        tokenDecimals = _collateralToken.decimals();
+    }
 
     /// @notice Get current market price from oracle
     /// @return price The current price (scaled to collateral token decimals)
@@ -532,7 +539,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
 
     /// @notice Add collateral to account
     /// @param _amount Amount of collateral to add
-    function addCollateral(uint256 _amount) external {
+    function addCollateral(uint256 _amount) public {
         if (_amount == 0) {
             revert InvalidSize();
         }
@@ -541,6 +548,17 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         _mint(_msgSender(), _amount);
 
         emit CollateralAdded(_msgSender(), _amount);
+    }
+
+    /// @notice Add collateral to account using ERC-2612 permit (approve + deposit in one tx)
+    /// @param _amount Amount of collateral to add
+    /// @param _deadline Permit signature deadline
+    /// @param _v Permit signature v
+    /// @param _r Permit signature r
+    /// @param _s Permit signature s
+    function addCollateralWithPermit(uint256 _amount, uint256 _deadline, uint8 _v, bytes32 _r, bytes32 _s) external {
+        IERC20Permit(address(collateralToken)).permit(_msgSender(), address(this), _amount, _deadline, _v, _r, _s);
+        addCollateral(_amount);
     }
 
     /// @notice Remove collateral from account
