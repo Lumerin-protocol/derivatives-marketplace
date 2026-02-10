@@ -58,7 +58,7 @@ describe("PerpsSimple - createOrder", function () {
       await expect(
         perps.write.createOrder([marketPrice, 0n], {
           account: buyer.account,
-        })
+        }),
       ).to.be.rejectedWith("InvalidSize");
     });
 
@@ -72,7 +72,7 @@ describe("PerpsSimple - createOrder", function () {
       await expect(
         perps.write.createOrder([0n, quantity], {
           account: buyer.account,
-        })
+        }),
       ).to.be.rejectedWith("InvalidPrice");
     });
 
@@ -88,7 +88,7 @@ describe("PerpsSimple - createOrder", function () {
       await expect(
         perps.write.createOrder([invalidPrice, quantity], {
           account: buyer.account,
-        })
+        }),
       ).to.be.rejectedWith("InvalidPrice");
     });
   });
@@ -244,22 +244,20 @@ describe("PerpsSimple - createOrder", function () {
 
       const marketPrice = await perps.read.getMarketPrice();
       const maxQuantity =
-        ((config.collateralPerUser - config.orderFee) *
-          100n *
-          10n ** BigInt(config.quantityDecimals)) /
-        (marketPrice * config.marginPercent);
+        (config.collateralPerUser * 100n * 10n ** BigInt(config.quantityDecimals)) /
+        (marketPrice * BigInt(config.marginPercent));
       const quantity = maxQuantity * 2n;
 
       await expect(
         perps.write.createOrder([marketPrice, BigInt(quantity)], {
           account: buyer.account,
-        })
+        }),
       ).to.be.rejectedWith("InsufficientMargin");
     });
   });
 
-  describe("Order Fee", function () {
-    it("should deduct order fee when creating order", async function () {
+  describe("Match Fees", function () {
+    it("should not deduct fee when order rests (no match)", async function () {
       const { contracts, accounts, config } = await loadFixture(deployPerpsWithCollateralFixture);
       const { perps } = contracts;
       const { buyer } = accounts;
@@ -268,13 +266,65 @@ describe("PerpsSimple - createOrder", function () {
       const marketPrice = await perps.read.getMarketPrice();
       const quantity = parseUnits("1", 6);
 
+      // Place a resting buy order below market — no match, no fee
       await perps.write.createOrder(
         [marketPrice - config.minimumPriceIncrement, BigInt(quantity)],
-        { account: buyer.account }
+        { account: buyer.account },
       );
 
       const balanceAfter = await perps.read.balanceOf([buyer.account.address]);
-      expect(balanceBefore - balanceAfter).to.equal(config.orderFee);
+      expect(balanceBefore - balanceAfter).to.equal(0n);
+    });
+
+    it("should charge taker fee on match with liquidationFee as floor", async function () {
+      const { contracts, accounts, config } = await loadFixture(deployPerpsWithCollateralFixture);
+      const { perps } = contracts;
+      const { buyer, seller } = accounts;
+
+      const marketPrice = await perps.read.getMarketPrice();
+      const quantity = parseUnits("1", config.quantityDecimals);
+
+      // Seller places a resting sell order
+      await perps.write.createOrder([marketPrice, -quantity], { account: seller.account });
+
+      // Record buyer's balance before matching
+      const balanceBefore = await perps.read.balanceOf([buyer.account.address]);
+
+      // Buyer places a matching buy order (taker)
+      await perps.write.createOrder([marketPrice, quantity], { account: buyer.account });
+
+      const balanceAfter = await perps.read.balanceOf([buyer.account.address]);
+      const notionalValue = (marketPrice * quantity) / 10n ** BigInt(config.quantityDecimals);
+      const bpsFee = (notionalValue * config.takerFeeBps) / 10000n;
+      // liquidationFee acts as the minimum fee floor
+      const expectedFee = bpsFee > config.liquidationFee ? bpsFee : config.liquidationFee;
+
+      expect(balanceBefore - balanceAfter).to.equal(expectedFee);
+    });
+
+    it("should not charge maker fee when makerFeeBps is 0", async function () {
+      const { contracts, accounts, config } = await loadFixture(deployPerpsWithCollateralFixture);
+      const { perps } = contracts;
+      const { buyer, seller } = accounts;
+
+      const marketPrice = await perps.read.getMarketPrice();
+      const quantity = parseUnits("1", config.quantityDecimals);
+      const feeBps = 0;
+
+      await perps.write.setMatchFee([feeBps, feeBps]);
+
+      // Seller places a resting sell order (maker)
+      await perps.write.createOrder([marketPrice, -quantity], { account: seller.account });
+
+      const sellerBalanceBefore = await perps.read.balanceOf([seller.account.address]);
+
+      // Buyer matches (triggers maker fee on seller)
+      await perps.write.createOrder([marketPrice, quantity], { account: buyer.account });
+
+      const sellerBalanceAfter = await perps.read.balanceOf([seller.account.address]);
+
+      // makerFeeBps is 0, so fee falls back to liquidationFee floor
+      expect(sellerBalanceBefore).to.equal(sellerBalanceAfter);
     });
   });
 
@@ -299,7 +349,7 @@ describe("PerpsSimple - createOrder", function () {
       await expect(
         perps.write.createOrder([marketPrice - 101n * tick, BigInt(quantity)], {
           account: buyer.account,
-        })
+        }),
       ).to.be.rejectedWith("MaxOrdersPerParticipantReached");
     });
   });
