@@ -55,8 +55,8 @@ dataSources:
         - event: CollateralRemoved(indexed address,uint256)
           handler: handleCollateralRemoved
         # Config events
-        - event: OrderFeeUpdated(uint256)
-          handler: handleOrderFeeUpdated
+        - event: MatchFeeUpdated(int16,int16)
+          handler: handleMatchFeeUpdated
         - event: MarginPercentUpdated(uint8)
           handler: handleMarginPercentUpdated
         - event: MaintenanceMarginPercentUpdated(uint8)

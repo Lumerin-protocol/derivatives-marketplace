@@ -11,7 +11,8 @@ export const PerpsStatsQuery = gql`
       maintenanceMarginPercent
       liquidationFee
       minimumPriceIncrement
-      orderFee
+      takerFeeBps
+      makerFeeBps
       reservePoolBalance
       collectedFeesBalance
       totalUsers
