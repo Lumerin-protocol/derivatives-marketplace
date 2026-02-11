@@ -1,0 +1,308 @@
+name: Deploy Perps Keeper ECS Service
+
+on:
+   push:
+     branches:
+       - dev
+       - stg
+       - main
+     paths:
+       - 'keeper/**'
+       - '.github/workflows/deploy-perps-keeper.yml'
+  
+   workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment (dev=DEV, stg=STG, main=LMN/PROD)'
+        required: true
+        type: choice
+        options:
+          - dev
+          - stg
+          - main
+
+permissions:
+  id-token: write   # Required for OIDC
+  contents: write   # Required for creating git tags on main
+  packages: write   # For GHCR
+
+env:
+  SERVICE_NAME: perps-keeper
+  GHCR_REGISTRY: ghcr.io
+  GHCR_IMAGE: ghcr.io/lumerin-protocol/perps-keeper
+
+jobs:
+  build:
+    name: 🔨 Build
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.gen_tag.outputs.version }}
+      tag: ${{ steps.gen_tag.outputs.tag_name }}
+      environment: ${{ steps.gen_tag.outputs.environment }}
+      ecs_cluster: ${{ steps.env_config.outputs.ecs_cluster }}
+      ecs_service: ${{ steps.env_config.outputs.ecs_service }}
+      task_family: ${{ steps.env_config.outputs.task_family }}
+      aws_region: ${{ steps.env_config.outputs.aws_region }}
+      is_cicd_branch: ${{ steps.gen_tag.outputs.is_cicd_branch }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Generate version tag
+        id: gen_tag
+        uses: ./.github/actions/gen-tag
+        with:
+          component: perps-keeper
+          major_version: '3'
+          environment_override: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || '' }}
+
+      - name: Environment config
+        id: env_config
+        run: |
+          ENV="${{ steps.gen_tag.outputs.environment }}"
+          
+          # Task family is the same across all environments (per Terraform config)
+          echo "task_family=tsk-perps-keeper" >> $GITHUB_OUTPUT
+          
+          case $ENV in
+            dev)
+              echo "aws_region=us-east-1" >> $GITHUB_OUTPUT
+              echo "ecs_cluster=ecs-derivatives-marketplace-dev" >> $GITHUB_OUTPUT
+              echo "ecs_service=svc-perps-keeper-dev" >> $GITHUB_OUTPUT
+              ;;
+            stg)
+              echo "aws_region=us-east-1" >> $GITHUB_OUTPUT
+              echo "ecs_cluster=ecs-derivatives-marketplace-stg" >> $GITHUB_OUTPUT
+              echo "ecs_service=svc-perps-keeper-stg" >> $GITHUB_OUTPUT
+              ;;
+            main)
+              echo "aws_region=us-east-1" >> $GITHUB_OUTPUT
+              echo "ecs_cluster=ecs-derivatives-marketplace-lmn" >> $GITHUB_OUTPUT
+              echo "ecs_service=svc-perps-keeper-lmn" >> $GITHUB_OUTPUT
+              ;;
+          esac
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./keeper
+          push: ${{ steps.gen_tag.outputs.is_cicd_branch != 'true' }}
+          load: ${{ steps.gen_tag.outputs.is_cicd_branch == 'true' }}
+          tags: |
+            ${{ env.GHCR_IMAGE }}:${{ steps.gen_tag.outputs.version }}
+            ${{ env.GHCR_IMAGE }}:${{ steps.gen_tag.outputs.environment }}-latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          labels: |
+            org.opencontainers.image.source=${{ github.repositoryUrl }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.gen_tag.outputs.version }}
+
+      - name: CI/CD test summary
+        if: steps.gen_tag.outputs.is_cicd_branch == 'true'
+        run: |
+          echo "## 🔧 CI/CD Test Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Mode:** Test only (no deployment)" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ steps.gen_tag.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** Built locally, not pushed to GHCR" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Build verification successful" >> $GITHUB_STEP_SUMMARY
+
+  deploy:
+    name: 🚀 Deploy
+    runs-on: ubuntu-latest
+    needs: build
+    if: needs.build.outputs.is_cicd_branch != 'true'
+    
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ needs.build.outputs.environment == 'dev' && secrets.AWS_ROLE_ARN_DEV || needs.build.outputs.environment == 'stg' && secrets.AWS_ROLE_ARN_STG || secrets.AWS_ROLE_ARN_LMN }}
+          aws-region: ${{ needs.build.outputs.aws_region }}
+          role-session-name: GitHubActions-PerpsKeeper-${{ github.run_id }}
+
+      - name: Update task definition and deploy
+        run: |
+          CLUSTER="${{ needs.build.outputs.ecs_cluster }}"
+          SERVICE="${{ needs.build.outputs.ecs_service }}"
+          TASK_FAMILY="${{ needs.build.outputs.task_family }}"
+          IMAGE="${{ env.GHCR_IMAGE }}:${{ needs.build.outputs.version }}"
+          REGION="${{ needs.build.outputs.aws_region }}"
+          
+          echo "🚀 Deploying to ${{ needs.build.outputs.environment }} environment"
+          echo "   Cluster: ${CLUSTER}"
+          echo "   Service: ${SERVICE}"
+          echo "   Task Family: ${TASK_FAMILY}"
+          echo "   Image: ${IMAGE}"
+          
+          # Get current task definition
+          echo "📥 Fetching current task definition..."
+          aws ecs describe-task-definition \
+            --task-definition ${TASK_FAMILY} \
+            --region ${REGION} \
+            --query 'taskDefinition' > task-def.json
+          
+          # Update task definition with new image
+          echo "🔧 Updating container image in task definition..."
+          jq --arg IMAGE "${IMAGE}" \
+              '.containerDefinitions[0].image = $IMAGE |
+              del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
+            task-def.json > new-task-def.json
+          
+          # Register new task definition
+          echo "📝 Registering new task definition revision..."
+          NEW_TASK_DEF=$(aws ecs register-task-definition \
+            --cli-input-json file://new-task-def.json \
+            --region ${REGION} \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          
+          echo "✅ Registered new task definition: ${NEW_TASK_DEF}"
+          
+          # Update ECS service with new task definition
+          echo "🚀 Updating ECS service..."
+          aws ecs update-service \
+            --cluster ${CLUSTER} \
+            --service ${SERVICE} \
+            --task-definition ${NEW_TASK_DEF} \
+            --region ${REGION} \
+            --force-new-deployment
+          
+          echo "✅ Deployment triggered successfully"
+
+  verify:
+    name: 🔍 Verify
+    runs-on: ubuntu-latest
+    needs: [build, deploy]
+    if: needs.build.outputs.is_cicd_branch != 'true'
+    
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ needs.build.outputs.environment == 'dev' && secrets.AWS_ROLE_ARN_DEV || needs.build.outputs.environment == 'stg' && secrets.AWS_ROLE_ARN_STG || secrets.AWS_ROLE_ARN_LMN }}
+          aws-region: ${{ needs.build.outputs.aws_region }}
+          role-session-name: GitHubActions-PerpsKeeper-Verify-${{ github.run_id }}
+
+      - name: Wait for service to stabilize
+        run: |
+          echo "⏳ Waiting for service to stabilize..."
+          aws ecs wait services-stable \
+            --cluster ${{ needs.build.outputs.ecs_cluster }} \
+            --services ${{ needs.build.outputs.ecs_service }} \
+            --region ${{ needs.build.outputs.aws_region }}
+          
+          echo "✅ Service is stable and running"
+
+  cleanup:
+    name: 🧹 Cleanup
+    runs-on: ubuntu-latest
+    needs: [build, verify]
+    if: always() && needs.build.outputs.is_cicd_branch != 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        if: needs.verify.result == 'success'
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create and push tag
+        if: needs.verify.result == 'success'
+        run: |
+          TAG_NAME="${{ needs.build.outputs.tag }}"
+          echo "🏷️ Creating tag after successful deployment: $TAG_NAME"
+          
+          # Check if tag already exists
+          if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
+            echo "⚠️ Tag $TAG_NAME already exists, skipping tag creation"
+          else
+            git tag -a "$TAG_NAME" -m "Release ${{ needs.build.outputs.version }} - Deployed to ${{ needs.build.outputs.environment }}"
+            git push origin "$TAG_NAME"
+            echo "✅ Tag $TAG_NAME created and pushed"
+          fi
+
+      - name: Deployment summary
+        if: needs.verify.result == 'success'
+        run: |
+          echo "## 🎉 Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Service:** Perps Keeper" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ needs.build.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ needs.build.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** \`${{ env.GHCR_IMAGE }}:${{ needs.build.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Cluster:** ${{ needs.build.outputs.ecs_cluster }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Service:** ${{ needs.build.outputs.ecs_service }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Service deployed and stabilized successfully" >> $GITHUB_STEP_SUMMARY
+
+      - name: Failure summary
+        if: needs.verify.result == 'failure'
+        run: |
+          echo "## ❌ Deployment Failed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Service:** Perps Keeper" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ needs.build.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ needs.build.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️ Deployment or verification failed. Check logs above for details." >> $GITHUB_STEP_SUMMARY
+
+  notify:
+    name: 📢 Notify
+    runs-on: ubuntu-latest
+    needs: [build, deploy, verify, cleanup]
+    if: always() && (needs.build.result == 'success')
+    
+    steps:
+      - name: Checkout (for composite action)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      
+      - name: Determine status
+        id: status
+        run: |
+          if [ "${{ needs.build.outputs.is_cicd_branch }}" == "true" ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+          elif [ "${{ needs.verify.result }}" == "success" ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+          elif [ "${{ needs.verify.result }}" == "failure" ] || [ "${{ needs.deploy.result }}" == "failure" ]; then
+            echo "status=failure" >> $GITHUB_OUTPUT
+          elif [ "${{ needs.verify.result }}" == "cancelled" ] || [ "${{ needs.deploy.result }}" == "cancelled" ]; then
+            echo "status=cancelled" >> $GITHUB_OUTPUT
+          else
+            echo "status=skipped" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Send Slack notification
+        uses: ./.github/actions/slack-notify
+        with:
+          status: ${{ steps.status.outputs.status }}
+          environment: ${{ needs.build.outputs.environment }}
+          service_name: 'Perps Keeper'
+          version: ${{ needs.build.outputs.version }}
+          slack_webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          image_tag: ${{ needs.build.outputs.is_cicd_branch != 'true' && format('{0}:{1}', env.GHCR_IMAGE, needs.build.outputs.version) || '' }}
+          additional_info: '${{ needs.build.outputs.is_cicd_branch == ''true'' && ''*Mode:* CI/CD Test (build only, no deploy)'' || format(''*ECS Cluster:* `{0}` • *Service:* `{1}`'', needs.build.outputs.ecs_cluster, needs.build.outputs.ecs_service) }}'
+

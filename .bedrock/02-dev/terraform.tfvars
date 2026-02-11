@@ -6,23 +6,25 @@ ecs_cluster = {
   protect = false
 }
 
-# Configure Market Maker Lambda
+# Configure PerpsKeeper Service
 perpskeeper_service = {
-  create          = false
-  ghcr_repo       = "ghcr.io/lumerin-protocol/perps-keeper"
-  ghcr_imagetag   = "latest-dev"
-  svc_name        = "perps-keeper"
-  task_worker_qty = 1
-  cnt_port        = 3000
-  cnt_name        = "perps-keeper"
-  task_cpu        = 256
-  task_ram        = 512
-  eth_price_feed_address = "0x6F736186d2c93913721e2570c283dff2a08575e9"
-  keeper_poll_interval_ms = 5000
-  keeper_resync_interval_ms = 300000
-  keeper_dry_run = false
-  keeper_min_profit_margin = 0
-  keeper_health_port = 3000
+  create                    = true
+  ghcr_repo                 = "ghcr.io/lumerin-protocol/perps-keeper"
+  ghcr_imagetag             = "latest-dev"
+  svc_name                  = "perps-keeper"
+  dns_name                  = "keeper"  # Creates keeper.dev.lumerin.io
+  task_worker_qty           = 1
+  cnt_port                  = 3000
+  cnt_name                  = "perps-keeper"
+  task_cpu                  = 256
+  task_ram                  = 512
+  network                   = "arbitrum-sepolia"
+  eth_price_feed_address    = "0x6F736186d2c93913721e2570c283dff2a08575e9"
+  keeper_poll_interval_ms   = "5000"
+  keeper_resync_interval_ms = "300000"
+  keeper_dry_run            = "false"
+  keeper_min_profit_margin  = "0"
+  keeper_health_port        = "3000"
 }
 
 ########################################
