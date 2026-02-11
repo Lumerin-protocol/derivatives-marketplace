@@ -66,7 +66,7 @@ resource "aws_secretsmanager_secret_version" "perps_keeper" {
   secret_string = jsonencode({
     keeper_private_key          = var.perpskeeper_private_key
     eth_node_address         = var.ethereum_rpc_url
-    futures_subgraph_url = "https://gateway.thegraph.com/api/${var.graph_api_key}/subgraphs/id/${var.derivatives_subgraph_id}"
     oracles_subgraph_url = "https://gateway.thegraph.com/api/${var.graph_api_key}/subgraphs/id/${var.oracles_subgraph_id}"
+    derivatives_subgraph_url = "https://gateway.thegraph.com/api/${var.graph_api_key}/subgraphs/id/${var.derivatives_subgraph_id}"
   })
 }
