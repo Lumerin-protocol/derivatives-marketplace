@@ -15,7 +15,8 @@ async function main() {
     "PRICE_ORACLE_ADDRESS",
     "MARGIN_PERCENT",
     "MAINTENANCE_MARGIN_PERCENT",
-    "ORDER_FEE",
+    "TAKER_FEE_BPS",
+    "MAKER_FEE_BPS",
     "LIQUIDATION_FEE",
     "MINIMUM_PRICE_INCREMENT",
   );
@@ -98,11 +99,14 @@ async function main() {
 
   const perps = await viem.getContractAt("PerpsSimple", perpsProxy.address);
 
-  // Set order fee
-  logInfo("Set order fee", { orderFee: env.ORDER_FEE });
+  // Set fees
+  logInfo("Set fees", {
+    takerFeeBps: env.TAKER_FEE_BPS,
+    makerFeeBps: env.MAKER_FEE_BPS,
+  });
   await logPrompt("Proceed?");
-  console.log("Setting order fee...");
-  const feeRes = await perps.simulate.setOrderFee([BigInt(env.ORDER_FEE)]);
+  console.log("Setting fee bps...");
+  const feeRes = await perps.simulate.setMatchFee([Number(env.TAKER_FEE_BPS), Number(env.MAKER_FEE_BPS)]);
   const feeReceipt = await writeAndWait(deployer, feeRes);
   logStep("Done", txUrl(pc, feeReceipt.transactionHash));
 
@@ -130,7 +134,8 @@ async function main() {
     maintenance: `${env.MAINTENANCE_MARGIN_PERCENT}%`,
     liqFee: env.LIQUIDATION_FEE,
     tick: env.MINIMUM_PRICE_INCREMENT,
-    orderFee: env.ORDER_FEE,
+    takerFeeBps: env.TAKER_FEE_BPS,
+    makerFeeBps: env.MAKER_FEE_BPS,
   });
 
   logSuccess(addrUrl(pc, perpsProxy.address));

@@ -3,6 +3,7 @@ import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { parseUnits, zeroAddress } from "viem";
 import { deployPerpsFixture, deployPerpsWithCollateralFixture } from "./fixtures";
 import { viem } from "hardhat";
+import { catchError } from "../lib/lib";
 
 describe("PerpsSimple - Admin Functions", function () {
   describe("setOracle", function () {
@@ -30,7 +31,7 @@ describe("PerpsSimple - Admin Functions", function () {
       const { buyer } = accounts;
 
       await expect(
-        perps.write.setOracle([priceOracle.address], { account: buyer.account })
+        perps.write.setOracle([priceOracle.address], { account: buyer.account }),
       ).to.be.rejectedWith("OwnableUnauthorizedAccount");
     });
 
@@ -40,7 +41,7 @@ describe("PerpsSimple - Admin Functions", function () {
       const { owner } = accounts;
 
       await expect(
-        perps.write.setOracle([zeroAddress], { account: owner.account })
+        perps.write.setOracle([zeroAddress], { account: owner.account }),
       ).to.be.rejectedWith("InvalidOracle");
     });
   });
@@ -51,10 +52,10 @@ describe("PerpsSimple - Admin Functions", function () {
       const { perps } = contracts;
       const { owner } = accounts;
 
-      await perps.write.setMarginPercent([20n], { account: owner.account });
+      await perps.write.setMarginPercent([20], { account: owner.account });
 
       const marginPercent = await perps.read.marginPercent();
-      expect(marginPercent).to.equal(20n);
+      expect(marginPercent).to.equal(20);
     });
 
     it("should revert when non-owner tries to set margin percent", async function () {
@@ -63,7 +64,7 @@ describe("PerpsSimple - Admin Functions", function () {
       const { buyer } = accounts;
 
       await expect(
-        perps.write.setMarginPercent([20n], { account: buyer.account })
+        perps.write.setMarginPercent([20], { account: buyer.account }),
       ).to.be.rejectedWith("OwnableUnauthorizedAccount");
     });
 
@@ -73,7 +74,7 @@ describe("PerpsSimple - Admin Functions", function () {
       const { owner } = accounts;
 
       await expect(
-        perps.write.setMarginPercent([0n], { account: owner.account })
+        perps.write.setMarginPercent([0], { account: owner.account }),
       ).to.be.rejectedWith("InvalidMarginPercent");
     });
 
@@ -83,7 +84,7 @@ describe("PerpsSimple - Admin Functions", function () {
       const { owner } = accounts;
 
       await expect(
-        perps.write.setMarginPercent([101n], { account: owner.account })
+        perps.write.setMarginPercent([101], { account: owner.account }),
       ).to.be.rejectedWith("InvalidMarginPercent");
     });
 
@@ -96,7 +97,7 @@ describe("PerpsSimple - Admin Functions", function () {
       await expect(
         perps.write.setMarginPercent([config.maintenanceMarginPercent], {
           account: owner.account,
-        })
+        }),
       ).to.be.rejectedWith("InvalidMarginPercent");
     });
   });
@@ -107,10 +108,12 @@ describe("PerpsSimple - Admin Functions", function () {
       const { perps } = contracts;
       const { owner } = accounts;
 
-      await perps.write.setMaintenanceMarginPercent([3n], { account: owner.account });
+      const margin = 3;
+
+      await perps.write.setMaintenanceMarginPercent([margin], { account: owner.account });
 
       const maintenanceMarginPercent = await perps.read.maintenanceMarginPercent();
-      expect(maintenanceMarginPercent).to.equal(3n);
+      expect(maintenanceMarginPercent).to.equal(margin);
     });
 
     it("should revert when non-owner tries to set", async function () {
@@ -119,7 +122,7 @@ describe("PerpsSimple - Admin Functions", function () {
       const { buyer } = accounts;
 
       await expect(
-        perps.write.setMaintenanceMarginPercent([3n], { account: buyer.account })
+        perps.write.setMaintenanceMarginPercent([3], { account: buyer.account }),
       ).to.be.rejectedWith("OwnableUnauthorizedAccount");
     });
 
@@ -129,7 +132,7 @@ describe("PerpsSimple - Admin Functions", function () {
       const { owner } = accounts;
 
       await expect(
-        perps.write.setMaintenanceMarginPercent([0n], { account: owner.account })
+        perps.write.setMaintenanceMarginPercent([0], { account: owner.account }),
       ).to.be.rejectedWith("InvalidMarginPercent");
     });
 
@@ -142,7 +145,7 @@ describe("PerpsSimple - Admin Functions", function () {
       await expect(
         perps.write.setMaintenanceMarginPercent([config.marginPercent], {
           account: owner.account,
-        })
+        }),
       ).to.be.rejectedWith("InvalidMarginPercent");
     });
   });
@@ -166,7 +169,7 @@ describe("PerpsSimple - Admin Functions", function () {
       const { buyer } = accounts;
 
       await expect(
-        perps.write.setLiquidationFee([parseUnits("20", 6)], { account: buyer.account })
+        perps.write.setLiquidationFee([parseUnits("20", 6)], { account: buyer.account }),
       ).to.be.rejectedWith("OwnableUnauthorizedAccount");
     });
 
@@ -182,17 +185,18 @@ describe("PerpsSimple - Admin Functions", function () {
     });
   });
 
-  describe("setOrderFee", function () {
-    it("should allow owner to set order fee", async function () {
+  describe("setMatchFee", function () {
+    it("should allow owner to set maker and taker fees", async function () {
       const { contracts, accounts } = await loadFixture(deployPerpsFixture);
       const { perps } = contracts;
       const { owner } = accounts;
 
-      const newFee = parseUnits("2", 6);
-      await perps.write.setOrderFee([newFee], { account: owner.account });
+      await perps.write.setMatchFee([10, 2], { account: owner.account });
 
-      const orderFee = await perps.read.orderFee();
-      expect(orderFee).to.equal(newFee);
+      const takerFeeBps = await perps.read.takerFeeBps();
+      const makerFeeBps = await perps.read.makerFeeBps();
+      expect(takerFeeBps).to.equal(10);
+      expect(makerFeeBps).to.equal(2);
     });
 
     it("should revert when non-owner tries to set", async function () {
@@ -200,83 +204,8 @@ describe("PerpsSimple - Admin Functions", function () {
       const { perps } = contracts;
       const { buyer } = accounts;
 
-      await expect(
-        perps.write.setOrderFee([parseUnits("2", 6)], { account: buyer.account })
-      ).to.be.rejectedWith("OwnableUnauthorizedAccount");
-    });
-  });
-
-  describe("setMinimumPriceIncrement", function () {
-    it("should allow owner to set minimum price increment", async function () {
-      const { contracts, accounts } = await loadFixture(deployPerpsFixture);
-      const { perps } = contracts;
-      const { owner } = accounts;
-
-      const newIncrement = parseUnits("0.5", 6);
-      await perps.write.setMinimumPriceIncrement([newIncrement], { account: owner.account });
-
-      const minimumPriceIncrement = await perps.read.minimumPriceIncrement();
-      expect(minimumPriceIncrement).to.equal(newIncrement);
-    });
-
-    it("should revert when non-owner tries to set", async function () {
-      const { contracts, accounts } = await loadFixture(deployPerpsFixture);
-      const { perps } = contracts;
-      const { buyer } = accounts;
-
-      await expect(
-        perps.write.setMinimumPriceIncrement([parseUnits("0.5", 6)], {
-          account: buyer.account,
-        })
-      ).to.be.rejectedWith("OwnableUnauthorizedAccount");
-    });
-
-    it("should revert when setting to 0", async function () {
-      const { contracts, accounts } = await loadFixture(deployPerpsFixture);
-      const { perps } = contracts;
-      const { owner } = accounts;
-
-      await expect(
-        perps.write.setMinimumPriceIncrement([0n], { account: owner.account })
-      ).to.be.rejectedWith("InvalidPrice");
-    });
-  });
-
-  describe("withdrawFees", function () {
-    it("should allow owner to withdraw collected fees", async function () {
-      const { contracts, accounts, config } = await loadFixture(deployPerpsWithCollateralFixture);
-      const { perps, usdcMock } = contracts;
-      const { owner, buyer } = accounts;
-
-      // Create an order to generate fees
-      const marketPrice = await perps.read.getMarketPrice();
-      console.log(marketPrice.toString(), config.minimumPriceIncrement.toString());
-      await perps.write.createOrder(
-        [marketPrice - config.minimumPriceIncrement, parseUnits("1", 6)],
-        { account: buyer.account }
-      );
-
-      const feesBefore = await perps.read.collectedFeesBalance();
-      expect(feesBefore > 0n).to.be.true;
-
-      const ownerBalanceBefore = await usdcMock.read.balanceOf([owner.account.address]);
-
-      await perps.write.withdrawFees({ account: owner.account });
-
-      const feesAfter = await perps.read.collectedFeesBalance();
-      expect(feesAfter).to.equal(0n);
-
-      const ownerBalanceAfter = await usdcMock.read.balanceOf([owner.account.address]);
-      expect(ownerBalanceAfter - ownerBalanceBefore).to.equal(feesBefore);
-    });
-
-    it("should revert when non-owner tries to withdraw", async function () {
-      const { contracts, accounts } = await loadFixture(deployPerpsFixture);
-      const { perps } = contracts;
-      const { buyer } = accounts;
-
-      await expect(perps.write.withdrawFees({ account: buyer.account })).to.be.rejectedWith(
-        "OwnableUnauthorizedAccount"
+      await expect(perps.write.setMatchFee([10, 0], { account: buyer.account })).to.be.rejectedWith(
+        "OwnableUnauthorizedAccount",
       );
     });
   });
@@ -284,15 +213,15 @@ describe("PerpsSimple - Admin Functions", function () {
   describe("depositReservePool", function () {
     it("should allow anyone to deposit to reserve pool", async function () {
       const { contracts, accounts } = await loadFixture(deployPerpsFixture);
-      const { perps, usdcMock } = contracts;
+      const { perps } = contracts;
       const { buyer } = accounts;
 
       const amount = parseUnits("1000", 6);
-      const reserveBefore = await perps.read.reservePoolBalance();
+      const reserveBefore = await perps.read.balanceOf([perps.address]);
 
       await perps.write.depositReservePool([amount], { account: buyer.account });
 
-      const reserveAfter = await perps.read.reservePoolBalance();
+      const reserveAfter = await perps.read.balanceOf([perps.address]);
       expect(reserveAfter - reserveBefore).to.equal(amount);
     });
 
@@ -322,11 +251,11 @@ describe("PerpsSimple - Admin Functions", function () {
       const { owner } = accounts;
 
       const amount = parseUnits("1000", 6);
-      const reserveBefore = await perps.read.reservePoolBalance();
+      const reserveBefore = await perps.read.balanceOf([perps.address]);
 
       await perps.write.withdrawReservePool([amount], { account: owner.account });
 
-      const reserveAfter = await perps.read.reservePoolBalance();
+      const reserveAfter = await perps.read.balanceOf([perps.address]);
       expect(reserveBefore - reserveAfter).to.equal(amount);
     });
 
@@ -336,7 +265,7 @@ describe("PerpsSimple - Admin Functions", function () {
       const { buyer } = accounts;
 
       await expect(
-        perps.write.withdrawReservePool([parseUnits("100", 6)], { account: buyer.account })
+        perps.write.withdrawReservePool([parseUnits("100", 6)], { account: buyer.account }),
       ).to.be.rejectedWith("OwnableUnauthorizedAccount");
     });
 
@@ -345,12 +274,12 @@ describe("PerpsSimple - Admin Functions", function () {
       const { perps } = contracts;
       const { owner } = accounts;
 
-      const reserve = await perps.read.reservePoolBalance();
+      const reserve = await perps.read.balanceOf([perps.address]);
       const tooMuch = reserve + parseUnits("1", 6);
 
-      await expect(
-        perps.write.withdrawReservePool([tooMuch], { account: owner.account })
-      ).to.be.rejectedWith("InsufficientCollateral");
+      await catchError(perps.abi, "InsufficientReservePool", async () => {
+        await perps.write.withdrawReservePool([tooMuch], { account: owner.account });
+      });
     });
 
     it("should transfer tokens to owner", async function () {

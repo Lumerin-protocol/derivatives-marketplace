@@ -16,7 +16,8 @@ type Perps @entity(immutable: false) {
   marginPercent: Int!
   maintenanceMarginPercent: Int!
   liquidationFee: BigInt!
-  orderFee: BigInt!
+  takerFeeBps: Int!
+  makerFeeBps: Int!
 
   # Pool balances
   reservePoolBalance: BigInt!
@@ -174,4 +175,19 @@ type PriceLevel @entity(immutable: false) {
   isBid: Boolean!
   totalQuantity: BigInt!
   orderCount: Int!
+}
+
+type ReservePoolEvent @entity(immutable: true) {
+  id: Bytes! # tx hash + log index
+  type: ReservePoolEventType!
+  amount: BigInt!
+  user: User!
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  transactionHash: Bytes!
+}
+
+enum ReservePoolEventType {
+  RESERVE
+  FEE
 }

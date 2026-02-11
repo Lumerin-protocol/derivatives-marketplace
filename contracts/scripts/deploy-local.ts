@@ -98,9 +98,19 @@ async function main() {
     "USDC",
   );
   console.log(
-    "Order fee:             ",
-    formatUnits(config.orderFee, config.tokenDecimals),
-    "USDC",
+    "Taker fee:             ",
+    config.takerFeeBps.toString(),
+    "bps",
+  );
+  console.log(
+    "Maker fee:             ",
+    config.makerFeeBps.toString(),
+    "bps",
+  );
+  console.log(
+    "Min match fee floor:   ",
+    formatUnits(config.liquidationFee, config.tokenDecimals),
+    "USDC (= liquidation fee)",
   );
   console.log(
     "Reserve pool deposit:  ",

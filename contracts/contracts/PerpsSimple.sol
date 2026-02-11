@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import { IERC20Permit } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import { StructuredLinkedList } from "solidity-linked-list/contracts/StructuredLinkedList.sol";
 import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
@@ -16,6 +17,8 @@ import { AggregatorV3Interface } from "./AggregatorV3Interface.sol";
 /// @notice Simple perpetual trading contract with on-chain order book
 /// @dev Positions are created between two users when orders match
 /// @dev TODO: Add support for partial liquidation
+/// @dev TODO: when not enough reserve pool, the user should be able to get revenue
+/// @dev on their collateral balance and withdraw later when collateral is added
 contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC20Upgradeable {
     using SafeERC20 for IERC20;
     using EnumerableSet for EnumerableSet.Bytes32Set;
@@ -36,7 +39,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     uint256 public liquidationFee; // Liquidation fee in collateral token units
     uint8 private tokenDecimals;
     uint8 private oracleDecimals;
-    uint256 public orderFee; // Fee for creating an order
+    uint256 private __gap;
     uint256 private nonce = 0; // Nonce for order IDs
 
     // Order book mappings
@@ -56,8 +59,10 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     EnumerableSet.AddressSet private usersWithPositions; // Users with active positions
 
     // Reserve and fees
-    uint256 public reservePoolBalance;
-    uint256 public collectedFeesBalance;
+    uint256 private __gap2;
+    uint256 private __gap3;
+    int16 public takerFeeBps; // Taker fee in basis points (e.g., 5 = 0.05%)
+    int16 public makerFeeBps; // Maker fee in basis points (e.g., 0 = 0%)
 
     /// @notice Represents an order in the order book
     struct Order {
@@ -91,27 +96,27 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     event PositionClosed(address indexed user, int256 quantityClosed, int256 pnl);
     event CollateralAdded(address indexed user, uint256 amount);
     event CollateralRemoved(address indexed user, uint256 amount);
-    event OrderFeeUpdated(uint256 newFee);
+    event MatchFeeUpdated(int16 newTakerFeeBps, int16 newMakerFeeBps);
     event MarginPercentUpdated(uint8 newMarginPercent);
     event MaintenanceMarginPercentUpdated(uint8 newMaintenanceMarginPercent);
     event LiquidationFeeUpdated(uint256 newLiquidationFee);
     event PositionLiquidated(
         address indexed user, address indexed liquidator, int256 positionSize, int256 pnl, uint256 liquidatorFee
     );
+    event BadDebt(address indexed user, uint256 amount); // The user does not have enough collateral to cover the loss
 
     // Errors
     error InvalidPrice();
     error InvalidSize();
-    error InsufficientMargin();
-    error InsufficientCollateral();
+    error InsufficientMargin(); // The margin % is not sufficient to cover the position
+    error InsufficientCollateral(); // The user wants to remove more collateral than they have
     error OracleStale();
-    error NoPosition();
     error InvalidOracle();
     error InvalidMarginPercent();
     error OrderNotBelongToSender();
     error MaxOrdersPerParticipantReached();
     error NotLiquidatable();
-    error InsufficientReservePool();
+    error InsufficientReservePool(); // The reserve pool does not have enough collateral to cover user profit
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(uint256 _minimumPriceIncrement) {
@@ -222,9 +227,6 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             // Add price level to sorted list
             _addPriceLevel(_price, isBuy);
         }
-
-        // Pay order fee
-        _payOrderFee(_msgSender());
 
         // Check margin requirement
         _ensureSufficientMargin(_msgSender());
@@ -340,13 +342,18 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     {
         uint256 matchAmt = _min(_abs(_order.quantity), _abs(_remainingQty));
         int256 matchQty = _toSignedQuantity(matchAmt, _remainingQty);
+        uint256 notionalValue = _calculateValue(_order.price, matchAmt);
 
         // Execute at maker's price (price improvement for taker)
         Order memory orderCopy = _order;
         _createPosition(_orderId, orderCopy, _taker, _order.price, matchQty);
 
+        // Charge fees at match time
+        _chargeMatchFee(_taker, notionalValue, true); // taker fee
+        _chargeMatchFee(_order.participant, notionalValue, false); // maker fee
+
         // Update cached order value
-        userTotalOrderValue[_order.participant] -= _calculateValue(_order.price, matchAmt);
+        userTotalOrderValue[_order.participant] -= notionalValue;
 
         _order.quantity = _reduceQuantity(_order.quantity, matchAmt);
 
@@ -532,7 +539,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
 
     /// @notice Add collateral to account
     /// @param _amount Amount of collateral to add
-    function addCollateral(uint256 _amount) external {
+    function addCollateral(uint256 _amount) public {
         if (_amount == 0) {
             revert InvalidSize();
         }
@@ -541,6 +548,17 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         _mint(_msgSender(), _amount);
 
         emit CollateralAdded(_msgSender(), _amount);
+    }
+
+    /// @notice Add collateral to account using ERC-2612 permit (approve + deposit in one tx)
+    /// @param _amount Amount of collateral to add
+    /// @param _deadline Permit signature deadline
+    /// @param _v Permit signature v
+    /// @param _r Permit signature r
+    /// @param _s Permit signature s
+    function addCollateralWithPermit(uint256 _amount, uint256 _deadline, uint8 _v, bytes32 _r, bytes32 _s) external {
+        IERC20Permit(address(collateralToken)).permit(_msgSender(), address(this), _amount, _deadline, _v, _r, _s);
+        addCollateral(_amount);
     }
 
     /// @notice Remove collateral from account
@@ -606,6 +624,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
 
     /// @notice Liquidate an underwater position
     /// @param _user Address of the user to liquidate
+    /// @dev TODO: make partial liquidation
     function liquidate(address _user) external {
         if (!isLiquidatable(_user)) {
             revert NotLiquidatable();
@@ -628,13 +647,14 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             uint256 transferAmount = loss < userBalance ? loss : userBalance;
             if (transferAmount > 0) {
                 _transfer(_user, address(this), transferAmount);
-                reservePoolBalance += transferAmount;
+            }
+            if (transferAmount < loss) {
+                emit BadDebt(_user, loss - transferAmount);
             }
         } else if (pnl > 0) {
             // User has profits despite being underwater (shouldn't happen often)
             uint256 profit = uint256(pnl);
-            if (reservePoolBalance >= profit) {
-                reservePoolBalance -= profit;
+            if (balanceOf(address(this)) >= profit) {
                 _transfer(address(this), _user, profit);
             }
         }
@@ -680,26 +700,24 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             uint256 profit = uint256(pnl);
 
             // Ensure reserve pool has enough to cover the profit
-            if (reservePoolBalance < profit) {
+            if (balanceOf(address(this)) < profit) {
                 revert InsufficientReservePool();
             }
 
-            reservePoolBalance -= profit;
             _transfer(address(this), _user, profit);
         } else if (pnl < 0) {
             // User loses - transfer from user to reserve pool
             uint256 loss = uint256(-pnl);
             if (balanceOf(_user) >= loss) {
                 _transfer(_user, address(this), loss);
-                reservePoolBalance += loss;
             } else {
                 // Not enough balance - transfer what's available
                 uint256 available = balanceOf(_user);
                 if (available > 0) {
                     _transfer(_user, address(this), available);
-                    reservePoolBalance += available;
                 }
                 // Remaining loss is absorbed (user doesn't have enough collateral)
+                emit BadDebt(_user, loss - available);
             }
         }
     }
@@ -847,11 +865,26 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         return bestAsk;
     }
 
-    /// @notice Pay order fee
-    function _payOrderFee(address _participant) private {
-        if (orderFee > 0) {
-            _transfer(_participant, address(this), orderFee);
-            collectedFeesBalance += orderFee;
+    /// @notice Charge match fee to a participant (maker or taker)
+    /// @dev Fee is max(notional * feeBps / 10000, liquidationFee) — the liquidation fee
+    ///      acts as a floor to ensure every trade covers potential liquidation costs
+    /// @param _participant Address of the participant
+    /// @param _notionalValue Notional value of the matched trade
+    /// @param _isTaker Whether the participant is the taker
+    function _chargeMatchFee(address _participant, uint256 _notionalValue, bool _isTaker) private {
+        int16 feeBps = _isTaker ? takerFeeBps : makerFeeBps;
+        int256 fee = (int256(_notionalValue) * int256(feeBps)) / 10_000;
+
+        // Use liquidationFee as minimum fee for taker so every trade covers
+        // potential liquidation cost of one party
+        if (_isTaker && fee < int256(liquidationFee)) {
+            fee = int256(liquidationFee);
+        }
+
+        if (fee > 0) {
+            _transfer(_participant, address(this), uint256(fee));
+        } else if (fee < 0) {
+            _transfer(address(this), _participant, uint256(-fee));
         }
     }
 
@@ -882,12 +915,6 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         Position memory position = positions[_user];
         if (position.netQuantity == 0) return 0;
         return _calculatePositionPnl(position, getMarketPrice());
-    }
-
-    /// @notice Get user's net position size
-    /// @return netQuantity Net position quantity (positive = long, negative = short)
-    function getNetPositionSize(address _user) external view returns (int256 netQuantity) {
-        return positions[_user].netQuantity;
     }
 
     /// @notice Get order book depth (active price levels)
@@ -978,35 +1005,26 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         emit LiquidationFeeUpdated(_liquidationFee);
     }
 
-    /// @notice Set the order fee
-    function setOrderFee(uint256 _orderFee) external onlyOwner {
-        orderFee = _orderFee;
-        emit OrderFeeUpdated(_orderFee);
-    }
-
-    /// @notice Withdraw collected fees
-    function withdrawFees() external onlyOwner {
-        uint256 amount = collectedFeesBalance;
-        collectedFeesBalance = 0;
-        _burn(address(this), amount);
-        collateralToken.safeTransfer(owner(), amount);
+    /// @notice Set maker and taker fees in basis points
+    /// @param _takerFeeBps Taker fee (e.g., 5 = 0.05%)
+    /// @param _makerFeeBps Maker fee (e.g., 0 = 0%)
+    function setMatchFee(int16 _takerFeeBps, int16 _makerFeeBps) external onlyOwner {
+        takerFeeBps = _takerFeeBps;
+        makerFeeBps = _makerFeeBps;
+        emit MatchFeeUpdated(_takerFeeBps, _makerFeeBps);
     }
 
     /// @notice Deposit to reserve pool
     function depositReservePool(uint256 _amount) external {
-        collateralToken.safeTransferFrom(_msgSender(), address(this), _amount);
-        reservePoolBalance += _amount;
-        // Mint ERC20 tokens to contract so it can transfer them when users profit
         _mint(address(this), _amount);
+        collateralToken.safeTransferFrom(_msgSender(), address(this), _amount);
     }
 
     /// @notice Withdraw from reserve pool
     function withdrawReservePool(uint256 _amount) external onlyOwner {
-        if (_amount > reservePoolBalance) {
-            revert InsufficientCollateral();
+        if (_amount > balanceOf(address(this))) {
+            revert InsufficientReservePool();
         }
-        reservePoolBalance -= _amount;
-        // Burn ERC20 tokens from contract before withdrawing collateral
         _burn(address(this), _amount);
         collateralToken.safeTransfer(_msgSender(), _amount);
     }

@@ -11,7 +11,7 @@ export async function deployPerpsFixture() {
   const _usdcMock = await viem.deployContract("contracts/USDCMock.sol:USDCMock", []);
   const usdcMock = await viem.getContractAt(
     "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol:IERC20Metadata",
-    _usdcMock.address
+    _usdcMock.address,
   );
   const tokenDecimals = await usdcMock.read.decimals();
 
@@ -31,15 +31,18 @@ export async function deployPerpsFixture() {
   await usdcMock.write.transfer([seller.account.address, topUpBalanceUSDC]);
 
   // Configuration
-  const marginPercent = 10n; // 10% initial margin
-  const maintenanceMarginPercent = 5n; // 5% maintenance margin
-  const liquidationFee = parseUnits("1", tokenDecimals); // 10 USDC liquidation fee
+  const marginPercent = 10; // 10% initial margin
+  const maintenanceMarginPercent = 5; // 5% maintenance margin
+  const liquidationFee = parseUnits("1", tokenDecimals); // 1 USDC liquidation fee
   const minimumPriceIncrement = parseUnits("0.01", tokenDecimals); // 1 USDC price tick
-  const orderFee = parseUnits("1", tokenDecimals); // 1 USDC order fee
+  const takerFeeBps = 5n; // 0.05% taker fee
+  const makerFeeBps = 0n; // 0% maker fee
   const collateralAmount = parseUnits("100000", tokenDecimals); // Reserve pool initial deposit
 
   // Deploy PerpsSimple contract
-  const perpsImpl = await viem.deployContract("contracts/PerpsSimple.sol:PerpsSimple", []);
+  const perpsImpl = await viem.deployContract("contracts/PerpsSimple.sol:PerpsSimple", [
+    minimumPriceIncrement,
+  ]);
   const perpsProxy = await viem.deployContract("ERC1967Proxy", [
     perpsImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -48,18 +51,20 @@ export async function deployPerpsFixture() {
       args: [
         usdcMock.address,
         priceOracle.address,
-        marginPercent,
-        maintenanceMarginPercent,
-        liquidationFee,
-        minimumPriceIncrement,
+        Number(marginPercent),
+        Number(maintenanceMarginPercent),
       ],
     }),
   ]);
   const perps = await viem.getContractAt("PerpsSimple", perpsProxy.address);
   const quantityDecimals = await perps.read.QUANTITY_DECIMALS();
 
-  // Set order fee
-  await perps.write.setOrderFee([orderFee], { account: owner.account });
+  // Set fees
+  await perps.write.setMatchFee([Number(takerFeeBps), Number(makerFeeBps)], {
+    account: owner.account,
+  });
+
+  await perps.write.setLiquidationFee([liquidationFee], { account: owner.account });
 
   // Approve perps contract to spend USDC for all accounts
   await usdcMock.write.approve([perps.address, maxUint256], { account: seller.account });
@@ -82,7 +87,8 @@ export async function deployPerpsFixture() {
       maintenanceMarginPercent,
       liquidationFee,
       minimumPriceIncrement,
-      orderFee,
+      takerFeeBps,
+      makerFeeBps,
       collateralAmount,
       quantityDecimals,
       tokenDecimals,
@@ -103,8 +109,12 @@ export async function deployPerpsFixture() {
     utils: {
       getMinimumCollateral: (price: bigint, absQuantity: bigint) => {
         const orderValue = (price * absQuantity) / 10n ** BigInt(quantityDecimals);
-        const requiredMargin = (orderValue * marginPercent) / 100n;
-        return requiredMargin + orderFee;
+        const requiredMargin = (orderValue * BigInt(marginPercent)) / 100n;
+        // Add taker fee (charged at match time) so the user can afford the match
+        // liquidationFee acts as the minimum fee floor
+        const bpsFee = (orderValue * takerFeeBps) / 10000n;
+        const fee = bpsFee > liquidationFee ? bpsFee : liquidationFee;
+        return requiredMargin + fee;
       },
     },
   };
@@ -205,7 +215,7 @@ export async function deployPerpsWithLiquidatablePositionFixture() {
 
   // Get initial market price
   const initialPrice = await perps.read.getMarketPrice();
-  const qty = parseUnits("0.1", config.quantityDecimals);
+  const qty = parseUnits("1", config.quantityDecimals);
 
   // Add minimal collateral to seller (just enough to create position)
   const minCollateral = utils.getMinimumCollateral(initialPrice, qty);
@@ -235,8 +245,8 @@ export async function deployPerpsWithLiquidatablePositionFixture() {
     },
     // Helper function to make seller liquidatable by moving price up
     async makeLiquidatable() {
-      // Increase price by 50% to put short position underwater
-      const newPrice = (initialPrice * 150n) / 100n;
+      // Increase price x2 to put short position underwater
+      const newPrice = initialPrice * 2n;
       await priceOracle.write.setPrice([newPrice, config.oracle.decimals]);
       return newPrice;
     },

@@ -11,7 +11,7 @@ import {
   PositionLiquidated,
   CollateralAdded,
   CollateralRemoved,
-  OrderFeeUpdated,
+  MatchFeeUpdated,
   MarginPercentUpdated,
   MaintenanceMarginPercentUpdated,
   LiquidationFeeUpdated,
@@ -43,7 +43,8 @@ function getOrCreatePerps(): Perps {
     perps.maintenanceMarginPercent = 0;
     perps.liquidationFee = BigInt.zero();
     perps.minimumPriceIncrement = BigInt.zero();
-    perps.orderFee = BigInt.zero();
+    perps.takerFeeBps = 0;
+    perps.makerFeeBps = 0;
     perps.reservePoolBalance = BigInt.zero();
     perps.collectedFeesBalance = BigInt.zero();
     perps.totalUsers = 0;
@@ -91,19 +92,14 @@ function loadPerpsFromContract(perps: Perps): void {
     perps.minimumPriceIncrement = minimumPriceIncrement.value;
   }
 
-  const orderFee = contract.try_orderFee();
-  if (!orderFee.reverted) {
-    perps.orderFee = orderFee.value;
+  const takerFeeBps = contract.try_takerFeeBps();
+  if (!takerFeeBps.reverted) {
+    perps.takerFeeBps = takerFeeBps.value;
   }
 
-  const reservePoolBalance = contract.try_reservePoolBalance();
-  if (!reservePoolBalance.reverted) {
-    perps.reservePoolBalance = reservePoolBalance.value;
-  }
-
-  const collectedFeesBalance = contract.try_collectedFeesBalance();
-  if (!collectedFeesBalance.reverted) {
-    perps.collectedFeesBalance = collectedFeesBalance.value;
+  const makerFeeBps = contract.try_makerFeeBps();
+  if (!makerFeeBps.reverted) {
+    perps.makerFeeBps = makerFeeBps.value;
   }
 
   const quantityDecimals = contract.try_QUANTITY_DECIMALS();
@@ -530,10 +526,14 @@ export function handleCollateralRemoved(event: CollateralRemoved): void {
 
 // ============ Config Event Handlers ============
 
-export function handleOrderFeeUpdated(event: OrderFeeUpdated): void {
-  log.info("Order fee updated: {}", [event.params.newFee.toString()]);
+export function handleMatchFeeUpdated(event: MatchFeeUpdated): void {
+  log.info("Match fee updated: taker {} maker {}", [
+    event.params.newTakerFeeBps.toString(),
+    event.params.newMakerFeeBps.toString(),
+  ]);
   const perps = getOrCreatePerps();
-  perps.orderFee = event.params.newFee;
+  perps.takerFeeBps = event.params.newTakerFeeBps;
+  perps.makerFeeBps = event.params.newMakerFeeBps;
   perps.lastUpdatedAt = event.block.timestamp;
   perps.save();
 }
