@@ -1,17 +1,17 @@
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import { IERC20Permit } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
-import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
-import { StructuredLinkedList } from "solidity-linked-list/contracts/StructuredLinkedList.sol";
-import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import { ERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
-import { AggregatorV3Interface } from "./AggregatorV3Interface.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
+import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import {StructuredLinkedList} from "solidity-linked-list/contracts/StructuredLinkedList.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {ERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
+import {AggregatorV3Interface} from "./AggregatorV3Interface.sol";
 
 /// @title PerpsSimple
 /// @notice Simple perpetual trading contract with on-chain order book
@@ -27,6 +27,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
 
     // Constants
     uint256 private constant MAX_ORACLE_STALENESS = 3600; // 1 hour
+    uint8 public constant FUNDING_DECIMALS = 18;
     uint8 public constant MAX_ORDERS_PER_PARTICIPANT = 100;
     uint8 public constant QUANTITY_DECIMALS = 6;
     uint256 public immutable minimumPriceIncrement; // Minimum price increment for orders
@@ -63,6 +64,13 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     uint256 private __gap3;
     int16 public takerFeeBps; // Taker fee in basis points (e.g., 5 = 0.05%)
     int16 public makerFeeBps; // Maker fee in basis points (e.g., 0 = 0%)
+
+    // Funding state
+    int256 public cumulativeFundingPerUnit; // Global cumulative funding per unit (tokenDecimals * 10^FUNDING_DECIMALS)
+    uint256 public lastFundingUpdateTime; // Last timestamp funding was updated
+    uint256 public fundingRateMaxBps; // Max absolute funding rate per fundingPeriod in bps (e.g., 100 = 1%)
+    uint256 public fundingPeriod; // Period for max funding rate (e.g., 86400 = 24 hours)
+    mapping(address => int256) private userFundingSnapshot; // Per-user snapshot of cumulativeFundingPerUnit
 
     /// @notice Represents an order in the order book
     struct Order {
@@ -104,6 +112,9 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         address indexed user, address indexed liquidator, int256 positionSize, int256 pnl, uint256 liquidatorFee
     );
     event BadDebt(address indexed user, uint256 amount); // The user does not have enough collateral to cover the loss
+    event FundingUpdated(int256 fundingRate, int256 cumulativeFundingPerUnit, uint256 timestamp);
+    event FundingSettled(address indexed user, int256 amount);
+    event FundingParametersUpdated(uint256 maxBps, uint256 period);
 
     // Errors
     error InvalidPrice();
@@ -117,6 +128,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     error MaxOrdersPerParticipantReached();
     error NotLiquidatable();
     error InsufficientReservePool(); // The reserve pool does not have enough collateral to cover user profit
+    error InvalidFundingParameters();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(uint256 _minimumPriceIncrement) {
@@ -163,7 +175,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     }
 
     /// @notice Authorize upgrade (only owner)
-    function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 
     /// @notice Get current market price from oracle
     /// @return price The current price (scaled to collateral token decimals)
@@ -195,6 +207,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     /// @dev Buy orders match with asks at or below the limit price
     /// @dev Sell orders match with bids at or above the limit price
     function createOrder(uint256 _price, int256 _quantity) external {
+        _updateGlobalFunding();
         _validateQuantity(_quantity);
         _validatePrice(_price);
 
@@ -437,7 +450,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     function _createOrder(address _participant, uint256 _price, int256 _quantity) private returns (bytes32) {
         bytes32 orderId = keccak256(abi.encode(_participant, _price, _quantity, block.timestamp, nonce++));
         orders[orderId] =
-            Order({ participant: _participant, price: _price, quantity: _quantity, createdAt: block.timestamp });
+            Order({participant: _participant, price: _price, quantity: _quantity, createdAt: block.timestamp});
 
         // Update cached total order value for user
         userTotalOrderValue[_participant] += _calculateValue(_price, _abs(_quantity));
@@ -475,6 +488,9 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
 
     /// @notice Update a user's net position with aggregated entry price
     function _updateUserPosition(address _user, int256 _quantity, uint256 _tradePrice) private {
+        // Settle any pending funding at the old position size before changing it
+        _settleFunding(_user);
+
         Position storage position = positions[_user];
         int256 newNetQuantity = position.netQuantity + _quantity;
         uint256 absQuantity = _abs(_quantity);
@@ -484,6 +500,8 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             position.netQuantity = _quantity;
             position.aggregatedEntryPrice = _tradePrice;
             usersWithPositions.add(_user);
+            // Sync funding snapshot for the new position
+            userFundingSnapshot[_user] = cumulativeFundingPerUnit;
 
             emit PositionTrade(_user, _tradePrice, _quantity, newNetQuantity, _tradePrice);
             return;
@@ -605,6 +623,12 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
                 requiredMarginForPosition += uint256(-unrealizedPnl);
             }
 
+            // Add pending funding owed to margin requirement
+            int256 pendingFunding = getPendingFunding(_user);
+            if (pendingFunding > 0) {
+                requiredMarginForPosition += uint256(pendingFunding);
+            }
+
             totalMargin += requiredMarginForPosition;
         }
 
@@ -626,6 +650,10 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     /// @param _user Address of the user to liquidate
     /// @dev TODO: make partial liquidation
     function liquidate(address _user) external {
+        // Update global funding and settle user's pending funding before liquidation
+        _updateGlobalFunding();
+        _settleFunding(_user);
+
         if (!isLiquidatable(_user)) {
             revert NotLiquidatable();
         }
@@ -751,6 +779,12 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             int256 unrealizedPnl = _calculatePositionPnl(position, currentPrice);
             if (unrealizedPnl < 0) {
                 requiredMarginForPosition += uint256(-unrealizedPnl);
+            }
+
+            // Add pending funding owed to margin requirement
+            int256 pendingFunding = getPendingFunding(_user);
+            if (pendingFunding > 0) {
+                requiredMarginForPosition += uint256(pendingFunding);
             }
 
             totalMargin += requiredMarginForPosition;
@@ -888,6 +922,134 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         }
     }
 
+    // ──────────────────────────────────────────────
+    // Funding
+    // ──────────────────────────────────────────────
+
+    /// @notice Compute the current cumulative funding per unit without writing state
+    /// @dev Uses the order-book mid-price as mark price and the oracle as index price.
+    ///      If either side of the book is empty, no additional funding accrues.
+    /// @return currentCumFunding The theoretical cumulative funding as of block.timestamp
+    function _getCurrentCumulativeFunding() private view returns (int256 currentCumFunding) {
+        currentCumFunding = cumulativeFundingPerUnit;
+
+        if (lastFundingUpdateTime == 0 || fundingPeriod == 0) return currentCumFunding;
+
+        uint256 timeElapsed = block.timestamp - lastFundingUpdateTime;
+        if (timeElapsed == 0) return currentCumFunding;
+
+        // Mark price = order-book mid-price
+        uint256 bestBid = getBestBidPrice();
+        uint256 bestAsk = getBestAskPrice();
+        if (bestBid == 0 || bestAsk == 0) return currentCumFunding;
+
+        uint256 markPrice = (bestBid + bestAsk) / 2;
+        uint256 indexPrice = getMarketPrice();
+
+        // fundingRate (scaled by 10^FUNDING_DECIMALS) = (mark - index) * 10^FUNDING_DECIMALS / index
+        int256 priceDiff = int256(markPrice) - int256(indexPrice);
+        int256 fundingRateScaled = (priceDiff * int256(10 ** FUNDING_DECIMALS)) / int256(indexPrice);
+
+        // Clamp to [-maxRate, maxRate]
+        int256 maxRateScaled = (int256(fundingRateMaxBps) * int256(10 ** FUNDING_DECIMALS)) / 10_000;
+        if (fundingRateScaled > maxRateScaled) fundingRateScaled = maxRateScaled;
+        if (fundingRateScaled < -maxRateScaled) fundingRateScaled = -maxRateScaled;
+
+        // deltaCumFunding (tokenDecimals * 10^FUNDING_DECIMALS) =
+        //   fundingRateScaled * indexPrice * timeElapsed / fundingPeriod
+        int256 deltaCumFunding = (fundingRateScaled * int256(indexPrice) * int256(timeElapsed)) / int256(fundingPeriod);
+
+        currentCumFunding += deltaCumFunding;
+    }
+
+    /// @notice Update the global cumulative funding rate (writes state)
+    /// @dev Called before any position-affecting operation.
+    function _updateGlobalFunding() private {
+        if (lastFundingUpdateTime == 0 || fundingPeriod == 0) return;
+
+        int256 newCumFunding = _getCurrentCumulativeFunding();
+
+        if (newCumFunding != cumulativeFundingPerUnit) {
+            // Derive the effective rate for the event
+            int256 delta = newCumFunding - cumulativeFundingPerUnit;
+            cumulativeFundingPerUnit = newCumFunding;
+            emit FundingUpdated(delta, newCumFunding, block.timestamp);
+        }
+
+        lastFundingUpdateTime = block.timestamp;
+    }
+
+    /// @notice Settle pending funding for a user against the reserve pool
+    /// @dev Must be called before any position change so funding is settled at the old size.
+    /// @param _user The user whose funding is being settled
+    function _settleFunding(address _user) private {
+        Position storage position = positions[_user];
+        if (position.netQuantity == 0) {
+            // No position – just sync snapshot so a new position starts clean
+            userFundingSnapshot[_user] = cumulativeFundingPerUnit;
+            return;
+        }
+
+        int256 delta = cumulativeFundingPerUnit - userFundingSnapshot[_user];
+        if (delta == 0) return;
+
+        // pendingFunding (in tokenDecimals) =
+        //   netQuantity * delta / (10^QUANTITY_DECIMALS * 10^FUNDING_DECIMALS)
+        // Positive = user owes, Negative = user receives
+        int256 pendingFunding =
+            (position.netQuantity * delta) / (int256(10 ** QUANTITY_DECIMALS) * int256(10 ** FUNDING_DECIMALS));
+
+        userFundingSnapshot[_user] = cumulativeFundingPerUnit;
+
+        if (pendingFunding == 0) return;
+
+        if (pendingFunding > 0) {
+            // User owes funding – transfer from user to reserve pool
+            uint256 owed = uint256(pendingFunding);
+            uint256 userBalance = balanceOf(_user);
+            if (userBalance >= owed) {
+                _transfer(_user, address(this), owed);
+            } else {
+                // Pay what the user has; remainder becomes implicit bad debt
+                // (user will likely be liquidated soon)
+                if (userBalance > 0) {
+                    _transfer(_user, address(this), userBalance);
+                }
+                emit BadDebt(_user, owed - userBalance);
+            }
+        } else {
+            // User receives funding – transfer from reserve pool to user
+            uint256 owed = uint256(-pendingFunding);
+            uint256 reserveBalance = balanceOf(address(this));
+            uint256 payout = owed < reserveBalance ? owed : reserveBalance;
+            if (payout > 0) {
+                _transfer(address(this), _user, payout);
+            }
+        }
+
+        emit FundingSettled(_user, pendingFunding);
+    }
+
+    /// @notice Trigger a funding-rate update (callable by anyone / keepers)
+    /// @dev Useful during idle periods to keep the cumulative funding current.
+    function updateFunding() external {
+        _updateGlobalFunding();
+    }
+
+    /// @notice Get the pending (unsettled) funding for a user
+    /// @param _user Address of the user
+    /// @return pendingFunding Positive = user owes, negative = user receives (in collateral token units)
+    function getPendingFunding(address _user) public view returns (int256) {
+        Position memory position = positions[_user];
+        if (position.netQuantity == 0) return 0;
+
+        int256 currentCumFunding = _getCurrentCumulativeFunding();
+        int256 delta = currentCumFunding - userFundingSnapshot[_user];
+        if (delta == 0) return 0;
+
+        return (position.netQuantity * delta) / (int256(10 ** QUANTITY_DECIMALS) * int256(10 ** FUNDING_DECIMALS));
+    }
+
     // View functions
 
     /// @notice Get order details
@@ -910,11 +1072,14 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         return usersWithPositions.values();
     }
 
-    /// @notice Get total unrealized PnL for a user
+    /// @notice Get total unrealized PnL for a user (including pending funding)
     function getUnrealizedPnl(address _user) external view returns (int256) {
         Position memory position = positions[_user];
         if (position.netQuantity == 0) return 0;
-        return _calculatePositionPnl(position, getMarketPrice());
+        int256 pnl = _calculatePositionPnl(position, getMarketPrice());
+        // Subtract pending funding (positive funding = user owes = reduces PnL)
+        pnl -= getPendingFunding(_user);
+        return pnl;
     }
 
     /// @notice Get order book depth (active price levels)
@@ -1012,6 +1177,28 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         takerFeeBps = _takerFeeBps;
         makerFeeBps = _makerFeeBps;
         emit MatchFeeUpdated(_takerFeeBps, _makerFeeBps);
+    }
+
+    /// @notice Set funding rate parameters
+    /// @param _fundingRateMaxBps Max absolute funding rate per period in basis points (e.g., 100 = 1%)
+    /// @param _fundingPeriod Time period for max funding rate in seconds (e.g., 86400 = 24 hours)
+    function setFundingParameters(uint256 _fundingRateMaxBps, uint256 _fundingPeriod) external onlyOwner {
+        if (_fundingPeriod == 0) {
+            revert InvalidFundingParameters();
+        }
+
+        // Settle any accrued funding before changing parameters
+        _updateGlobalFunding();
+
+        fundingRateMaxBps = _fundingRateMaxBps;
+        fundingPeriod = _fundingPeriod;
+
+        // Initialize timestamp on first call to prevent retroactive accrual
+        if (lastFundingUpdateTime == 0) {
+            lastFundingUpdateTime = block.timestamp;
+        }
+
+        emit FundingParametersUpdated(_fundingRateMaxBps, _fundingPeriod);
     }
 
     /// @notice Deposit to reserve pool
