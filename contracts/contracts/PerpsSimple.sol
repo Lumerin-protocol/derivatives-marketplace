@@ -1,17 +1,17 @@
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
-import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
-import {StructuredLinkedList} from "solidity-linked-list/contracts/StructuredLinkedList.sol";
-import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import {ERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
-import {AggregatorV3Interface} from "./AggregatorV3Interface.sol";
+import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import { IERC20Permit } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
+import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import { StructuredLinkedList } from "solidity-linked-list/contracts/StructuredLinkedList.sol";
+import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import { ERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
+import { AggregatorV3Interface } from "./AggregatorV3Interface.sol";
 
 /// @title PerpsSimple
 /// @notice Simple perpetual trading contract with on-chain order book
@@ -30,6 +30,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     uint8 public constant FUNDING_DECIMALS = 18;
     uint8 public constant MAX_ORDERS_PER_PARTICIPANT = 100;
     uint8 public constant QUANTITY_DECIMALS = 6;
+    uint256 public constant MAX_PRICE_LEVELS_PER_SIDE = 200; // Max active price levels per side (bid/ask)
     uint256 public immutable minimumPriceIncrement; // Minimum price increment for orders
 
     // State variables
@@ -48,7 +49,6 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     mapping(uint256 => StructuredLinkedList.List) private priceOrdersLongQueue; // FIFO queue of long orders by price
     mapping(uint256 => StructuredLinkedList.List) private priceOrdersShortQueue; // FIFO queue of short orders by price
     mapping(address => EnumerableSet.Bytes32Set) private participantOrderIdsIndex; // Orders by participant
-    mapping(address => mapping(uint256 => EnumerableSet.Bytes32Set)) private participantPriceOrderIdsIndex; // Orders by participant and price
     mapping(address => uint256) private userTotalOrderValue; // Cached total order value per user
 
     // Price level tracking for limit order matching
@@ -71,6 +71,9 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     uint256 public fundingRateMaxBps; // Max absolute funding rate per fundingPeriod in bps (e.g., 100 = 1%)
     uint256 public fundingPeriod; // Period for max funding rate (e.g., 86400 = 24 hours)
     mapping(address => int256) private userFundingSnapshot; // Per-user snapshot of cumulativeFundingPerUnit
+
+    // Order book limits
+    uint256 public minimumMarginPerOrder; // Minimum margin (collateral) locked per resting order (0 = no minimum)
 
     /// @notice Represents an order in the order book
     struct Order {
@@ -115,6 +118,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     event FundingUpdated(int256 fundingRate, int256 cumulativeFundingPerUnit, uint256 timestamp);
     event FundingSettled(address indexed user, int256 amount);
     event FundingParametersUpdated(uint256 maxBps, uint256 period);
+    event MinimumMarginPerOrderUpdated(uint256 newMinimumMarginPerOrder);
 
     // Errors
     error InvalidPrice();
@@ -129,6 +133,8 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     error NotLiquidatable();
     error InsufficientReservePool(); // The reserve pool does not have enough collateral to cover user profit
     error InvalidFundingParameters();
+    error OrderMarginTooLow(); // Order margin is below minimumMarginPerOrder
+    error MaxPriceLevelsReached(); // Too many active price levels on one side of the book
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(uint256 _minimumPriceIncrement) {
@@ -175,7 +181,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     }
 
     /// @notice Authorize upgrade (only owner)
-    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
 
     /// @notice Get current market price from oracle
     /// @return price The current price (scaled to collateral token decimals)
@@ -216,26 +222,30 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         // Track remaining quantity to be placed/matched
         int256 remainingQuantity = _quantity;
 
-        // First, offset user's own opposite orders that would match
-        remainingQuantity = _offsetUserOppositeOrders(_msgSender(), _price, remainingQuantity, isBuy);
-
         // Match with opposite orders using limit price logic
         remainingQuantity = _matchWithOppositeOrders(_msgSender(), _price, remainingQuantity, isBuy);
 
         // If there's remaining quantity, add order to book
         if (remainingQuantity != 0) {
+            // Validate minimum margin per resting order
+            if (minimumMarginPerOrder > 0) {
+                uint256 restingValue = _calculateValue(_price, _abs(remainingQuantity));
+                uint256 restingMargin = (restingValue * marginPercent) / 100;
+                if (restingMargin < minimumMarginPerOrder) {
+                    revert OrderMarginTooLow();
+                }
+            }
+
             EnumerableSet.Bytes32Set storage participantOrders = participantOrderIdsIndex[_msgSender()];
             if (participantOrders.length() >= MAX_ORDERS_PER_PARTICIPANT) {
                 revert MaxOrdersPerParticipantReached();
             }
 
             StructuredLinkedList.List storage orderQueue = _priceOrderIds(_price, isBuy);
-            EnumerableSet.Bytes32Set storage userOrderIdsAtPrice = participantPriceOrderIdsIndex[_msgSender()][_price];
 
             bytes32 orderId = _createOrder(_msgSender(), _price, remainingQuantity);
             orderQueue.pushBack(uint256(orderId));
             participantOrders.add(orderId);
-            userOrderIdsAtPrice.add(orderId);
 
             // Add price level to sorted list
             _addPriceLevel(_price, isBuy);
@@ -243,59 +253,6 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
 
         // Check margin requirement
         _ensureSufficientMargin(_msgSender());
-    }
-
-    /// @notice Offset user's own opposite orders that would match at limit price
-    /// @return remainingQuantity The remaining quantity after offsetting
-    function _offsetUserOppositeOrders(address _user, uint256 _limitPrice, int256 _quantity, bool _isBuy)
-        private
-        returns (int256 remainingQuantity)
-    {
-        remainingQuantity = _quantity;
-
-        StructuredLinkedList.List storage oppositePrices = _isBuy ? activeAskPrices : activeBidPrices;
-        if (oppositePrices.sizeOf() == 0) return remainingQuantity;
-
-        (, uint256 currentPrice) = oppositePrices.getNextNode(0);
-
-        while (currentPrice != 0 && remainingQuantity != 0) {
-            if (_isBuy && currentPrice > _limitPrice) break;
-            if (!_isBuy && currentPrice < _limitPrice) break;
-
-            remainingQuantity = _offsetOrdersAtPrice(_user, currentPrice, remainingQuantity);
-            (, currentPrice) = oppositePrices.getNextNode(currentPrice);
-        }
-
-        return remainingQuantity;
-    }
-
-    /// @notice Offset user's orders at a specific price level
-    function _offsetOrdersAtPrice(address _user, uint256 _price, int256 _remainingQty) private returns (int256) {
-        EnumerableSet.Bytes32Set storage userOrdersAtPrice = participantPriceOrderIdsIndex[_user][_price];
-
-        for (uint256 i = userOrdersAtPrice.length(); i > 0 && _remainingQty != 0; i--) {
-            bytes32 orderId = userOrdersAtPrice.at(i - 1);
-            Order storage order = orders[orderId];
-
-            if (_isOppositeSign(order.quantity, _remainingQty)) {
-                uint256 offsetAmt = _min(_abs(order.quantity), _abs(_remainingQty));
-
-                // Update cached order value
-                userTotalOrderValue[_user] -= _calculateValue(order.price, offsetAmt);
-
-                order.quantity = _reduceQuantity(order.quantity, offsetAmt);
-                _remainingQty = _reduceQuantity(_remainingQty, offsetAmt);
-
-                if (order.quantity == 0) {
-                    _removeOrder(orderId, order);
-                    emit OrderFilled(orderId, _user);
-                } else {
-                    emit OrderUpdated(orderId, _user, order.quantity);
-                }
-            }
-        }
-
-        return _remainingQty;
     }
 
     /// @notice Match incoming order with opposite orders using limit price logic
@@ -335,13 +292,8 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             bytes32 orderId = bytes32(orderIdUint);
             Order storage order = orders[orderId];
 
-            // Skip own orders (already handled in offset)
-            if (order.participant == _taker) {
-                (, uint256 nextId) = orderQueue.getNextNode(orderIdUint);
-                if (nextId == 0) break;
-                continue;
-            }
-
+            // Self-trades are allowed — user pays fees, position nets out.
+            // Users can cancelOrder() beforehand if they don't want to self-trade.
             _remainingQty = _executeMatch(_taker, orderId, order, _remainingQty);
         }
 
@@ -434,7 +386,6 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         orderQueue.remove(uint256(_orderId));
 
         participantOrderIdsIndex[order.participant].remove(_orderId);
-        participantPriceOrderIdsIndex[order.participant][order.price].remove(_orderId);
 
         // Calculate and subtract order value from cached total
         uint256 orderValue = _calculateValue(order.price, _abs(order.quantity));
@@ -450,7 +401,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     function _createOrder(address _participant, uint256 _price, int256 _quantity) private returns (bytes32) {
         bytes32 orderId = keccak256(abi.encode(_participant, _price, _quantity, block.timestamp, nonce++));
         orders[orderId] =
-            Order({participant: _participant, price: _price, quantity: _quantity, createdAt: block.timestamp});
+            Order({ participant: _participant, price: _price, quantity: _quantity, createdAt: block.timestamp });
 
         // Update cached total order value for user
         userTotalOrderValue[_participant] += _calculateValue(_price, _abs(_quantity));
@@ -837,6 +788,11 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             return;
         }
 
+        // Enforce max price levels per side
+        if (priceList.sizeOf() >= MAX_PRICE_LEVELS_PER_SIDE) {
+            revert MaxPriceLevelsReached();
+        }
+
         // Find insertion point for sorted order
         // Bids: highest first (descending), Asks: lowest first (ascending)
         if (priceList.sizeOf() == 0) {
@@ -1177,6 +1133,13 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         takerFeeBps = _takerFeeBps;
         makerFeeBps = _makerFeeBps;
         emit MatchFeeUpdated(_takerFeeBps, _makerFeeBps);
+    }
+
+    /// @notice Set minimum margin per resting order (in collateral token units)
+    /// @param _minimumMarginPerOrder Minimum margin locked per resting order (0 = no minimum)
+    function setMinimumMarginPerOrder(uint256 _minimumMarginPerOrder) external onlyOwner {
+        minimumMarginPerOrder = _minimumMarginPerOrder;
+        emit MinimumMarginPerOrderUpdated(_minimumMarginPerOrder);
     }
 
     /// @notice Set funding rate parameters

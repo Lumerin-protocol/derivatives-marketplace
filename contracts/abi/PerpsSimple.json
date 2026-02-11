@@ -180,6 +180,11 @@
   },
   {
     "inputs": [],
+    "name": "MaxPriceLevelsReached",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "NotInitializing",
     "type": "error"
   },
@@ -191,6 +196,11 @@
   {
     "inputs": [],
     "name": "OracleStale",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "OrderMarginTooLow",
     "type": "error"
   },
   {
@@ -461,6 +471,19 @@
       }
     ],
     "name": "MatchFeeUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "newMinimumMarginPerOrder",
+        "type": "uint256"
+      }
+    ],
+    "name": "MinimumMarginPerOrderUpdated",
     "type": "event"
   },
   {
@@ -771,6 +794,19 @@
         "internalType": "uint8",
         "name": "",
         "type": "uint8"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "MAX_PRICE_LEVELS_PER_SIDE",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
       }
     ],
     "stateMutability": "view",
@@ -1418,6 +1454,19 @@
   },
   {
     "inputs": [],
+    "name": "minimumMarginPerOrder",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "minimumPriceIncrement",
     "outputs": [
       {
@@ -1572,6 +1621,19 @@
       }
     ],
     "name": "setMatchFee",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_minimumMarginPerOrder",
+        "type": "uint256"
+      }
+    ],
+    "name": "setMinimumMarginPerOrder",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"

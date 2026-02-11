@@ -175,8 +175,8 @@ describe("PerpsSimple - createOrder", function () {
     });
   });
 
-  describe("Self-Order Offset", function () {
-    it("should offset own opposite orders at matching prices", async function () {
+  describe("Self-Trade", function () {
+    it("should self-trade own opposite orders at matching prices", async function () {
       const { contracts, accounts, config } = await loadFixture(deployPerpsWithCollateralFixture);
       const { perps } = contracts;
       const { buyer } = accounts;
@@ -193,21 +193,21 @@ describe("PerpsSimple - createOrder", function () {
       let orders = await perps.read.getUserOrders([buyer.account.address]);
       expect(orders.length).to.equal(1);
 
-      // Place a sell order at same price - should offset
+      // Place a sell order at same price - self-trades, nets to zero
       await perps.write.createOrder([price, -qty], {
         account: buyer.account,
       });
 
-      // Orders should be canceled out
+      // Orders should be consumed by self-trade
       orders = await perps.read.getUserOrders([buyer.account.address]);
       expect(orders.length).to.equal(0);
 
-      // No position should be created (just offset)
+      // No net position (self-trade: +1 then -1 = 0)
       const position = await perps.read.getUserPosition([buyer.account.address]);
       expect(position.netQuantity).to.equal(0n);
     });
 
-    it("should partially offset own orders", async function () {
+    it("should partially self-trade own orders", async function () {
       const { contracts, accounts } = await loadFixture(deployPerpsWithCollateralFixture);
       const { perps } = contracts;
       const { buyer } = accounts;
@@ -222,7 +222,7 @@ describe("PerpsSimple - createOrder", function () {
         account: buyer.account,
       });
 
-      // Place a sell order for 1 unit at same price - should partially offset
+      // Place a sell order for 1 unit at same price - partially self-trades
       await perps.write.createOrder([price, -BigInt(halfQty)], {
         account: buyer.account,
       });
