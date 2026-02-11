@@ -5,21 +5,57 @@
 # SECURITY GROUPS
 ################################
 
-# Dedicated security group for PerpsKeeper ECS tasks
+# Security group for internal ALB
+resource "aws_security_group" "perpskeeper_alb_use1" {
+  count       = var.perpskeeper_service.create ? 1 : 0
+  provider    = aws.use1
+  name        = "perpskeeper-alb-${substr(var.account_shortname, 8, 3)}"
+  description = "Security group for PerpsKeeper internal ALB"
+  vpc_id      = data.aws_vpc.use1_1.id
+
+  # Allow HTTPS from VPC and VPN
+  ingress {
+    description = "HTTPS from VPC and VPN"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = [data.aws_vpc.use1_1.cidr_block, "172.18.0.0/19"] # VPC + VPN
+  }
+
+  # Allow all outbound
+  egress {
+    description = "Allow all outbound"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(
+    var.default_tags,
+    var.foundation_tags,
+    {
+      Name       = "PerpsKeeper ALB Security Group",
+      Capability = null,
+    },
+  )
+}
+
+# Security group for PerpsKeeper ECS tasks
 resource "aws_security_group" "perpskeeper_ecs_use1" {
   count       = var.perpskeeper_service.create ? 1 : 0
   provider    = aws.use1
-  name        = "perpskeeper-ecs-v2-${substr(var.account_shortname, 8, 3)}"
+  name        = "perpskeeper-ecs-${substr(var.account_shortname, 8, 3)}"
   description = "Security group for PerpsKeeper ECS tasks"
   vpc_id      = data.aws_vpc.use1_1.id
 
-  # Allow health endpoint access from VPC and VPN
+  # Allow HTTP from ALB
   ingress {
-    description = "HTTP health endpoint from VPC and VPN"
-    from_port   = var.perpskeeper_service.cnt_port
-    to_port     = var.perpskeeper_service.cnt_port
-    protocol    = "tcp"
-    cidr_blocks = [data.aws_vpc.use1_1.cidr_block, "172.18.0.0/19"] # VPC + VPN
+    description     = "HTTP from ALB"
+    from_port       = var.perpskeeper_service.cnt_port
+    to_port         = var.perpskeeper_service.cnt_port
+    protocol        = "tcp"
+    security_groups = [aws_security_group.perpskeeper_alb_use1[count.index].id]
   }
 
   # Allow all outbound (for Ethereum RPC and blockchain access)
@@ -62,67 +98,101 @@ resource "aws_cloudwatch_log_group" "perpskeeper_use1" {
 }
 
 ################################
-# SERVICE DISCOVERY (CLOUD MAP)
+# APPLICATION LOAD BALANCER (INTERNAL)
 ################################
 
-# Service discovery namespace for internal services
-resource "aws_service_discovery_private_dns_namespace" "internal" {
-  count       = var.perpskeeper_service.create ? 1 : 0
-  provider    = aws.use1
-  name        = "internal"
-  description = "Private namespace for ECS service discovery"
-  vpc         = data.aws_vpc.use1_1.id
+# Internal ALB
+resource "aws_alb" "perpskeeper_int_use1" {
+  count                      = var.perpskeeper_service.create ? 1 : 0
+  provider                   = aws.use1
+  name                       = "alb-perps-keeper-${substr(var.account_shortname, 8, 3)}"
+  internal                   = true
+  load_balancer_type         = "application"
+  security_groups            = [aws_security_group.perpskeeper_alb_use1[count.index].id]
+  subnets                    = [for m in data.aws_subnet.middle_use1_1 : m.id]
+  enable_deletion_protection = false
 
   tags = merge(
     var.default_tags,
     var.foundation_tags,
     {
-      Name       = "ECS Service Discovery Namespace",
+      Name       = "PerpsKeeper Internal ALB",
       Capability = null,
     },
   )
 }
 
-# Register keeper service in service discovery
-resource "aws_service_discovery_service" "perpskeeper_use1" {
-  count    = var.perpskeeper_service.create ? 1 : 0
-  provider = aws.use1
-  name     = var.perpskeeper_service.svc_name  # "perps-keeper"
+# Target group
+resource "aws_alb_target_group" "perpskeeper_int_use1" {
+  count                         = var.perpskeeper_service.create ? 1 : 0
+  provider                      = aws.use1
+  name                          = "tg-perps-keeper-${substr(var.account_shortname, 8, 3)}"
+  port                          = tonumber(var.perpskeeper_service.cnt_port)
+  protocol                      = "HTTP"
+  vpc_id                        = data.aws_vpc.use1_1.id
+  target_type                   = "ip"
+  load_balancing_algorithm_type = "round_robin"
+  deregistration_delay          = "10"
 
-  dns_config {
-    namespace_id = aws_service_discovery_private_dns_namespace.internal[count.index].id
-    
-    dns_records {
-      ttl  = 10
-      type = "A"
-    }
-
-    routing_policy = "MULTIVALUE"
-  }
-
-  health_check_custom_config {
-    failure_threshold = 1
+  health_check {
+    enabled             = true
+    interval            = 30
+    path                = "/health"
+    port                = var.perpskeeper_service.cnt_port
+    protocol            = "HTTP"
+    timeout             = 5
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
   }
 
   tags = merge(
     var.default_tags,
     var.foundation_tags,
     {
-      Name       = "PerpsKeeper Service Discovery",
+      Name       = "PerpsKeeper Target Group",
       Capability = null,
     },
   )
 }
 
-# Create CNAME in public zone: keeper.dev.lumerin.io -> perps-keeper.internal
-resource "aws_route53_record" "perpskeeper_public_cname" {
+# HTTPS Listener
+resource "aws_alb_listener" "perpskeeper_int_443_use1" {
+  count             = var.perpskeeper_service.create ? 1 : 0
+  provider          = aws.use1
+  load_balancer_arn = aws_alb.perpskeeper_int_use1[count.index].arn
+  port              = "443"
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-FS-1-2-Res-2020-10"
+  certificate_arn   = data.aws_acm_certificate.lumerin_marketplace_ext.arn
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_alb_target_group.perpskeeper_int_use1[count.index].arn
+  }
+
+  tags = merge(
+    var.default_tags,
+    var.foundation_tags,
+    {
+      Name       = "PerpsKeeper HTTPS Listener",
+      Capability = null,
+    },
+  )
+}
+
+# Route53 record
+resource "aws_route53_record" "perpskeeper_int_use1" {
   count    = var.perpskeeper_service.create ? 1 : 0
   provider = aws.use1
   zone_id  = data.aws_route53_zone.public_lumerin.zone_id
-  name     = "${var.perpskeeper_service.dns_name}.${data.aws_route53_zone.public_lumerin.name}"
-  type     = "CNAME"
-  ttl      = 60
-  records  = ["${var.perpskeeper_service.svc_name}.${aws_service_discovery_private_dns_namespace.internal[count.index].name}"]
+  name     = "keeper.${data.aws_route53_zone.public_lumerin.name}"
+  type     = "A"
+
+  alias {
+    name                   = aws_alb.perpskeeper_int_use1[count.index].dns_name
+    zone_id                = aws_alb.perpskeeper_int_use1[count.index].zone_id
+    evaluate_target_health = true
+  }
 }
 
 ################################
@@ -142,8 +212,8 @@ resource "aws_ecs_service" "perpskeeper_use1" {
   propagate_tags         = "SERVICE"
   enable_execute_command = true
 
-  # Liquidation keeper: Only one instance can be active at a time
-  # Kill old task before starting new one (recreate deployment strategy)
+  # Liquidation keeper: Only one instance active at a time
+  # Recreate deployment strategy to avoid duplicate liquidations
   deployment_minimum_healthy_percent = 0   # Allow stopping all old tasks
   deployment_maximum_percent         = 100 # Only run desired_count (1 task max)
 
@@ -158,9 +228,11 @@ resource "aws_ecs_service" "perpskeeper_use1" {
     security_groups  = [aws_security_group.perpskeeper_ecs_use1[count.index].id]
   }
 
-  # Service Discovery configuration
-  service_registries {
-    registry_arn = aws_service_discovery_service.perpskeeper_use1[count.index].arn
+  # Load balancer configuration
+  load_balancer {
+    target_group_arn = aws_alb_target_group.perpskeeper_int_use1[count.index].arn
+    container_name   = "${var.perpskeeper_service.cnt_name}-container"
+    container_port   = var.perpskeeper_service.cnt_port
   }
 
   tags = merge(
@@ -281,17 +353,22 @@ resource "aws_ecs_task_definition" "perpskeeper_use1" {
 # ACCESS INFORMATION
 ################################
 
-# The PerpsKeeper service is accessible via:
-#   DEV: http://keeper.dev.lumerin.io:3000/health
-#   STG: http://keeper.stg.lumerin.io:3000/health
-#   LMN: http://keeper.lmn.lumerin.io:3000/health
+# The PerpsKeeper service is accessible via internal ALB:
+#   DEV: https://keeper.dev.lumerin.io/health
+#   STG: https://keeper.stg.lumerin.io/health
+#   LMN: https://keeper.lmn.lumerin.io/health
 #
-# Access is restricted by security group to:
+# Access is restricted by ALB security group to:
 #   - VPC CIDR: data.aws_vpc.use1_1.cidr_block
 #   - VPN CIDR: 172.18.0.0/19
 #
-# DNS Resolution:
-#   keeper.{env}.lumerin.io (CNAME in public zone)
-#     -> perps-keeper.internal (service discovery A record)
-#       -> Task private IP (auto-updated on task restart)
+# Architecture:
+#   keeper.{env}.lumerin.io (Route53 A record)
+#     -> Internal ALB (HTTPS:443)
+#       -> Target Group (health check: /health)
+#         -> ECS Task (HTTP:3000)
+#
+# Additional Monitoring:
+#   - CloudWatch Logs: /ecs/perps-keeper-{env}
+#   - ECS Console: Task status and metrics
 
