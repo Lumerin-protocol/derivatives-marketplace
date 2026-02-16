@@ -50,6 +50,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     mapping(uint256 => StructuredLinkedList.List) private priceOrdersLongQueue; // FIFO queue of long orders by price
     mapping(uint256 => StructuredLinkedList.List) private priceOrdersShortQueue; // FIFO queue of short orders by price
     mapping(address => EnumerableSet.Bytes32Set) private participantOrderIdsIndex; // Orders by participant
+    uint256 private __gap2;
     mapping(address => uint256) private userTotalOrderValue; // Cached total order value per user
 
     // Price level tracking for limit order matching
@@ -61,8 +62,8 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     EnumerableSet.AddressSet private usersWithPositions; // Users with active positions
 
     // Reserve and fees
-    uint256 private __gap2;
     uint256 private __gap3;
+    uint256 private __gap4;
     int16 public takerFeeBps; // Taker fee in basis points (e.g., 5 = 0.05%)
     int16 public makerFeeBps; // Maker fee in basis points (e.g., 0 = 0%)
 
