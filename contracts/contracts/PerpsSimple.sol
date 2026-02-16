@@ -12,6 +12,7 @@ import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils
 import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import { ERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
 import { AggregatorV3Interface } from "./AggregatorV3Interface.sol";
+// import { console } from "hardhat/console.sol";
 
 /// @title PerpsSimple
 /// @notice Simple perpetual trading contract with on-chain order book
@@ -223,7 +224,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         int256 remainingQuantity = _quantity;
 
         // Match with opposite orders using limit price logic
-        remainingQuantity = _matchWithOppositeOrders(_msgSender(), _price, remainingQuantity, isBuy);
+        remainingQuantity = _matchWithOppositeOrders(_msgSender(), _price, remainingQuantity);
 
         // If there's remaining quantity, add order to book
         if (remainingQuantity != 0) {
@@ -257,12 +258,12 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
 
     /// @notice Match incoming order with opposite orders using limit price logic
     /// @return remainingQuantity The remaining quantity after matching
-    function _matchWithOppositeOrders(address _taker, uint256 _limitPrice, int256 _quantity, bool _isBuy)
+    function _matchWithOppositeOrders(address _taker, uint256 _limitPrice, int256 _quantity)
         private
         returns (int256 remainingQuantity)
     {
         remainingQuantity = _quantity;
-
+        bool _isBuy = _quantity > 0;
         StructuredLinkedList.List storage oppositePrices = _isBuy ? activeAskPrices : activeBidPrices;
         if (oppositePrices.sizeOf() == 0) return remainingQuantity;
 
@@ -284,49 +285,47 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         private
         returns (int256)
     {
-        StructuredLinkedList.List storage orderQueue =
-            _isBuy ? priceOrdersShortQueue[_price] : priceOrdersLongQueue[_price];
+        StructuredLinkedList.List storage makerOrderQueue = _priceOrderIds(_price, !_isBuy);
 
-        while (_remainingQty != 0 && orderQueue.sizeOf() > 0) {
-            (, uint256 orderIdUint) = orderQueue.getNextNode(0);
-            bytes32 orderId = bytes32(orderIdUint);
-            Order storage order = orders[orderId];
+        while (_remainingQty != 0 && makerOrderQueue.sizeOf() > 0) {
+            (, uint256 orderIdUint) = makerOrderQueue.getNextNode(0);
+            bytes32 makerOrderId = bytes32(orderIdUint);
+            Order storage makerOrder = orders[makerOrderId];
 
             // Self-trades are allowed — user pays fees, position nets out.
             // Users can cancelOrder() beforehand if they don't want to self-trade.
-            _remainingQty = _executeMatch(_taker, orderId, order, _remainingQty);
+            _remainingQty = _executeMatch(_taker, makerOrderId, makerOrder, _remainingQty);
         }
 
         return _remainingQty;
     }
 
     /// @notice Execute a single order match
-    function _executeMatch(address _taker, bytes32 _orderId, Order storage _order, int256 _remainingQty)
+    function _executeMatch(address _taker, bytes32 _makerOrderId, Order storage _makerOrder, int256 _remainingQty)
         private
         returns (int256)
     {
-        uint256 matchAmt = _min(_abs(_order.quantity), _abs(_remainingQty));
+        uint256 matchAmt = _min(_abs(_makerOrder.quantity), _abs(_remainingQty));
         int256 matchQty = _toSignedQuantity(matchAmt, _remainingQty);
-        uint256 notionalValue = _calculateValue(_order.price, matchAmt);
+        uint256 notionalValue = _calculateValue(_makerOrder.price, matchAmt);
 
         // Execute at maker's price (price improvement for taker)
-        Order memory orderCopy = _order;
-        _createPosition(_orderId, orderCopy, _taker, _order.price, matchQty);
+        Order memory orderCopy = _makerOrder;
+        _createPosition(_makerOrderId, orderCopy, _taker, _makerOrder.price, matchQty);
 
         // Charge fees at match time
         _chargeMatchFee(_taker, notionalValue, true); // taker fee
-        _chargeMatchFee(_order.participant, notionalValue, false); // maker fee
+        _chargeMatchFee(_makerOrder.participant, notionalValue, false); // maker fee
 
         // Update cached order value
-        userTotalOrderValue[_order.participant] -= notionalValue;
+        userTotalOrderValue[_makerOrder.participant] -= notionalValue;
+        _makerOrder.quantity = _reduceQuantity(_makerOrder.quantity, matchAmt);
 
-        _order.quantity = _reduceQuantity(_order.quantity, matchAmt);
-
-        if (_order.quantity == 0) {
-            _removeOrder(_orderId, _order);
-            emit OrderFilled(_orderId, _order.participant);
+        if (_makerOrder.quantity == 0) {
+            emit OrderFilled(_makerOrderId, _makerOrder.participant);
+            _removeOrder(_makerOrderId, _makerOrder, orderCopy.quantity > 0);
         } else {
-            emit OrderUpdated(_orderId, _order.participant, _order.quantity);
+            emit OrderUpdated(_makerOrderId, _makerOrder.participant, _makerOrder.quantity);
         }
 
         return _remainingQty - matchQty;
@@ -375,14 +374,15 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             revert OrderNotBelongToSender();
         }
 
-        _removeOrder(_orderId, order);
+        _removeOrder(_orderId, order, order.quantity > 0);
         emit OrderCancelled(_orderId, order.participant);
     }
 
     /// @notice Remove an order from the book (internal)
-    function _removeOrder(bytes32 _orderId, Order memory order) private {
-        bool isBid = order.quantity > 0;
-        StructuredLinkedList.List storage orderQueue = _priceOrderIds(order.price, isBid);
+    /// @dev _isBid preserved because order.quantity could be zero
+    function _removeOrder(bytes32 _orderId, Order memory order, bool _isBid) private {
+        StructuredLinkedList.List storage orderQueue = _priceOrderIds(order.price, _isBid);
+
         orderQueue.remove(uint256(_orderId));
 
         participantOrderIdsIndex[order.participant].remove(_orderId);
@@ -394,7 +394,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         delete orders[_orderId];
 
         // Remove price level if no more orders at this price
-        _removePriceLevelIfEmpty(order.price, isBid);
+        _removePriceLevelIfEmpty(order.price, _isBid);
     }
 
     /// @notice Create a new order

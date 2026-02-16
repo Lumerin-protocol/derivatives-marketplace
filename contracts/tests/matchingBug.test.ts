@@ -27,7 +27,7 @@ describe("PerpsSimple - Self-Trade Behavior", function () {
 
     await perps.write.createOrder([price, -qty5], { account: userA.account }); // A: sell 5
     await perps.write.createOrder([price, -qty5], { account: userB.account }); // B: sell 5
-    await perps.write.createOrder([price, qty3], { account: userA.account });  // A: buy 3
+    await perps.write.createOrder([price, qty3], { account: userA.account }); // A: buy 3
 
     // A's sell reduced from 5 to 2 (partial fill via self-trade)
     const ordersA = await perps.read.getUserOrders([userA.account.address]);
@@ -60,7 +60,7 @@ describe("PerpsSimple - Self-Trade Behavior", function () {
 
     await perps.write.createOrder([price, -qty5], { account: userA.account }); // A: sell 5
     await perps.write.createOrder([price, -qty5], { account: userB.account }); // B: sell 5
-    await perps.write.createOrder([price, qty8], { account: userA.account });  // A: buy 8
+    await perps.write.createOrder([price, qty8], { account: userA.account }); // A: buy 8
 
     // A: sell consumed by self-trade, no resting orders
     expect((await perps.read.getUserOrders([userA.account.address])).length).to.equal(0);
@@ -87,7 +87,7 @@ describe("PerpsSimple - Self-Trade Behavior", function () {
 
     await perps.write.createOrder([price, -qty5], { account: userA.account }); // A: sell 5
     await perps.write.createOrder([price, -qty5], { account: userB.account }); // B: sell 5
-    await perps.write.createOrder([price, qty5], { account: userA.account });  // A: buy 5
+    await perps.write.createOrder([price, qty5], { account: userA.account }); // A: buy 5
 
     // A: sell consumed by self-trade, no resting orders
     expect((await perps.read.getUserOrders([userA.account.address])).length).to.equal(0);
@@ -157,9 +157,9 @@ describe("PerpsSimple - Self-Trade Behavior", function () {
     const qty6 = parseUnits("6", config.quantityDecimals);
     const qty1 = parseUnits("1", config.quantityDecimals);
 
-    await perps.write.createOrder([price, -qty2], { account: userA.account });        // A: sell 2 @ P
-    await perps.write.createOrder([price + tick, -qty2], { account: userA.account });  // A: sell 2 @ P+1
-    await perps.write.createOrder([price, -qty5], { account: userB.account });         // B: sell 5 @ P
+    await perps.write.createOrder([price, -qty2], { account: userA.account }); // A: sell 2 @ P
+    await perps.write.createOrder([price + tick, -qty2], { account: userA.account }); // A: sell 2 @ P+1
+    await perps.write.createOrder([price, -qty5], { account: userB.account }); // B: sell 5 @ P
 
     // A places BUY 6 at P+tick
     // At price P: self-trade A(2), match B(4). Buy fully consumed. Never reaches P+1.
@@ -181,5 +181,33 @@ describe("PerpsSimple - Self-Trade Behavior", function () {
     expect(posA.netQuantity).to.equal(qty4);
     expect(posB.netQuantity).to.equal(-qty4);
     expect(posA.aggregatedEntryPrice).to.equal(price); // executed at maker's price (B's ask = P)
+  });
+
+  it("matching bug: should correctly update quantity and perform matching correctly", async function () {
+    const { contracts, accounts, config } = await loadFixture(deployPerpsWithCollateralFixture);
+    const { perps } = contracts;
+    const { seller: userA, buyer: userB } = accounts;
+
+    const price = await perps.read.getMarketPrice();
+    const tick = config.minimumPriceIncrement;
+    const qty = parseUnits("1", config.quantityDecimals);
+
+    await perps.write.createOrder([price + tick, 1n * qty], { account: userB.account });
+    await perps.write.createOrder([price, -2n * qty], { account: userA.account });
+
+    const positionA = await perps.read.getUserPosition([userA.account.address]);
+    const positionB = await perps.read.getUserPosition([userB.account.address]);
+
+    const ordersA = await perps.read.getUserOrders([userA.account.address]);
+    const orderBook = await perps.read.getOrderBookPrices([10n]);
+    const quantityAtPrice = await perps.read.getQuantityAtPrice([price, false]);
+
+    expect(positionA.netQuantity).to.equal(-qty);
+    expect(positionB.netQuantity).to.equal(qty);
+    expect(positionA.aggregatedEntryPrice).to.equal(price + tick);
+    expect(positionB.aggregatedEntryPrice).to.equal(price + tick);
+    expect(ordersA.length).to.equal(1);
+    expect(quantityAtPrice).to.equal(qty);
+    expect(orderBook[1][0]).to.equal(price);
   });
 });
