@@ -15,6 +15,11 @@ import {
   MarginPercentUpdated,
   MaintenanceMarginPercentUpdated,
   LiquidationFeeUpdated,
+  FundingUpdated,
+  FundingSettled,
+  FundingParametersUpdated,
+  MinimumMarginPerOrderUpdated,
+  BadDebt,
   PerpsSimple as PerpsContract,
 } from "../generated/PerpsSimple/PerpsSimple";
 import {
@@ -27,6 +32,9 @@ import {
   Liquidation,
   CollateralEvent,
   PriceLevel,
+  FundingUpdate,
+  FundingSettlement,
+  BadDebtEvent,
 } from "../generated/schema";
 
 // ============ Helper Functions ============
@@ -45,6 +53,11 @@ function getOrCreatePerps(): Perps {
     perps.minimumPriceIncrement = BigInt.zero();
     perps.takerFeeBps = 0;
     perps.makerFeeBps = 0;
+    perps.fundingRateMaxBps = BigInt.zero();
+    perps.fundingPeriod = BigInt.zero();
+    perps.cumulativeFundingPerUnit = BigInt.zero();
+    perps.lastFundingUpdateTime = BigInt.zero();
+    perps.minimumMarginPerOrder = BigInt.zero();
     perps.reservePoolBalance = BigInt.zero();
     perps.collectedFeesBalance = BigInt.zero();
     perps.totalUsers = 0;
@@ -53,6 +66,7 @@ function getOrCreatePerps(): Perps {
     perps.totalTrades = 0;
     perps.totalVolume = BigInt.zero();
     perps.totalLiquidations = 0;
+    perps.totalBadDebt = BigInt.zero();
     perps.initializedAt = BigInt.zero();
     perps.lastUpdatedAt = BigInt.zero();
   }
@@ -106,6 +120,31 @@ function loadPerpsFromContract(perps: Perps): void {
   if (!quantityDecimals.reverted) {
     perps.quantityDecimals = quantityDecimals.value;
   }
+
+  const fundingRateMaxBps = contract.try_fundingRateMaxBps();
+  if (!fundingRateMaxBps.reverted) {
+    perps.fundingRateMaxBps = fundingRateMaxBps.value;
+  }
+
+  const fundingPeriod = contract.try_fundingPeriod();
+  if (!fundingPeriod.reverted) {
+    perps.fundingPeriod = fundingPeriod.value;
+  }
+
+  const cumulativeFundingPerUnit = contract.try_cumulativeFundingPerUnit();
+  if (!cumulativeFundingPerUnit.reverted) {
+    perps.cumulativeFundingPerUnit = cumulativeFundingPerUnit.value;
+  }
+
+  const lastFundingUpdateTime = contract.try_lastFundingUpdateTime();
+  if (!lastFundingUpdateTime.reverted) {
+    perps.lastFundingUpdateTime = lastFundingUpdateTime.value;
+  }
+
+  const minimumMarginPerOrder = contract.try_minimumMarginPerOrder();
+  if (!minimumMarginPerOrder.reverted) {
+    perps.minimumMarginPerOrder = minimumMarginPerOrder.value;
+  }
 }
 
 function getOrCreateUser(address: Address, timestamp: BigInt): User {
@@ -122,6 +161,8 @@ function getOrCreateUser(address: Address, timestamp: BigInt): User {
     user.activeOrderCount = 0;
     user.tradeCount = 0;
     user.realizedPnl = BigInt.zero();
+    user.totalFundingPaid = BigInt.zero();
+    user.totalFundingReceived = BigInt.zero();
     user.trades = [];
     user.createdAt = timestamp;
     user.lastActivityAt = timestamp;
@@ -524,6 +565,80 @@ export function handleCollateralRemoved(event: CollateralRemoved): void {
   user.save();
 }
 
+// ============ Funding Event Handlers ============
+
+export function handleFundingUpdated(event: FundingUpdated): void {
+  log.info("Funding updated: rate {} cumulative {} time {}", [
+    event.params.fundingRate.toString(),
+    event.params.cumulativeFundingPerUnit.toString(),
+    event.params.timestamp.toString(),
+  ]);
+
+  const eventId = createEventId(event.transaction.hash, event.logIndex);
+  const fundingUpdate = new FundingUpdate(eventId);
+  fundingUpdate.fundingRate = event.params.fundingRate;
+  fundingUpdate.cumulativeFundingPerUnit = event.params.cumulativeFundingPerUnit;
+  fundingUpdate.timestamp = event.params.timestamp;
+  fundingUpdate.blockNumber = event.block.number;
+  fundingUpdate.transactionHash = event.transaction.hash;
+  fundingUpdate.save();
+
+  const perps = getOrCreatePerps();
+  perps.cumulativeFundingPerUnit = event.params.cumulativeFundingPerUnit;
+  perps.lastFundingUpdateTime = event.params.timestamp;
+  perps.lastUpdatedAt = event.block.timestamp;
+  perps.save();
+}
+
+export function handleFundingSettled(event: FundingSettled): void {
+  log.info("Funding settled: user {} amount {}", [
+    event.params.user.toHexString(),
+    event.params.amount.toString(),
+  ]);
+
+  const user = getOrCreateUser(event.params.user, event.block.timestamp);
+
+  const eventId = createEventId(event.transaction.hash, event.logIndex);
+  const settlement = new FundingSettlement(eventId);
+  settlement.user = user.id;
+  settlement.amount = event.params.amount;
+  settlement.timestamp = event.block.timestamp;
+  settlement.blockNumber = event.block.number;
+  settlement.transactionHash = event.transaction.hash;
+  settlement.save();
+
+  if (event.params.amount.gt(BigInt.zero())) {
+    user.totalFundingReceived = user.totalFundingReceived.plus(event.params.amount);
+  } else {
+    user.totalFundingPaid = user.totalFundingPaid.plus(event.params.amount.neg());
+  }
+  user.lastActivityAt = event.block.timestamp;
+  user.save();
+}
+
+export function handleBadDebt(event: BadDebt): void {
+  log.info("Bad debt: user {} amount {}", [
+    event.params.user.toHexString(),
+    event.params.amount.toString(),
+  ]);
+
+  const user = getOrCreateUser(event.params.user, event.block.timestamp);
+
+  const eventId = createEventId(event.transaction.hash, event.logIndex);
+  const badDebtEvent = new BadDebtEvent(eventId);
+  badDebtEvent.user = user.id;
+  badDebtEvent.amount = event.params.amount;
+  badDebtEvent.timestamp = event.block.timestamp;
+  badDebtEvent.blockNumber = event.block.number;
+  badDebtEvent.transactionHash = event.transaction.hash;
+  badDebtEvent.save();
+
+  const perps = getOrCreatePerps();
+  perps.totalBadDebt = perps.totalBadDebt.plus(event.params.amount);
+  perps.lastUpdatedAt = event.block.timestamp;
+  perps.save();
+}
+
 // ============ Config Event Handlers ============
 
 export function handleMatchFeeUpdated(event: MatchFeeUpdated): void {
@@ -562,6 +677,28 @@ export function handleLiquidationFeeUpdated(event: LiquidationFeeUpdated): void 
   log.info("Liquidation fee updated: {}", [event.params.newLiquidationFee.toString()]);
   const perps = getOrCreatePerps();
   perps.liquidationFee = event.params.newLiquidationFee;
+  perps.lastUpdatedAt = event.block.timestamp;
+  perps.save();
+}
+
+export function handleFundingParametersUpdated(event: FundingParametersUpdated): void {
+  log.info("Funding parameters updated: maxBps {} period {}", [
+    event.params.maxBps.toString(),
+    event.params.period.toString(),
+  ]);
+  const perps = getOrCreatePerps();
+  perps.fundingRateMaxBps = event.params.maxBps;
+  perps.fundingPeriod = event.params.period;
+  perps.lastUpdatedAt = event.block.timestamp;
+  perps.save();
+}
+
+export function handleMinimumMarginPerOrderUpdated(event: MinimumMarginPerOrderUpdated): void {
+  log.info("Minimum margin per order updated: {}", [
+    event.params.newMinimumMarginPerOrder.toString(),
+  ]);
+  const perps = getOrCreatePerps();
+  perps.minimumMarginPerOrder = event.params.newMinimumMarginPerOrder;
   perps.lastUpdatedAt = event.block.timestamp;
   perps.save();
 }

@@ -13,7 +13,7 @@
     "deploy-local": "graph deploy --node http://localhost:8020/ --ipfs http://localhost:5001 --version-label 0 perps",
     "setup-local": "pnpm prepare-local && pnpm codegen && pnpm build && pnpm create-local && pnpm deploy-local",
     "test": "graph test",
-    "indexer": "docker-compose up --env-file ../.env"
+    "indexer": "docker compose --env-file ../.env up"
   },
   "dependencies": {
     "@graphprotocol/graph-ts": "0.37.0"
