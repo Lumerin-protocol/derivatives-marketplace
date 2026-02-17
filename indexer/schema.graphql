@@ -19,6 +19,13 @@ type Perps @entity(immutable: false) {
   takerFeeBps: Int!
   makerFeeBps: Int!
 
+  # Funding
+  fundingRateMaxBps: BigInt!
+  fundingPeriod: BigInt!
+  cumulativeFundingPerUnit: BigInt!
+  lastFundingUpdateTime: BigInt!
+  minimumMarginPerOrder: BigInt!
+
   # Pool balances
   reservePoolBalance: BigInt!
   collectedFeesBalance: BigInt!
@@ -30,6 +37,7 @@ type Perps @entity(immutable: false) {
   totalTrades: Int!
   totalVolume: BigInt!
   totalLiquidations: Int!
+  totalBadDebt: BigInt!
 
   # Timestamps
   initializedAt: BigInt!
@@ -50,6 +58,10 @@ type User @entity(immutable: false) {
   netQuantity: BigInt!
   aggregatedEntryPrice: BigInt!
 
+  # Funding
+  totalFundingPaid: BigInt!
+  totalFundingReceived: BigInt!
+
   # Stats
   orderCount: Int!
   activeOrderCount: Int!
@@ -62,6 +74,8 @@ type User @entity(immutable: false) {
   positionHistory: [PositionSnapshot!]! @derivedFrom(field: "user")
   positionCloses: [PositionClose!]! @derivedFrom(field: "user")
   collateralEvents: [CollateralEvent!]! @derivedFrom(field: "user")
+  fundingSettlements: [FundingSettlement!]! @derivedFrom(field: "user")
+  badDebts: [BadDebtEvent!]! @derivedFrom(field: "user")
   liquidationsAsUser: [Liquidation!]! @derivedFrom(field: "user")
   liquidationsAsLiquidator: [Liquidation!]! @derivedFrom(field: "liquidator")
 
@@ -175,6 +189,39 @@ type PriceLevel @entity(immutable: false) {
   isBid: Boolean!
   totalQuantity: BigInt!
   orderCount: Int!
+}
+
+# Funding rate update event (global)
+type FundingUpdate @entity(immutable: true) {
+  id: Bytes! # tx hash + log index
+  fundingRate: BigInt! # signed
+  cumulativeFundingPerUnit: BigInt! # signed
+  # Metadata
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  transactionHash: Bytes!
+}
+
+# Funding settlement for a user
+type FundingSettlement @entity(immutable: true) {
+  id: Bytes! # tx hash + log index
+  user: User!
+  amount: BigInt! # signed: positive = received, negative = paid
+  # Metadata
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  transactionHash: Bytes!
+}
+
+# Bad debt event when a user can't cover losses
+type BadDebtEvent @entity(immutable: true) {
+  id: Bytes! # tx hash + log index
+  user: User!
+  amount: BigInt!
+  # Metadata
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  transactionHash: Bytes!
 }
 
 type ReservePoolEvent @entity(immutable: true) {
