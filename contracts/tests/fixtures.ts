@@ -1,6 +1,7 @@
 import { viem } from "hardhat";
 import { parseUnits, maxUint256, encodeFunctionData, formatUnits } from "viem";
-import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
+import { loadFixture, time } from "@nomicfoundation/hardhat-network-helpers";
+import { computeExpectedFunding as _computeExpectedFunding } from "./utils";
 
 export async function deployPerpsFixture() {
   // Get wallet clients
@@ -58,6 +59,7 @@ export async function deployPerpsFixture() {
   ]);
   const perps = await viem.getContractAt("PerpsSimple", perpsProxy.address);
   const quantityDecimals = await perps.read.QUANTITY_DECIMALS();
+  const fundingDecimals = await perps.read.FUNDING_DECIMALS();
 
   // Set fees
   await perps.write.setMatchFee([Number(takerFeeBps), Number(makerFeeBps)], {
@@ -91,6 +93,7 @@ export async function deployPerpsFixture() {
       makerFeeBps,
       collateralAmount,
       quantityDecimals,
+      fundingDecimals,
       tokenDecimals,
     },
     contracts: {
@@ -249,6 +252,74 @@ export async function deployPerpsWithLiquidatablePositionFixture() {
       const newPrice = initialPrice * 2n;
       await priceOracle.write.setPrice([newPrice, config.oracle.decimals]);
       return newPrice;
+    },
+  };
+}
+
+export async function deployPerpsWithFundingFixture() {
+  const data = await loadFixture(deployPerpsWithCollateralFixture);
+  const { contracts, accounts, config } = data;
+  const { perps } = contracts;
+  const { owner } = accounts;
+
+  // Enable funding: max 1% per 24 hours
+  const fundingRateMaxBps = 100n;
+  const fundingPeriod = 86400n; // 24 hours in seconds
+
+  await perps.write.setFundingParameters([fundingRateMaxBps, fundingPeriod], {
+    account: owner.account,
+  });
+
+  return {
+    ...data,
+    config: {
+      ...config,
+      fundingRateMaxBps,
+      fundingPeriod,
+    },
+    utils: {
+      ...data.utils,
+      computeExpectedFunding: (
+        netQuantity: bigint,
+        markPrice: bigint,
+        indexPrice: bigint,
+        timeElapsed: bigint,
+        overrideFundingRateMaxBps?: bigint,
+      ) =>
+        _computeExpectedFunding(
+          netQuantity,
+          markPrice,
+          indexPrice,
+          timeElapsed,
+          fundingPeriod,
+          overrideFundingRateMaxBps ?? fundingRateMaxBps,
+          config.fundingDecimals,
+          config.quantityDecimals,
+        ),
+    },
+  };
+}
+
+export async function deployPerpsWithFundingAndPositionsFixture() {
+  const data = await loadFixture(deployPerpsWithFundingFixture);
+  const { contracts, accounts, config } = data;
+  const { perps } = contracts;
+  const { seller, buyer } = accounts;
+
+  const marketPrice = await perps.read.getMarketPrice();
+  const qty = parseUnits("10", config.quantityDecimals); // 10 units
+
+  // Create matching orders at market price to establish positions
+  // Seller: short 10 units, Buyer: long 10 units
+  await perps.write.createOrder([marketPrice, -qty], { account: seller.account });
+  await perps.write.createOrder([marketPrice, qty], { account: buyer.account });
+
+  return {
+    ...data,
+    config: {
+      ...config,
+      marketPrice,
+      qty,
     },
   };
 }

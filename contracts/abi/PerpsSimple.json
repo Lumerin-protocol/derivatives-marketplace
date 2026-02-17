@@ -145,6 +145,11 @@
   },
   {
     "inputs": [],
+    "name": "InvalidFundingParameters",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "InvalidInitialization",
     "type": "error"
   },
@@ -175,6 +180,11 @@
   },
   {
     "inputs": [],
+    "name": "MaxPriceLevelsReached",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "NotInitializing",
     "type": "error"
   },
@@ -186,6 +196,11 @@
   {
     "inputs": [],
     "name": "OracleStale",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "OrderMarginTooLow",
     "type": "error"
   },
   {
@@ -329,6 +344,69 @@
     "inputs": [
       {
         "indexed": false,
+        "internalType": "uint256",
+        "name": "maxBps",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "period",
+        "type": "uint256"
+      }
+    ],
+    "name": "FundingParametersUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "int256",
+        "name": "amount",
+        "type": "int256"
+      }
+    ],
+    "name": "FundingSettled",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "int256",
+        "name": "fundingRate",
+        "type": "int256"
+      },
+      {
+        "indexed": false,
+        "internalType": "int256",
+        "name": "cumulativeFundingPerUnit",
+        "type": "int256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+      }
+    ],
+    "name": "FundingUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
         "internalType": "uint64",
         "name": "version",
         "type": "uint64"
@@ -393,6 +471,19 @@
       }
     ],
     "name": "MatchFeeUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "newMinimumMarginPerOrder",
+        "type": "uint256"
+      }
+    ],
+    "name": "MinimumMarginPerOrderUpdated",
     "type": "event"
   },
   {
@@ -684,12 +775,38 @@
   },
   {
     "inputs": [],
+    "name": "FUNDING_DECIMALS",
+    "outputs": [
+      {
+        "internalType": "uint8",
+        "name": "",
+        "type": "uint8"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "MAX_ORDERS_PER_PARTICIPANT",
     "outputs": [
       {
         "internalType": "uint8",
         "name": "",
         "type": "uint8"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "MAX_PRICE_LEVELS_PER_SIDE",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
       }
     ],
     "stateMutability": "view",
@@ -880,6 +997,19 @@
   },
   {
     "inputs": [],
+    "name": "cumulativeFundingPerUnit",
+    "outputs": [
+      {
+        "internalType": "int256",
+        "name": "",
+        "type": "int256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "decimals",
     "outputs": [
       {
@@ -902,6 +1032,32 @@
     "name": "depositReservePool",
     "outputs": [],
     "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "fundingPeriod",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "fundingRateMaxBps",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   },
   {
@@ -1022,6 +1178,25 @@
         "internalType": "uint256[]",
         "name": "askPrices",
         "type": "uint256[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      }
+    ],
+    "name": "getPendingFunding",
+    "outputs": [
+      {
+        "internalType": "int256",
+        "name": "",
+        "type": "int256"
       }
     ],
     "stateMutability": "view",
@@ -1200,6 +1375,19 @@
     "type": "function"
   },
   {
+    "inputs": [],
+    "name": "lastFundingUpdateTime",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [
       {
         "internalType": "address",
@@ -1259,6 +1447,19 @@
         "internalType": "uint8",
         "name": "",
         "type": "uint8"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "minimumMarginPerOrder",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
       }
     ],
     "stateMutability": "view",
@@ -1353,6 +1554,24 @@
     "inputs": [
       {
         "internalType": "uint256",
+        "name": "_fundingRateMaxBps",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "_fundingPeriod",
+        "type": "uint256"
+      }
+    ],
+    "name": "setFundingParameters",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
         "name": "_liquidationFee",
         "type": "uint256"
       }
@@ -1402,6 +1621,19 @@
       }
     ],
     "name": "setMatchFee",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_minimumMarginPerOrder",
+        "type": "uint256"
+      }
+    ],
+    "name": "setMinimumMarginPerOrder",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -1520,6 +1752,13 @@
       }
     ],
     "name": "transferOwnership",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "updateFunding",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"

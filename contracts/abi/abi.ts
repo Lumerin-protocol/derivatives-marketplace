@@ -123,16 +123,18 @@ export const perpsSimpleAbi = [
   { type: 'error', inputs: [], name: 'InsufficientCollateral' },
   { type: 'error', inputs: [], name: 'InsufficientMargin' },
   { type: 'error', inputs: [], name: 'InsufficientReservePool' },
+  { type: 'error', inputs: [], name: 'InvalidFundingParameters' },
   { type: 'error', inputs: [], name: 'InvalidInitialization' },
   { type: 'error', inputs: [], name: 'InvalidMarginPercent' },
   { type: 'error', inputs: [], name: 'InvalidOracle' },
   { type: 'error', inputs: [], name: 'InvalidPrice' },
   { type: 'error', inputs: [], name: 'InvalidSize' },
   { type: 'error', inputs: [], name: 'MaxOrdersPerParticipantReached' },
-  { type: 'error', inputs: [], name: 'NoPosition' },
+  { type: 'error', inputs: [], name: 'MaxPriceLevelsReached' },
   { type: 'error', inputs: [], name: 'NotInitializing' },
   { type: 'error', inputs: [], name: 'NotLiquidatable' },
   { type: 'error', inputs: [], name: 'OracleStale' },
+  { type: 'error', inputs: [], name: 'OrderMarginTooLow' },
   { type: 'error', inputs: [], name: 'OrderNotBelongToSender' },
   {
     type: 'error',
@@ -192,6 +194,20 @@ export const perpsSimpleAbi = [
         indexed: false,
       },
     ],
+    name: 'BadDebt',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      { name: 'user', internalType: 'address', type: 'address', indexed: true },
+      {
+        name: 'amount',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+    ],
     name: 'CollateralAdded',
   },
   {
@@ -207,6 +223,64 @@ export const perpsSimpleAbi = [
       },
     ],
     name: 'CollateralRemoved',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'maxBps',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+      {
+        name: 'period',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+    ],
+    name: 'FundingParametersUpdated',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      { name: 'user', internalType: 'address', type: 'address', indexed: true },
+      {
+        name: 'amount',
+        internalType: 'int256',
+        type: 'int256',
+        indexed: false,
+      },
+    ],
+    name: 'FundingSettled',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'fundingRate',
+        internalType: 'int256',
+        type: 'int256',
+        indexed: false,
+      },
+      {
+        name: 'cumulativeFundingPerUnit',
+        internalType: 'int256',
+        type: 'int256',
+        indexed: false,
+      },
+      {
+        name: 'timestamp',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+    ],
+    name: 'FundingUpdated',
   },
   {
     type: 'event',
@@ -265,6 +339,38 @@ export const perpsSimpleAbi = [
     anonymous: false,
     inputs: [
       {
+        name: 'newTakerFeeBps',
+        internalType: 'int16',
+        type: 'int16',
+        indexed: false,
+      },
+      {
+        name: 'newMakerFeeBps',
+        internalType: 'int16',
+        type: 'int16',
+        indexed: false,
+      },
+    ],
+    name: 'MatchFeeUpdated',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
+        name: 'newMinimumMarginPerOrder',
+        internalType: 'uint256',
+        type: 'uint256',
+        indexed: false,
+      },
+    ],
+    name: 'MinimumMarginPerOrderUpdated',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      {
         name: 'orderId',
         internalType: 'bytes32',
         type: 'bytes32',
@@ -309,19 +415,6 @@ export const perpsSimpleAbi = [
       },
     ],
     name: 'OrderCreated',
-  },
-  {
-    type: 'event',
-    anonymous: false,
-    inputs: [
-      {
-        name: 'newFee',
-        internalType: 'uint256',
-        type: 'uint256',
-        indexed: false,
-      },
-    ],
-    name: 'OrderFeeUpdated',
   },
   {
     type: 'event',
@@ -528,8 +621,22 @@ export const perpsSimpleAbi = [
   {
     type: 'function',
     inputs: [],
+    name: 'FUNDING_DECIMALS',
+    outputs: [{ name: '', internalType: 'uint8', type: 'uint8' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
     name: 'MAX_ORDERS_PER_PARTICIPANT',
     outputs: [{ name: '', internalType: 'uint8', type: 'uint8' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'MAX_PRICE_LEVELS_PER_SIDE',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
     stateMutability: 'view',
   },
   {
@@ -550,6 +657,19 @@ export const perpsSimpleAbi = [
     type: 'function',
     inputs: [{ name: '_amount', internalType: 'uint256', type: 'uint256' }],
     name: 'addCollateral',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [
+      { name: '_amount', internalType: 'uint256', type: 'uint256' },
+      { name: '_deadline', internalType: 'uint256', type: 'uint256' },
+      { name: '_v', internalType: 'uint8', type: 'uint8' },
+      { name: '_r', internalType: 'bytes32', type: 'bytes32' },
+      { name: '_s', internalType: 'bytes32', type: 'bytes32' },
+    ],
+    name: 'addCollateralWithPermit',
     outputs: [],
     stateMutability: 'nonpayable',
   },
@@ -596,13 +716,6 @@ export const perpsSimpleAbi = [
   },
   {
     type: 'function',
-    inputs: [],
-    name: 'collectedFeesBalance',
-    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
     inputs: [
       { name: '_price', internalType: 'uint256', type: 'uint256' },
       { name: '_quantity', internalType: 'int256', type: 'int256' },
@@ -610,6 +723,13 @@ export const perpsSimpleAbi = [
     name: 'createOrder',
     outputs: [],
     stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'cumulativeFundingPerUnit',
+    outputs: [{ name: '', internalType: 'int256', type: 'int256' }],
+    stateMutability: 'view',
   },
   {
     type: 'function',
@@ -624,6 +744,20 @@ export const perpsSimpleAbi = [
     name: 'depositReservePool',
     outputs: [],
     stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'fundingPeriod',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'fundingRateMaxBps',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
   },
   {
     type: 'function',
@@ -655,13 +789,6 @@ export const perpsSimpleAbi = [
   },
   {
     type: 'function',
-    inputs: [{ name: '_user', internalType: 'address', type: 'address' }],
-    name: 'getNetPositionSize',
-    outputs: [{ name: 'netQuantity', internalType: 'int256', type: 'int256' }],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
     inputs: [{ name: '_orderId', internalType: 'bytes32', type: 'bytes32' }],
     name: 'getOrder',
     outputs: [
@@ -687,6 +814,13 @@ export const perpsSimpleAbi = [
       { name: 'bidPrices', internalType: 'uint256[]', type: 'uint256[]' },
       { name: 'askPrices', internalType: 'uint256[]', type: 'uint256[]' },
     ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: '_user', internalType: 'address', type: 'address' }],
+    name: 'getPendingFunding',
+    outputs: [{ name: '', internalType: 'int256', type: 'int256' }],
     stateMutability: 'view',
   },
   {
@@ -783,6 +917,13 @@ export const perpsSimpleAbi = [
   },
   {
     type: 'function',
+    inputs: [],
+    name: 'lastFundingUpdateTime',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
     inputs: [{ name: '_user', internalType: 'address', type: 'address' }],
     name: 'liquidate',
     outputs: [],
@@ -805,8 +946,22 @@ export const perpsSimpleAbi = [
   {
     type: 'function',
     inputs: [],
+    name: 'makerFeeBps',
+    outputs: [{ name: '', internalType: 'int16', type: 'int16' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
     name: 'marginPercent',
     outputs: [{ name: '', internalType: 'uint8', type: 'uint8' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'minimumMarginPerOrder',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
     stateMutability: 'view',
   },
   {
@@ -821,13 +976,6 @@ export const perpsSimpleAbi = [
     inputs: [],
     name: 'name',
     outputs: [{ name: '', internalType: 'string', type: 'string' }],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    inputs: [],
-    name: 'orderFee',
-    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
     stateMutability: 'view',
   },
   {
@@ -873,10 +1021,13 @@ export const perpsSimpleAbi = [
   },
   {
     type: 'function',
-    inputs: [],
-    name: 'reservePoolBalance',
-    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
-    stateMutability: 'view',
+    inputs: [
+      { name: '_fundingRateMaxBps', internalType: 'uint256', type: 'uint256' },
+      { name: '_fundingPeriod', internalType: 'uint256', type: 'uint256' },
+    ],
+    name: 'setFundingParameters',
+    outputs: [],
+    stateMutability: 'nonpayable',
   },
   {
     type: 'function',
@@ -910,6 +1061,29 @@ export const perpsSimpleAbi = [
   {
     type: 'function',
     inputs: [
+      { name: '_takerFeeBps', internalType: 'int16', type: 'int16' },
+      { name: '_makerFeeBps', internalType: 'int16', type: 'int16' },
+    ],
+    name: 'setMatchFee',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [
+      {
+        name: '_minimumMarginPerOrder',
+        internalType: 'uint256',
+        type: 'uint256',
+      },
+    ],
+    name: 'setMinimumMarginPerOrder',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [
       {
         name: '_oracle',
         internalType: 'contract AggregatorV3Interface',
@@ -922,16 +1096,16 @@ export const perpsSimpleAbi = [
   },
   {
     type: 'function',
-    inputs: [{ name: '_orderFee', internalType: 'uint256', type: 'uint256' }],
-    name: 'setOrderFee',
-    outputs: [],
-    stateMutability: 'nonpayable',
+    inputs: [],
+    name: 'symbol',
+    outputs: [{ name: '', internalType: 'string', type: 'string' }],
+    stateMutability: 'view',
   },
   {
     type: 'function',
     inputs: [],
-    name: 'symbol',
-    outputs: [{ name: '', internalType: 'string', type: 'string' }],
+    name: 'takerFeeBps',
+    outputs: [{ name: '', internalType: 'int16', type: 'int16' }],
     stateMutability: 'view',
   },
   {
@@ -971,6 +1145,13 @@ export const perpsSimpleAbi = [
   },
   {
     type: 'function',
+    inputs: [],
+    name: 'updateFunding',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
     inputs: [
       { name: 'newImplementation', internalType: 'address', type: 'address' },
       { name: 'data', internalType: 'bytes', type: 'bytes' },
@@ -978,13 +1159,6 @@ export const perpsSimpleAbi = [
     name: 'upgradeToAndCall',
     outputs: [],
     stateMutability: 'payable',
-  },
-  {
-    type: 'function',
-    inputs: [],
-    name: 'withdrawFees',
-    outputs: [],
-    stateMutability: 'nonpayable',
   },
   {
     type: 'function',
@@ -1087,6 +1261,17 @@ export const priceOracleMockAbi = [
 
 export const usdcMockAbi = [
   { type: 'constructor', inputs: [], stateMutability: 'nonpayable' },
+  { type: 'error', inputs: [], name: 'ECDSAInvalidSignature' },
+  {
+    type: 'error',
+    inputs: [{ name: 'length', internalType: 'uint256', type: 'uint256' }],
+    name: 'ECDSAInvalidSignatureLength',
+  },
+  {
+    type: 'error',
+    inputs: [{ name: 's', internalType: 'bytes32', type: 'bytes32' }],
+    name: 'ECDSAInvalidSignatureS',
+  },
   {
     type: 'error',
     inputs: [
@@ -1126,6 +1311,33 @@ export const usdcMockAbi = [
     name: 'ERC20InvalidSpender',
   },
   {
+    type: 'error',
+    inputs: [{ name: 'deadline', internalType: 'uint256', type: 'uint256' }],
+    name: 'ERC2612ExpiredSignature',
+  },
+  {
+    type: 'error',
+    inputs: [
+      { name: 'signer', internalType: 'address', type: 'address' },
+      { name: 'owner', internalType: 'address', type: 'address' },
+    ],
+    name: 'ERC2612InvalidSigner',
+  },
+  {
+    type: 'error',
+    inputs: [
+      { name: 'account', internalType: 'address', type: 'address' },
+      { name: 'currentNonce', internalType: 'uint256', type: 'uint256' },
+    ],
+    name: 'InvalidAccountNonce',
+  },
+  { type: 'error', inputs: [], name: 'InvalidShortString' },
+  {
+    type: 'error',
+    inputs: [{ name: 'str', internalType: 'string', type: 'string' }],
+    name: 'StringTooLong',
+  },
+  {
     type: 'event',
     anonymous: false,
     inputs: [
@@ -1150,6 +1362,7 @@ export const usdcMockAbi = [
     ],
     name: 'Approval',
   },
+  { type: 'event', anonymous: false, inputs: [], name: 'EIP712DomainChanged' },
   {
     type: 'event',
     anonymous: false,
@@ -1164,6 +1377,13 @@ export const usdcMockAbi = [
       },
     ],
     name: 'Transfer',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'DOMAIN_SEPARATOR',
+    outputs: [{ name: '', internalType: 'bytes32', type: 'bytes32' }],
+    stateMutability: 'view',
   },
   {
     type: 'function',
@@ -1202,9 +1422,46 @@ export const usdcMockAbi = [
   {
     type: 'function',
     inputs: [],
+    name: 'eip712Domain',
+    outputs: [
+      { name: 'fields', internalType: 'bytes1', type: 'bytes1' },
+      { name: 'name', internalType: 'string', type: 'string' },
+      { name: 'version', internalType: 'string', type: 'string' },
+      { name: 'chainId', internalType: 'uint256', type: 'uint256' },
+      { name: 'verifyingContract', internalType: 'address', type: 'address' },
+      { name: 'salt', internalType: 'bytes32', type: 'bytes32' },
+      { name: 'extensions', internalType: 'uint256[]', type: 'uint256[]' },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
     name: 'name',
     outputs: [{ name: '', internalType: 'string', type: 'string' }],
     stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: 'owner', internalType: 'address', type: 'address' }],
+    name: 'nonces',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [
+      { name: 'owner', internalType: 'address', type: 'address' },
+      { name: 'spender', internalType: 'address', type: 'address' },
+      { name: 'value', internalType: 'uint256', type: 'uint256' },
+      { name: 'deadline', internalType: 'uint256', type: 'uint256' },
+      { name: 'v', internalType: 'uint8', type: 'uint8' },
+      { name: 'r', internalType: 'bytes32', type: 'bytes32' },
+      { name: 's', internalType: 'bytes32', type: 'bytes32' },
+    ],
+    name: 'permit',
+    outputs: [],
+    stateMutability: 'nonpayable',
   },
   {
     type: 'function',
