@@ -5,7 +5,7 @@
   "author": "Oleksandr Shevchuk <shev@titan.io>",
   "license": "MIT",
   "engines": {
-    "node": "20.x"
+    "node": "22.x"
   },
   "scripts": {
     "format:sol": "forge fmt ./contracts/**/*.sol",

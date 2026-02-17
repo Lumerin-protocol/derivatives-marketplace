@@ -1,5 +1,5 @@
 import type { PublicClient, WalletClient, Account } from "viem";
-import { perpsSimpleAbi, aggregatorV3Abi } from "./abi.ts";
+import { perpsSimpleAbi, aggregatorV3InterfaceAbi } from "./abi.ts";
 import type { Config } from "./config.ts";
 import type { PositionTracker, UserState } from "./positionTracker.ts";
 import type pino from "pino";
@@ -47,7 +47,7 @@ export class Liquidator {
           ? [
               {
                 address: this.config.ethPriceFeedAddress,
-                abi: aggregatorV3Abi,
+                abi: aggregatorV3InterfaceAbi,
                 functionName: "decimals",
               },
             ]
@@ -58,7 +58,7 @@ export class Liquidator {
 
     this.liquidationFee = results[0] as bigint;
     this.collateralDecimals = Number(results[1]);
-    this.ethFeedDecimals = Number(results[2]);
+    this.ethFeedDecimals = results[2] != null ? Number(results[2]) : 0;
 
     // Run first check immediately, then at interval
     this.checkPrice();
@@ -100,7 +100,7 @@ export class Liquidator {
     }
     const [, answer] = (await this.publicClient.readContract({
       address: this.config.ethPriceFeedAddress,
-      abi: aggregatorV3Abi,
+      abi: aggregatorV3InterfaceAbi,
       functionName: "latestRoundData",
     })) as [bigint, bigint, bigint, bigint, bigint];
 
@@ -113,6 +113,7 @@ export class Liquidator {
    *   gasCostCollateral = gasCostWei * ethPrice / 10^(18 + ethFeedDecimals − collateralDecimals)
    */
   private gasCostToCollateral(gasCostWei: bigint, ethPrice: bigint): bigint {
+    if (ethPrice === 0n) return 0n;
     const exponent = 18 + this.ethFeedDecimals - this.collateralDecimals;
     return (gasCostWei * ethPrice) / 10n ** BigInt(exponent);
   }

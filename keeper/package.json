@@ -4,18 +4,21 @@
   "type": "module",
   "private": true,
   "engines": {
-    "node": ">=22.18.0"
+    "node": ">=22.6.0"
   },
   "scripts": {
     "dev": "node --env-file=../.env src/index.ts | pino-pretty",
     "dev:dry": "DRY_RUN=true node --env-file=../.env src/index.ts | pino-pretty",
     "start": "node --env-file=../.env src/index.ts",
+    "pretest": "cd ../contracts && pnpm hardhat compile && cp ./abi/abi.ts ../keeper/src/abi.ts",
+    "test": "node --test --test-force-exit 'tests/**/*.test.ts'",
+    "test:watch": "node --test --watch 'tests/**/*.test.ts'",
     "typecheck": "tsc --noEmit",
     "docker": "docker build -t perps-keeper . && docker run --rm --env-file ../.env perps-keeper"
   },
   "dependencies": {
     "pino": "^10.3.1",
-    "viem": "^2.42.1"
+    "viem": "^2.45.3"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
