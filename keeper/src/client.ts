@@ -1,11 +1,22 @@
-import { createPublicClient, createWalletClient, http, webSocket } from "viem";
+import { createPublicClient, createWalletClient, http, webSocket, defineChain } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import type { Config } from "./config.ts";
-import { arbitrum, arbitrumSepolia } from "viem/chains";
+import { arbitrum, arbitrumSepolia, hardhat as hardhatBase } from "viem/chains";
 
-const chainMapping = {
+export const hardhat = defineChain({
+  ...hardhatBase,
+  contracts: {
+    ...hardhatBase.contracts,
+    multicall3: {
+      address: "0xcA11bde05977b3631167028862bE2a173976CA11" as `0x${string}`,
+    },
+  },
+});
+
+export const chainMapping = {
   "arbitrum-sepolia": arbitrumSepolia,
   arbitrum: arbitrum,
+  hardhat: hardhat,
 } as const;
 
 export function createClients(config: Config) {
