@@ -370,6 +370,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     /// @notice Cancel an order
     /// @param _orderId Order ID to cancel
     function cancelOrder(bytes32 _orderId) external {
+        _updateGlobalFunding();
         Order memory order = orders[_orderId];
         if (order.participant != _msgSender()) {
             revert OrderNotBelongToSender();
@@ -510,6 +511,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     /// @notice Add collateral to account
     /// @param _amount Amount of collateral to add
     function addCollateral(uint256 _amount) public {
+        _updateGlobalFunding();
         if (_amount == 0) {
             revert InvalidSize();
         }
@@ -534,6 +536,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     /// @notice Remove collateral from account
     /// @param _amount Amount of collateral to remove
     function removeCollateral(uint256 _amount) external {
+        _updateGlobalFunding();
         if (_amount == 0) {
             revert InvalidSize();
         }
