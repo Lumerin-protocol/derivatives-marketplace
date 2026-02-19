@@ -377,8 +377,10 @@ export function handleOrderMatched(event: OrderMatched): void {
 
   const buyer = getOrCreateUser(event.params.buyer, event.block.timestamp);
   const seller = getOrCreateUser(event.params.seller, event.block.timestamp);
+  const perps = getOrCreatePerps();
 
-  const volume = event.params.price.times(event.params.quantity);
+  const quantityScale = BigInt.fromI32(10).pow(u8(perps.quantityDecimals));
+  const volume = event.params.price.times(event.params.quantity).div(quantityScale);
 
   // Create trade
   const tradeId = createEventId(event.transaction.hash, event.logIndex);
@@ -406,7 +408,6 @@ export function handleOrderMatched(event: OrderMatched): void {
   seller.save();
 
   // Update global stats
-  const perps = getOrCreatePerps();
   perps.totalTrades++;
   perps.totalVolume = perps.totalVolume.plus(volume);
   perps.lastUpdatedAt = event.block.timestamp;
