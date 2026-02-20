@@ -1527,6 +1527,13 @@
     "type": "function"
   },
   {
+    "inputs": [],
+    "name": "resetState",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
     "inputs": [
       {
         "internalType": "uint256",

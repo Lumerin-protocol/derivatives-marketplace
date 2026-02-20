@@ -211,18 +211,19 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     /// @dev Buy orders match with asks at or below the limit price
     /// @dev Sell orders match with bids at or above the limit price
     function createOrder(uint256 _price, int256 _quantity) external {
+        address sender = _msgSender();
         _updateGlobalFunding();
         _validateQuantity(_quantity);
         _validatePrice(_price);
 
         // Settle taker's funding once before matching so per-match _updateUserPosition
         // calls can skip it (cumulativeFundingPerUnit is constant within this tx).
-        _settleFunding(_msgSender());
+        _settleFunding(sender);
 
         bool isBuy = _quantity > 0;
         int256 remainingQuantity = _quantity;
 
-        remainingQuantity = _matchWithOppositeOrders(_msgSender(), _price, remainingQuantity);
+        remainingQuantity = _matchWithOppositeOrders(sender, _price, remainingQuantity);
 
         if (remainingQuantity != 0) {
             // Validate minimum margin per resting order
@@ -234,14 +235,14 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
                 }
             }
 
-            EnumerableSet.Bytes32Set storage participantOrders = participantOrderIdsIndex[_msgSender()];
+            EnumerableSet.Bytes32Set storage participantOrders = participantOrderIdsIndex[sender];
             if (participantOrders.length() >= MAX_ORDERS_PER_PARTICIPANT) {
                 revert MaxOrdersPerParticipantReached();
             }
 
             StructuredLinkedList.List storage orderQueue = _priceOrderIds(_price, isBuy);
 
-            bytes32 orderId = _createOrder(_msgSender(), _price, remainingQuantity);
+            bytes32 orderId = _createOrder(sender, _price, remainingQuantity);
             orderQueue.pushBack(uint256(orderId));
             participantOrders.add(orderId);
 
@@ -250,7 +251,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         }
 
         // Check margin requirement
-        _ensureSufficientMargin(_msgSender());
+        _ensureSufficientMargin(sender);
     }
 
     /// @notice Match incoming order with opposite orders using limit price logic (direct walk).
@@ -308,11 +309,12 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         // Cache fields from storage once to avoid repeated SLOADs.
         uint256 makerPrice = _makerOrder.price;
         address makerParticipant = _makerOrder.participant;
-        uint256 matchAmt = _min(_abs(_makerOrder.quantity), _abs(_remainingQty));
+        int256 makerQty = _makerOrder.quantity;
+        uint256 matchAmt = _min(_abs(makerQty), _abs(_remainingQty));
         int256 matchQty = _toSignedQuantity(matchAmt, _remainingQty);
         uint256 notionalValue = _calculateValue(makerPrice, matchAmt);
 
-        _createPosition(_makerOrderId, makerParticipant, _taker, makerPrice, matchQty, _taker);
+        _createPosition(_makerOrderId, makerParticipant, _taker, makerPrice, matchQty);
 
         // Charge fees at match time
         _chargeMatchFee(_taker, notionalValue, true); // taker fee
@@ -320,17 +322,20 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
 
         // Update cached order value
         userTotalOrderValue[makerParticipant] -= notionalValue;
-        _makerOrder.quantity = _reduceQuantity(_makerOrder.quantity, matchAmt);
+        int256 newMakerQty = _reduceQuantity(makerQty, matchAmt);
+        _makerOrder.quantity = newMakerQty;
 
-        if (_makerOrder.quantity == 0) {
+        if (newMakerQty == 0) {
             emit OrderFilled(_makerOrderId, makerParticipant);
             // Maker is a bid when the taker is selling (_remainingQty < 0).
             _removeOrder(_makerOrderId, makerParticipant, makerPrice, _remainingQty < 0);
         } else {
-            emit OrderUpdated(_makerOrderId, makerParticipant, _makerOrder.quantity);
+            emit OrderUpdated(_makerOrderId, makerParticipant, newMakerQty);
         }
 
-        return _remainingQty - matchQty;
+        unchecked {
+            return _remainingQty - matchQty;
+        }
     }
 
     /// @notice Get absolute value of int256
@@ -388,8 +393,9 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     }
 
     /// @notice Create a new order
+    /// @dev Order IDs use sequential counter — cheap and unique within contract (keccak was ~200+ gas per order).
     function _createOrder(address _participant, uint256 _price, int256 _quantity) private returns (bytes32) {
-        bytes32 orderId = keccak256(abi.encode(_participant, _price, _quantity, block.timestamp, nonce++));
+        bytes32 orderId = bytes32(++nonce);
         orders[orderId] = Order({ participant: _participant, price: _price, quantity: _quantity });
 
         // Update cached total order value for user
@@ -400,20 +406,17 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     }
 
     /// @notice Update net positions when orders match
-    /// @param _taker Address of the taker whose funding was already settled before the matching loop
+    /// @param taker Address of the taker whose funding was already settled before the matching loop
     function _createPosition(
         bytes32 matchedOrderId,
         address makerParticipant,
-        address _otherParticipant,
+        address taker,
         uint256 _price,
-        int256 _quantity,
-        address _taker
+        int256 _quantity
     ) private {
         // Determine buyer and seller based on quantity sign
         // Positive quantity = taker is buying, negative = taker is selling
-        (address buyer, address seller) = _quantity > 0
-            ? (_otherParticipant, makerParticipant)
-            : (makerParticipant, _otherParticipant);
+        (address buyer, address seller) = _quantity > 0 ? (taker, makerParticipant) : (makerParticipant, taker);
 
         // Use absolute quantity for position updates
         // Buyer always gets positive (long), seller always gets negative (short)
@@ -422,10 +425,10 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         emit OrderMatched(matchedOrderId, buyer, seller, _price, uint256(absQty));
 
         // Skip funding settlement for the taker — already settled once before the loop.
-        if (buyer != _taker) _settleFunding(buyer);
+        if (buyer != taker) _settleFunding(buyer);
         _updateUserPosition(buyer, absQty, _price);
 
-        if (seller != _taker) _settleFunding(seller);
+        if (seller != taker) _settleFunding(seller);
         _updateUserPosition(seller, -absQty, _price);
     }
 
@@ -975,6 +978,9 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     /// @dev Must be called before any position change so funding is settled at the old size.
     /// @param _user The user whose funding is being settled
     function _settleFunding(address _user) private {
+        // When funding isn't configured, skip storage reads and calculations.
+        if (lastFundingUpdateTime == 0 || fundingPeriod == 0) return;
+
         Position storage position = positions[_user];
         if (position.netQuantity == 0) {
             // No position – just sync snapshot so a new position starts clean

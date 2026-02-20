@@ -7,16 +7,16 @@ All scenarios use a single seller (maker) placing N resting orders, then a singl
 
 ## Results
 
-| Scenario | Baseline | Round 1–7 | + DLL (Round 8) | Total saved | % |
-|---|---:|---:|---:|---:|---:|
-| Resting only (no match) | 393,610 | 376,018 | **369,001** | -24,609 | -6.3% |
-| 1 match | 338,467 | 337,190 | **329,391** | -9,076 | -2.7% |
-| 3 matches (1 level) | 410,999 | 392,865 | **376,061** | -34,938 | -8.5% |
-| 10 matches (1 level) | 795,267 | 730,676 | **686,135** | -109,132 | -13.7% |
-| 10 matches (5 levels) | 869,548 | 809,504 | **748,720** | -120,828 | -13.9% |
-| 20 matches (1 level) | 1,343,788 | 1,212,812 | **1,128,647** | -215,141 | -16.0% |
-| 20 matches (10 levels) | 1,510,922 | 1,390,176 | **1,269,464** | -241,458 | -16.0% |
-| **32 matches (1 level)** | **2,002,040** | **1,791,375** | **1,659,661** | **-342,379** | **-17.1%** |
+| Scenario | Baseline | Round 1–7 | + DLL (Round 8) | + Micro-opts (Round 9, no DLL) | Total saved (baseline → R9) | % |
+|---|---:|---:|---:|---:|---:|---:|
+| Resting only (no match) | 393,610 | 376,018 | **369,001** | **371,260** | -22,350 | -5.7% |
+| 1 match | 338,467 | 337,190 | **329,391** | **336,196** | -2,271 | -0.7% |
+| 3 matches (1 level) | 410,999 | 392,865 | **376,061** | **390,916** | -20,083 | -4.9% |
+| 10 matches (1 level) | 795,267 | 730,676 | **686,135** | **724,689** | -70,578 | -8.9% |
+| 10 matches (5 levels) | 869,548 | 809,504 | **748,720** | **803,518** | -66,030 | -7.6% |
+| 20 matches (1 level) | 1,343,788 | 1,212,812 | **1,128,647** | **1,201,057** | -142,731 | -10.6% |
+| 20 matches (10 levels) | 1,510,922 | 1,390,176 | **1,269,464** | **1,378,422** | -132,500 | -8.8% |
+| **32 matches (1 level)** | **2,002,040** | **1,791,375** | **1,659,661** | **1,772,699** | **-229,341** | **-11.5%** |
 
 ### Average gas per match (32-match scenario)
 
@@ -25,7 +25,8 @@ All scenarios use a single seller (maker) placing N resting orders, then a singl
 | Baseline | 62,564 |
 | After rounds 1–7 | 55,980 |
 | After DLL (round 8) | **51,864** |
-| Total reduction | **-10,700 (-17.1%)** |
+| Round 9 (micro-opts only, no DLL) | **55,397** |
+| Total reduction vs baseline (R9) | **-7,167 (-11.5%)** |
 
 ---
 
@@ -146,6 +147,32 @@ Order queues use `pushBack` / `removeFast` / `isEmpty` / `getNext`.
 Price lists use `pushFront` / `insertBefore` / `insertAfter` / `remove` / `nodeExists` / `sizeOf` / `getNext` (full semantics, same as before).
 
 **Impact:** ~4,100 gas saved per match; ~7,000 gas saved on the resting-only path.
+
+---
+
+### 9. Micro-optimisations (Round 9, no DLL — applied 2026-02-20)
+
+Applied worktree optimisations without swapping the linked-list implementation.
+
+1. **Skip `_settleFunding` when funding is not configured**  
+   Early return when `lastFundingUpdateTime == 0` or `fundingPeriod == 0`. Benchmarks use disabled funding, so this saves storage reads on the hot path.
+
+2. **Cache `_msgSender()` in `createOrder`**  
+   Resolve `address sender = _msgSender()` once; reuse throughout.
+
+3. **Validation inlining**  
+   Inline `_quantity == 0` and `_price` checks at function start instead of calling `_validateQuantity` / `_validatePrice`.
+
+4. **`_executeMatch` micro-opts**  
+   Cache `makerQty`, compute `newMakerQty` once, use `unchecked { return _remainingQty - matchQty }`.
+
+5. **`_createPosition` simplification**  
+   Remove redundant taker parameter (was passed twice); simplify signature to `(makerParticipant, taker, ...)`.
+
+6. **Cheaper order IDs**  
+   Replace `keccak256(abi.encode(...))` with `bytes32(++nonce)`. Sequential counter is unique within the contract and much cheaper.
+
+**Impact (Round 9 vs Round 1–7, no DLL):** ~4.8K gas on resting-only; ~1–19K gas on matching scenarios. DLL migration (Round 8) would yield additional ~4.1K gas per match.
 
 ---
 
