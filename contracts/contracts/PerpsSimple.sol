@@ -82,7 +82,6 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         address participant;
         uint256 price; // Order price
         int256 quantity; // Order quantity (positive = long/buy, negative = short/sell)
-        uint256 createdAt;
     }
 
     /// @notice Represents a user's net position
@@ -220,6 +219,10 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         _validateQuantity(_quantity);
         _validatePrice(_price);
 
+        // Settle taker's funding once before matching so per-match _updateUserPosition
+        // calls can skip it (cumulativeFundingPerUnit is constant within this tx).
+        _settleFunding(_msgSender());
+
         bool isBuy = _quantity > 0;
         int256 remainingQuantity = _quantity;
 
@@ -255,6 +258,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     }
 
     /// @notice Match incoming order with opposite orders using limit price logic (direct walk).
+    /// @param _taker Address of the taker (funding already settled before this call)
     function _matchWithOppositeOrders(address _taker, uint256 _limitPrice, int256 _quantity)
         private
         returns (int256 remainingQuantity)
@@ -285,12 +289,16 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     {
         StructuredLinkedList.List storage makerOrderQueue = _priceOrderIds(_price, !_isBuy);
 
-        while (_remainingQty != 0 && makerOrderQueue.sizeOf() > 0) {
-            (, uint256 orderIdUint) = makerOrderQueue.getNextNode(0);
+        (, uint256 orderIdUint) = makerOrderQueue.getNextNode(0);
+        while (_remainingQty != 0 && orderIdUint != 0) {
             bytes32 makerOrderId = bytes32(orderIdUint);
             Order storage makerOrder = orders[makerOrderId];
             _remainingQty = _executeMatch(_taker, makerOrderId, makerOrder, _remainingQty);
+            (, orderIdUint) = makerOrderQueue.getNextNode(0);
         }
+
+        // Remove price level once after finishing this level, instead of after every filled order.
+        _removePriceLevelIfEmpty(_price, !_isBuy);
 
         return _remainingQty;
     }
@@ -306,7 +314,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
 
         // Execute at maker's price (price improvement for taker)
         Order memory orderCopy = _makerOrder;
-        _createPosition(_makerOrderId, orderCopy, _taker, _makerOrder.price, matchQty);
+        _createPosition(_makerOrderId, orderCopy, _taker, _makerOrder.price, matchQty, _taker);
 
         // Charge fees at match time
         _chargeMatchFee(_taker, notionalValue, true); // taker fee
@@ -370,7 +378,9 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             revert OrderNotBelongToSender();
         }
 
-        _removeOrder(_orderId, order, order.quantity > 0);
+        bool isBid = order.quantity > 0;
+        _removeOrder(_orderId, order, isBid);
+        _removePriceLevelIfEmpty(order.price, isBid);
         emit OrderCancelled(_orderId, order.participant);
     }
 
@@ -388,16 +398,12 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         userTotalOrderValue[order.participant] -= orderValue;
 
         delete orders[_orderId];
-
-        // Remove price level if no more orders at this price
-        _removePriceLevelIfEmpty(order.price, _isBid);
     }
 
     /// @notice Create a new order
     function _createOrder(address _participant, uint256 _price, int256 _quantity) private returns (bytes32) {
         bytes32 orderId = keccak256(abi.encode(_participant, _price, _quantity, block.timestamp, nonce++));
-        orders[orderId] =
-            Order({ participant: _participant, price: _price, quantity: _quantity, createdAt: block.timestamp });
+        orders[orderId] = Order({ participant: _participant, price: _price, quantity: _quantity });
 
         // Update cached total order value for user
         userTotalOrderValue[_participant] += _calculateValue(_price, _abs(_quantity));
@@ -407,12 +413,14 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     }
 
     /// @notice Update net positions when orders match
+    /// @param _taker Address of the taker whose funding was already settled before the matching loop
     function _createPosition(
         bytes32 matchedOrderId,
         Order memory matchedOrder,
         address _otherParticipant,
         uint256 _price,
-        int256 _quantity
+        int256 _quantity,
+        address _taker
     ) private {
         // Determine buyer and seller based on quantity sign
         // Positive quantity = taker is buying, negative = taker is selling
@@ -426,17 +434,17 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
 
         emit OrderMatched(matchedOrderId, buyer, seller, _price, uint256(absQty));
 
-        // Update buyer's position (long: positive quantity)
+        // Skip funding settlement for the taker — already settled once before the loop.
+        if (buyer != _taker) _settleFunding(buyer);
         _updateUserPosition(buyer, absQty, _price);
 
-        // Update seller's position (short: negative quantity)
+        if (seller != _taker) _settleFunding(seller);
         _updateUserPosition(seller, -absQty, _price);
     }
 
     /// @notice Update a user's net position with aggregated entry price
     function _updateUserPosition(address _user, int256 _quantity, uint256 _tradePrice) private {
-        // Settle any pending funding at the old position size before changing it
-        _settleFunding(_user);
+        // Settle any pending funding at the old position size before changing it.
 
         Position storage position = positions[_user];
         int256 newNetQuantity = position.netQuantity + _quantity;

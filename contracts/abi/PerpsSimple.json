@@ -1125,11 +1125,6 @@
             "internalType": "int256",
             "name": "quantity",
             "type": "int256"
-          },
-          {
-            "internalType": "uint256",
-            "name": "createdAt",
-            "type": "uint256"
           }
         ],
         "internalType": "struct PerpsSimple.Order",
