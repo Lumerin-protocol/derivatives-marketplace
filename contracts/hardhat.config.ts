@@ -19,6 +19,9 @@ chai.use(chaiAsPromised);
 
 // Base config is used for local deployment and/or contract build
 const config: HardhatUserConfig = {
+  paths: {
+    tests: "./tests",
+  },
   solidity: {
     compilers: [
       {

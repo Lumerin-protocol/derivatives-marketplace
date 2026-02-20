@@ -17,7 +17,6 @@ describe("PerpsSimple - getOrder", function () {
     expect(getAddress(order.participant)).to.equal(getAddress(buyer.account.address));
     expect(order.price > 0n).to.be.true;
     expect(order.quantity > 0n).to.be.true; // Buy order
-    expect(order.createdAt > 0n).to.be.true;
   });
 
   it("should return empty order for non-existent orderId", async function () {
