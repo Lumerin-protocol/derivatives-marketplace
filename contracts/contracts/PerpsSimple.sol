@@ -42,15 +42,13 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     uint256 public liquidationFee; // Liquidation fee in collateral token units
     uint8 private tokenDecimals;
     uint8 private oracleDecimals;
-    uint256 private __gap;
-    uint256 private nonce = 0; // Nonce for order IDs
+    uint256 private nonce; // Nonce for order IDs
 
     // Order book mappings
     mapping(bytes32 => Order) private orders;
     mapping(uint256 => StructuredLinkedList.List) private priceOrdersLongQueue; // FIFO queue of long orders by price
     mapping(uint256 => StructuredLinkedList.List) private priceOrdersShortQueue; // FIFO queue of short orders by price
     mapping(address => EnumerableSet.Bytes32Set) private participantOrderIdsIndex; // Orders by participant
-    uint256 private __gap2;
     mapping(address => uint256) private userTotalOrderValue; // Cached total order value per user
 
     // Price level tracking for limit order matching
@@ -62,8 +60,6 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     EnumerableSet.AddressSet private usersWithPositions; // Users with active positions
 
     // Reserve and fees
-    uint256 private __gap3;
-    uint256 private __gap4;
     int16 public takerFeeBps; // Taker fee in basis points (e.g., 5 = 0.05%)
     int16 public makerFeeBps; // Maker fee in basis points (e.g., 0 = 0%)
 
@@ -1208,6 +1204,56 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     function depositReservePool(uint256 _amount) external {
         _mint(address(this), _amount);
         collateralToken.safeTransferFrom(_msgSender(), address(this), _amount);
+    }
+
+    /// @notice Reset all trading state (orders, positions, funding, nonce)
+    /// @dev Intended for testnet use to wipe state without redeploying. ERC20 balances are not touched.
+    function resetState() external onlyOwner {
+        // Clear all bid orders and price levels
+        (, uint256 price) = activeBidPrices.getNextNode(0);
+        while (price != 0) {
+            (, uint256 nextPrice) = activeBidPrices.getNextNode(price);
+            _clearPriceLevelOrders(price, true);
+            activeBidPrices.remove(price);
+            price = nextPrice;
+        }
+
+        // Clear all ask orders and price levels
+        (, price) = activeAskPrices.getNextNode(0);
+        while (price != 0) {
+            (, uint256 nextPrice) = activeAskPrices.getNextNode(price);
+            _clearPriceLevelOrders(price, false);
+            activeAskPrices.remove(price);
+            price = nextPrice;
+        }
+
+        // Clear all positions and per-user funding snapshots
+        address[] memory users = usersWithPositions.values();
+        for (uint256 i = 0; i < users.length; i++) {
+            delete userFundingSnapshot[users[i]];
+            delete positions[users[i]];
+            usersWithPositions.remove(users[i]);
+        }
+
+        cumulativeFundingPerUnit = 0;
+        lastFundingUpdateTime = 0;
+        nonce = 0;
+    }
+
+    /// @notice Clear all orders at a single price level and remove them from participant indexes
+    function _clearPriceLevelOrders(uint256 _price, bool _isBid) private {
+        StructuredLinkedList.List storage queue = _isBid ? priceOrdersLongQueue[_price] : priceOrdersShortQueue[_price];
+        (, uint256 orderIdUint) = queue.getNextNode(0);
+        while (orderIdUint != 0) {
+            (, uint256 nextOrderIdUint) = queue.getNextNode(orderIdUint);
+            bytes32 orderId = bytes32(orderIdUint);
+            address participant = orders[orderId].participant;
+            participantOrderIdsIndex[participant].remove(orderId);
+            userTotalOrderValue[participant] = 0;
+            delete orders[orderId];
+            queue.remove(orderIdUint);
+            orderIdUint = nextOrderIdUint;
+        }
     }
 
     /// @notice Withdraw from reserve pool
