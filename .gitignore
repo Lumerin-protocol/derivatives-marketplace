@@ -47,6 +47,8 @@ secret.*
 
 # tests
 /test-temp
+indexer/tests/.bin
+indexer/tests/.latest.json
 
 # hide any .internal.md files (LOcal AI discussion notes)
 *.internal.md

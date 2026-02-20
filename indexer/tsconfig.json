@@ -1,4 +1,4 @@
 {
-  "extends": "@graphprotocol/graph-ts/types/tsconfig.base.json",
-  "include": ["src", "tests"]
+  "files": [],
+  "references": [{ "path": "./tsconfig.graph.json" }, { "path": "./tsconfig.smoke.json" }]
 }

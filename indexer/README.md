@@ -205,4 +205,4 @@ The ABI is read from `../contracts/abi/PerpsSimple.json`, so the contracts packa
 }
 ```
 
-A full set of reusable queries is available in `tests/subgraph-queries.ts`. The test runner in `tests/queries.test.ts` can be used to smoke-test the subgraph against a running instance.
+A full set of reusable queries is available in `tests/subgraph-queries.ts`. The test runner in `tests/queries.smoke.ts` can be used to smoke-test the subgraph against a running instance (`pnpm test:smoke`).

@@ -1,0 +1,49 @@
+name: Indexer Tests
+
+on:
+  push:
+    branches: [main, dev, stg]
+    paths:
+      - 'indexer/**'
+      - '.github/workflows/indexer-tests.yml'
+
+  pull_request:
+    paths:
+      - 'indexer/**'
+      - '.github/workflows/indexer-tests.yml'
+
+  workflow_dispatch:
+
+concurrency:
+  group: indexer-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    name: Indexer Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        working-directory: ./indexer
+        run: pnpm install --frozen-lockfile
+
+      - name: Run unit tests
+        working-directory: ./indexer
+        run: pnpm test

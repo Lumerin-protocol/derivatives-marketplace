@@ -1,0 +1,4 @@
+{
+  "extends": "../tsconfig.smoke.json",
+  "include": ["queries.smoke.ts", "subgraph-queries.ts"]
+}

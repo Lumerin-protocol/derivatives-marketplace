@@ -35,7 +35,7 @@ import {
   PositionSession,
 } from "../generated/schema";
 import { isSameSign } from "./lib";
-import { positionSessionId } from "./ids";
+import { createEventId, positionSessionId } from "./ids";
 
 // ============ Helper Functions ============
 
@@ -164,7 +164,6 @@ function getOrCreateUser(address: Address, timestamp: BigInt): User {
     user.realizedPnl = BigInt.zero();
     user.totalFundingPaid = BigInt.zero();
     user.totalFundingReceived = BigInt.zero();
-    user.trades = [];
     user.createdAt = timestamp;
     user.lastActivityAt = timestamp;
 
@@ -195,10 +194,6 @@ function getOrCreatePriceLevel(price: BigInt, isBid: boolean): PriceLevel {
     level.orderCount = 0;
   }
   return level;
-}
-
-function createEventId(transactionHash: Bytes, logIndex: BigInt): Bytes {
-  return transactionHash.concatI32(logIndex.toI32());
 }
 
 // ============ Event Handlers ============
@@ -368,7 +363,7 @@ export function handleOrderUpdated(event: OrderUpdated): void {
 }
 
 export function handleOrderMatched(event: OrderMatched): void {
-  log.info("Order matched: maker {} buyer {} seller {} price {} qty {}", [
+  log.info("Order matched: makerOrderId {} buyer {} seller {} price {} qty {}", [
     event.params.makerOrderId.toHexString(),
     event.params.buyer.toHexString(),
     event.params.seller.toHexString(),
