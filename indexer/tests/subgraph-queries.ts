@@ -71,58 +71,35 @@ export const UserOrdersQuery = gql`
   }
 `;
 
-// Get user's trades
+// Get user's trades (position updates from PositionTrade events)
 export const UserTradesQuery = gql`
   query UserTrades($address: ID!, $first: Int!, $skip: Int!) {
     user(id: $address) {
       trades(first: $first, skip: $skip, orderBy: timestamp, orderDirection: desc) {
         id
-        makerOrderId
-        buyer {
-          address
-        }
-        seller {
-          address
-        }
-        price
-        quantity
-        volume
-        timestamp
-      }
-    }
-  }
-`;
-
-// Get user's position history
-export const UserPositionHistoryQuery = gql`
-  query UserPositionHistory($address: ID!, $first: Int!, $skip: Int!) {
-    user(id: $address) {
-      positionHistory(first: $first, skip: $skip, orderBy: timestamp, orderDirection: desc) {
-        id
         tradePrice
         tradeQuantity
         netQuantityAfter
         aggregatedEntryPriceAfter
+        realizedPnl
         timestamp
       }
     }
   }
 `;
 
-// Get recent trades
+// Get recent trades (each row = one user's side of a match)
 export const RecentTradesQuery = gql`
   query RecentTrades($first: Int!, $skip: Int!) {
     trades(first: $first, skip: $skip, orderBy: timestamp, orderDirection: desc) {
       id
-      buyer {
+      user {
         address
       }
-      seller {
-        address
-      }
-      price
-      quantity
-      volume
+      tradePrice
+      tradeQuantity
+      netQuantityAfter
+      realizedPnl
       timestamp
       blockNumber
       transactionHash

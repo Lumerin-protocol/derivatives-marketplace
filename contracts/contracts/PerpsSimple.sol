@@ -93,6 +93,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
 
     // Events
     event OrderCreated(bytes32 indexed orderId, address indexed participant, uint256 price, int256 quantity);
+    // TODO: expose average fill price for the order or connect it with the trade event
     event OrderFilled(bytes32 indexed orderId, address indexed participant);
     event OrderCancelled(bytes32 indexed orderId, address indexed participant);
     event OrderUpdated(bytes32 indexed orderId, address indexed participant, int256 newQuantity);
@@ -104,9 +105,9 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         uint256 tradePrice,
         int256 quantity,
         int256 netQuantityAfter,
-        uint256 aggregatedEntryPriceAfter
+        uint256 aggregatedEntryPriceAfter,
+        int256 realizedPnl
     );
-    event PositionClosed(address indexed user, int256 quantityClosed, int256 pnl);
     event CollateralAdded(address indexed user, uint256 amount);
     event CollateralRemoved(address indexed user, uint256 amount);
     event MatchFeeUpdated(int16 newTakerFeeBps, int16 newMakerFeeBps);
@@ -430,13 +431,13 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         // Buyer always gets positive (long), seller always gets negative (short)
         int256 absQty = int256(_abs(_quantity));
 
+        emit OrderMatched(matchedOrderId, buyer, seller, _price, uint256(absQty));
+
         // Update buyer's position (long: positive quantity)
         _updateUserPosition(buyer, absQty, _price);
 
         // Update seller's position (short: negative quantity)
         _updateUserPosition(seller, -absQty, _price);
-
-        emit OrderMatched(matchedOrderId, buyer, seller, _price, uint256(absQty));
     }
 
     /// @notice Update a user's net position with aggregated entry price
@@ -456,15 +457,15 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             // Sync funding snapshot for the new position
             userFundingSnapshot[_user] = cumulativeFundingPerUnit;
 
-            emit PositionTrade(_user, _tradePrice, _quantity, newNetQuantity, _tradePrice);
+            emit PositionTrade(_user, _tradePrice, _quantity, newNetQuantity, position.aggregatedEntryPrice, 0);
             return;
         }
 
         uint256 oldAbsQuantity = _abs(position.netQuantity);
         int256 priceDiff = int256(_tradePrice) - int256(position.aggregatedEntryPrice);
 
+        // Same direction - add to position with weighted average entry price
         if (_isSameSign(position.netQuantity, _quantity)) {
-            // Same direction - add to position with weighted average entry price
             uint256 newAbsQuantity = _abs(newNetQuantity);
 
             // Weighted average: (oldQty * oldPrice + newQty * newPrice) / totalQty
@@ -473,38 +474,31 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             position.aggregatedEntryPrice = (oldValue + newValue) / newAbsQuantity;
             position.netQuantity = newNetQuantity;
 
-            emit PositionTrade(_user, _tradePrice, _quantity, newNetQuantity, position.aggregatedEntryPrice);
+            emit PositionTrade(_user, _tradePrice, _quantity, newNetQuantity, position.aggregatedEntryPrice, 0);
+            return;
+        }
+
+        // Opposite direction: settle the reduced part, then open remainder (if any) in opposite side
+        uint256 settledAbs = absQuantity < oldAbsQuantity ? absQuantity : oldAbsQuantity;
+        int256 settledQuantity = _toSignedQuantity(settledAbs, position.netQuantity);
+        int256 pnl = _settleReducedPosition(_user, priceDiff, settledQuantity);
+        uint256 remainingAbs = absQuantity - settledAbs;
+
+        if (remainingAbs > 0) {
+            // Flip: emit close then open opposite
+            uint256 entryPriceBefore = position.aggregatedEntryPrice;
+            position.netQuantity = _toSignedQuantity(remainingAbs, _quantity);
+            position.aggregatedEntryPrice = _tradePrice;
+            userFundingSnapshot[_user] = cumulativeFundingPerUnit;
+            emit PositionTrade(_user, _tradePrice, settledQuantity, 0, entryPriceBefore, pnl);
+            emit PositionTrade(_user, _tradePrice, position.netQuantity, position.netQuantity, _tradePrice, 0);
+        } else if (newNetQuantity == 0) {
+            emit PositionTrade(_user, _tradePrice, settledQuantity, 0, position.aggregatedEntryPrice, pnl);
+            delete positions[_user];
+            usersWithPositions.remove(_user);
         } else {
-            // Opposite direction - offset position and settle reduced amount
-            if (absQuantity >= oldAbsQuantity) {
-                // Fully offset or flip - settle the full original position
-                int256 settledQuantity = _toSignedQuantity(oldAbsQuantity, position.netQuantity);
-                int256 pnl = _settleReducedPosition(_user, priceDiff, settledQuantity);
-
-                uint256 remaining = absQuantity - oldAbsQuantity;
-                if (remaining > 0) {
-                    // Flip position - create new position in opposite direction
-                    position.netQuantity = _toSignedQuantity(remaining, _quantity);
-                    position.aggregatedEntryPrice = _tradePrice;
-
-                    emit PositionTrade(_user, _tradePrice, _quantity, position.netQuantity, _tradePrice);
-                } else {
-                    // Fully offset - close position
-                    delete positions[_user];
-                    usersWithPositions.remove(_user);
-
-                    emit PositionClosed(_user, settledQuantity, pnl);
-                }
-            } else {
-                // Partially offset - settle only the reduced amount
-                int256 reducedQuantity = _toSignedQuantity(absQuantity, position.netQuantity);
-                int256 pnl = _settleReducedPosition(_user, priceDiff, reducedQuantity);
-
-                position.netQuantity = newNetQuantity;
-
-                emit PositionTrade(_user, _tradePrice, _quantity, newNetQuantity, position.aggregatedEntryPrice);
-                emit PositionClosed(_user, reducedQuantity, pnl);
-            }
+            position.netQuantity = newNetQuantity;
+            emit PositionTrade(_user, _tradePrice, _quantity, newNetQuantity, position.aggregatedEntryPrice, pnl);
         }
     }
 
@@ -857,6 +851,54 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         if (activeAskPrices.sizeOf() == 0) return 0;
         (, uint256 bestAsk) = activeAskPrices.getNextNode(0);
         return bestAsk;
+    }
+
+    /// @notice Simulate an order: how much would match and at what average price (view, no state change).
+    /// @param _price Limit price (same as createOrder)
+    /// @param _quantity Order quantity (positive = buy, negative = sell)
+    /// @return filledQuantity Signed quantity that would be matched (same sign as _quantity)
+    /// @return averageFillPrice Volume-weighted average fill price (0 if no fill). Uses same decimals as price.
+    /// @return remainingQuantity Signed quantity that would rest on the book or remain unfilled
+    function simulateOrder(uint256 _price, int256 _quantity)
+        external
+        view
+        returns (int256 filledQuantity, uint256 averageFillPrice, int256 remainingQuantity)
+    {
+        if (_quantity == 0) return (0, 0, 0);
+
+        bool isBuy = _quantity > 0;
+        remainingQuantity = _quantity;
+        uint256 totalNotional = 0;
+        uint256 totalFilledAbs = 0;
+
+        StructuredLinkedList.List storage oppositePrices = isBuy ? activeAskPrices : activeBidPrices;
+        (, uint256 currentPrice) = oppositePrices.getNextNode(0);
+
+        while (currentPrice != 0 && remainingQuantity != 0) {
+            if (isBuy && currentPrice > _price) break;
+            if (!isBuy && currentPrice < _price) break;
+
+            StructuredLinkedList.List storage orderQueue = isBuy ? priceOrdersShortQueue[currentPrice] : priceOrdersLongQueue[currentPrice];
+            (, uint256 orderIdUint) = orderQueue.getNextNode(0);
+
+            while (orderIdUint != 0 && remainingQuantity != 0) {
+                Order storage makerOrder = orders[bytes32(orderIdUint)];
+                uint256 matchAmt = _min(_abs(makerOrder.quantity), _abs(remainingQuantity));
+                if (matchAmt > 0) {
+                    totalNotional += _calculateValue(makerOrder.price, matchAmt);
+                    totalFilledAbs += matchAmt;
+                    remainingQuantity -= _toSignedQuantity(matchAmt, remainingQuantity);
+                }
+                (, orderIdUint) = orderQueue.getNextNode(orderIdUint);
+            }
+
+            (, currentPrice) = oppositePrices.getNextNode(currentPrice);
+        }
+
+        filledQuantity = _quantity - remainingQuantity;
+        if (totalFilledAbs > 0) {
+            averageFillPrice = (totalNotional * (10 ** QUANTITY_DECIMALS)) / totalFilledAbs;
+        }
     }
 
     /// @notice Charge match fee to a participant (maker or taker)
