@@ -210,7 +210,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         return price;
     }
 
-    /// @notice Create an order (buy or sell) with limit price matching
+    /// @notice Create an order (buy or sell) with limit price matching (direct walk, no simulate list).
     /// @param _price Limit price (must be multiple of minimumPriceIncrement)
     /// @param _quantity Order quantity (positive = long/buy, negative = short/sell)
     /// @dev Buy orders match with asks at or below the limit price
@@ -221,14 +221,10 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         _validatePrice(_price);
 
         bool isBuy = _quantity > 0;
-
-        // Track remaining quantity to be placed/matched
         int256 remainingQuantity = _quantity;
 
-        // Match with opposite orders using limit price logic
         remainingQuantity = _matchWithOppositeOrders(_msgSender(), _price, remainingQuantity);
 
-        // If there's remaining quantity, add order to book
         if (remainingQuantity != 0) {
             // Validate minimum margin per resting order
             if (minimumMarginPerOrder > 0) {
@@ -258,8 +254,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         _ensureSufficientMargin(_msgSender());
     }
 
-    /// @notice Match incoming order with opposite orders using limit price logic
-    /// @return remainingQuantity The remaining quantity after matching
+    /// @notice Match incoming order with opposite orders using limit price logic (direct walk).
     function _matchWithOppositeOrders(address _taker, uint256 _limitPrice, int256 _quantity)
         private
         returns (int256 remainingQuantity)
@@ -275,14 +270,15 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             if (_isBuy && currentPrice > _limitPrice) break;
             if (!_isBuy && currentPrice < _limitPrice) break;
 
+            (, uint256 nextPrice) = oppositePrices.getNextNode(currentPrice);
             remainingQuantity = _matchOrdersAtPrice(_taker, currentPrice, remainingQuantity, _isBuy);
-            (, currentPrice) = oppositePrices.getNextNode(currentPrice);
+            currentPrice = nextPrice;
         }
 
         return remainingQuantity;
     }
 
-    /// @notice Match orders at a specific price level
+    /// @notice Match orders at a specific price level (direct walk).
     function _matchOrdersAtPrice(address _taker, uint256 _price, int256 _remainingQty, bool _isBuy)
         private
         returns (int256)
@@ -293,9 +289,6 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             (, uint256 orderIdUint) = makerOrderQueue.getNextNode(0);
             bytes32 makerOrderId = bytes32(orderIdUint);
             Order storage makerOrder = orders[makerOrderId];
-
-            // Self-trades are allowed — user pays fees, position nets out.
-            // Users can cancelOrder() beforehand if they don't want to self-trade.
             _remainingQty = _executeMatch(_taker, makerOrderId, makerOrder, _remainingQty);
         }
 
@@ -867,27 +860,27 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         if (_quantity == 0) return (0, 0, 0);
 
         bool isBuy = _quantity > 0;
-        remainingQuantity = _quantity;
+        int256 remaining = _quantity;
         uint256 totalNotional = 0;
         uint256 totalFilledAbs = 0;
-
         StructuredLinkedList.List storage oppositePrices = isBuy ? activeAskPrices : activeBidPrices;
         (, uint256 currentPrice) = oppositePrices.getNextNode(0);
 
-        while (currentPrice != 0 && remainingQuantity != 0) {
+        while (currentPrice != 0 && remaining != 0) {
             if (isBuy && currentPrice > _price) break;
             if (!isBuy && currentPrice < _price) break;
 
-            StructuredLinkedList.List storage orderQueue = isBuy ? priceOrdersShortQueue[currentPrice] : priceOrdersLongQueue[currentPrice];
+            StructuredLinkedList.List storage orderQueue =
+                isBuy ? priceOrdersShortQueue[currentPrice] : priceOrdersLongQueue[currentPrice];
             (, uint256 orderIdUint) = orderQueue.getNextNode(0);
 
-            while (orderIdUint != 0 && remainingQuantity != 0) {
+            while (orderIdUint != 0 && remaining != 0) {
                 Order storage makerOrder = orders[bytes32(orderIdUint)];
-                uint256 matchAmt = _min(_abs(makerOrder.quantity), _abs(remainingQuantity));
+                uint256 matchAmt = _min(_abs(makerOrder.quantity), _abs(remaining));
                 if (matchAmt > 0) {
                     totalNotional += _calculateValue(makerOrder.price, matchAmt);
                     totalFilledAbs += matchAmt;
-                    remainingQuantity -= _toSignedQuantity(matchAmt, remainingQuantity);
+                    remaining -= _toSignedQuantity(matchAmt, remaining);
                 }
                 (, orderIdUint) = orderQueue.getNextNode(orderIdUint);
             }
@@ -895,6 +888,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             (, currentPrice) = oppositePrices.getNextNode(currentPrice);
         }
 
+        remainingQuantity = remaining;
         filledQuantity = _quantity - remainingQuantity;
         if (totalFilledAbs > 0) {
             averageFillPrice = (totalNotional * (10 ** QUANTITY_DECIMALS)) / totalFilledAbs;
