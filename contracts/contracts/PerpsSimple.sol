@@ -266,6 +266,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         remainingQuantity = _quantity;
         bool _isBuy = _quantity > 0;
         StructuredLinkedList.List storage oppositePrices = _isBuy ? activeAskPrices : activeBidPrices;
+
         if (oppositePrices.sizeOf() == 0) return remainingQuantity;
 
         (, uint256 currentPrice) = oppositePrices.getNextNode(0);
@@ -308,27 +309,29 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         private
         returns (int256)
     {
+        // Cache fields from storage once to avoid repeated SLOADs.
+        uint256 makerPrice = _makerOrder.price;
+        address makerParticipant = _makerOrder.participant;
         uint256 matchAmt = _min(_abs(_makerOrder.quantity), _abs(_remainingQty));
         int256 matchQty = _toSignedQuantity(matchAmt, _remainingQty);
-        uint256 notionalValue = _calculateValue(_makerOrder.price, matchAmt);
+        uint256 notionalValue = _calculateValue(makerPrice, matchAmt);
 
-        // Execute at maker's price (price improvement for taker)
-        Order memory orderCopy = _makerOrder;
-        _createPosition(_makerOrderId, orderCopy, _taker, _makerOrder.price, matchQty, _taker);
+        _createPosition(_makerOrderId, makerParticipant, _taker, makerPrice, matchQty, _taker);
 
         // Charge fees at match time
         _chargeMatchFee(_taker, notionalValue, true); // taker fee
-        _chargeMatchFee(_makerOrder.participant, notionalValue, false); // maker fee
+        _chargeMatchFee(makerParticipant, notionalValue, false); // maker fee
 
         // Update cached order value
-        userTotalOrderValue[_makerOrder.participant] -= notionalValue;
+        userTotalOrderValue[makerParticipant] -= notionalValue;
         _makerOrder.quantity = _reduceQuantity(_makerOrder.quantity, matchAmt);
 
         if (_makerOrder.quantity == 0) {
-            emit OrderFilled(_makerOrderId, _makerOrder.participant);
-            _removeOrder(_makerOrderId, _makerOrder, orderCopy.quantity > 0);
+            emit OrderFilled(_makerOrderId, makerParticipant);
+            // Maker is a bid when the taker is selling (_remainingQty < 0).
+            _removeOrder(_makerOrderId, makerParticipant, makerPrice, _remainingQty < 0);
         } else {
-            emit OrderUpdated(_makerOrderId, _makerOrder.participant, _makerOrder.quantity);
+            emit OrderUpdated(_makerOrderId, makerParticipant, _makerOrder.quantity);
         }
 
         return _remainingQty - matchQty;
@@ -337,11 +340,6 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     /// @notice Get absolute value of int256
     function _abs(int256 _value) private pure returns (uint256) {
         return _value > 0 ? uint256(_value) : uint256(-_value);
-    }
-
-    /// @notice Check if two quantities have opposite signs
-    function _isOppositeSign(int256 _a, int256 _b) private pure returns (bool) {
-        return (_a > 0 && _b < 0) || (_a < 0 && _b > 0);
     }
 
     /// @notice Check if two quantities have the same sign
@@ -379,24 +377,17 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         }
 
         bool isBid = order.quantity > 0;
-        _removeOrder(_orderId, order, isBid);
+        userTotalOrderValue[order.participant] -= _calculateValue(order.price, _abs(order.quantity));
+        _removeOrder(_orderId, order.participant, order.price, isBid);
         _removePriceLevelIfEmpty(order.price, isBid);
         emit OrderCancelled(_orderId, order.participant);
     }
 
     /// @notice Remove an order from the book (internal)
-    /// @dev _isBid preserved because order.quantity could be zero
-    function _removeOrder(bytes32 _orderId, Order memory order, bool _isBid) private {
-        StructuredLinkedList.List storage orderQueue = _priceOrderIds(order.price, _isBid);
-
-        orderQueue.remove(uint256(_orderId));
-
-        participantOrderIdsIndex[order.participant].remove(_orderId);
-
-        // Calculate and subtract order value from cached total
-        uint256 orderValue = _calculateValue(order.price, _abs(order.quantity));
-        userTotalOrderValue[order.participant] -= orderValue;
-
+    /// @dev Callers are responsible for updating userTotalOrderValue before this call.
+    function _removeOrder(bytes32 _orderId, address _participant, uint256 _price, bool _isBid) private {
+        _priceOrderIds(_price, _isBid).remove(uint256(_orderId));
+        participantOrderIdsIndex[_participant].remove(_orderId);
         delete orders[_orderId];
     }
 
@@ -416,7 +407,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     /// @param _taker Address of the taker whose funding was already settled before the matching loop
     function _createPosition(
         bytes32 matchedOrderId,
-        Order memory matchedOrder,
+        address makerParticipant,
         address _otherParticipant,
         uint256 _price,
         int256 _quantity,
@@ -425,8 +416,8 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         // Determine buyer and seller based on quantity sign
         // Positive quantity = taker is buying, negative = taker is selling
         (address buyer, address seller) = _quantity > 0
-            ? (_otherParticipant, matchedOrder.participant)
-            : (matchedOrder.participant, _otherParticipant);
+            ? (_otherParticipant, makerParticipant)
+            : (makerParticipant, _otherParticipant);
 
         // Use absolute quantity for position updates
         // Buyer always gets positive (long), seller always gets negative (short)
@@ -788,13 +779,14 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         }
 
         // Enforce max price levels per side
-        if (priceList.sizeOf() >= MAX_PRICE_LEVELS_PER_SIDE) {
+        uint256 size = priceList.sizeOf();
+        if (size >= MAX_PRICE_LEVELS_PER_SIDE) {
             revert MaxPriceLevelsReached();
         }
 
         // Find insertion point for sorted order
         // Bids: highest first (descending), Asks: lowest first (ascending)
-        if (priceList.sizeOf() == 0) {
+        if (size == 0) {
             priceList.pushFront(_price);
             return;
         }
