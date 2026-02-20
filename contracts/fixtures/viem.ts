@@ -1,16 +1,16 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { type Address, encodeFunctionData, getContract, maxUint256, parseUnits } from "viem";
-import { perpsSimpleAbi, usdcMockAbi, priceOracleMockAbi } from "../src/abi.ts";
+import { perpsSimpleAbi, usdcMockAbi, priceOracleMockAbi } from "../abi/abi.ts";
 import {
   HARDHAT_ACCOUNTS,
   createTestPublicClient,
   createTestWalletClient,
   createTestClientInstance,
+  hardhat,
 } from "./helpers.ts";
-import { hardhat } from "../src/client.ts";
 
-const ARTIFACTS_DIR = resolve(import.meta.dirname, "../../contracts/artifacts");
+const ARTIFACTS_DIR = resolve(import.meta.dirname, "../artifacts");
 
 function loadArtifact(contractPath: string) {
   const raw = readFileSync(resolve(ARTIFACTS_DIR, contractPath), "utf-8");
@@ -36,12 +36,9 @@ async function deploy(
   return receipt.contractAddress;
 }
 
-// ── Fixture types ────────────────────────────────────────────────────────────
-
 // ── Base deployment fixture ──────────────────────────────────────────────────
 
 export async function deployPerpsFixture() {
-  // Create clients
   const publicClient = createTestPublicClient();
   const testClient = createTestClientInstance();
   const ownerWallet = createTestWalletClient(HARDHAT_ACCOUNTS[0].privateKey);
@@ -57,7 +54,6 @@ export async function deployPerpsFixture() {
     bytecode: multicall3Artifact.deployedBytecode,
   });
 
-  // Load artifacts
   const usdcArtifact = loadArtifact("contracts/USDCMock.sol/USDCMock.json");
   const oracleArtifact = loadArtifact("contracts/PriceOracleMock.sol/PriceOracleMock.json");
   const perpsArtifact = loadArtifact("contracts/PerpsSimple.sol/PerpsSimple.json");
@@ -65,7 +61,6 @@ export async function deployPerpsFixture() {
     "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol/ERC1967Proxy.json",
   );
 
-  // Deploy USDC Mock
   const usdcAddress = await deploy(ownerWallet, publicClient, usdcArtifact);
   const usdc = getContract({
     address: usdcAddress,
@@ -76,7 +71,6 @@ export async function deployPerpsFixture() {
   const tokenDecimals = await usdc.read.decimals();
   const topUpBalanceUSDC = parseUnits("1000", tokenDecimals);
 
-  // Deploy Price Oracle Mock
   const oracleDecimals = 6;
   const initialPrice = parseUnits("2.9976357", oracleDecimals);
   const oracleAddress = await deploy(ownerWallet, publicClient, oracleArtifact, [
@@ -84,12 +78,10 @@ export async function deployPerpsFixture() {
     oracleDecimals,
   ]);
 
-  // Top up accounts with USDC
   await usdc.write.transfer([HARDHAT_ACCOUNTS[1].address, topUpBalanceUSDC]);
   await usdc.write.transfer([HARDHAT_ACCOUNTS[2].address, topUpBalanceUSDC]);
   await usdc.write.transfer([HARDHAT_ACCOUNTS[3].address, topUpBalanceUSDC]);
 
-  // Configuration
   const marginPercent = 10;
   const maintenanceMarginPercent = 5;
   const liquidationFee = parseUnits("1", tokenDecimals);
@@ -98,7 +90,6 @@ export async function deployPerpsFixture() {
   const makerFeeBps = 0;
   const collateralAmount = parseUnits("100000", tokenDecimals);
 
-  // Deploy PerpsSimple (implementation + proxy)
   const perpsImplAddress = await deploy(ownerWallet, publicClient, perpsArtifact, [
     minimumPriceIncrement,
   ]);
@@ -122,11 +113,9 @@ export async function deployPerpsFixture() {
 
   const quantityDecimals = await perps.read.QUANTITY_DECIMALS();
 
-  // Set fees
   await perps.write.setMatchFee([takerFeeBps, makerFeeBps]);
   await perps.write.setLiquidationFee([liquidationFee]);
 
-  // Approve perps contract to spend USDC for all accounts
   for (const wallet of [sellerWallet, buyerWallet, buyer2Wallet, ownerWallet]) {
     const usdcForWallet = getContract({
       address: usdcAddress,
@@ -136,7 +125,6 @@ export async function deployPerpsFixture() {
     await usdcForWallet.write.approve([perpsProxyAddress, maxUint256]);
   }
 
-  // Deposit to reserve pool
   await perps.write.depositReservePool([collateralAmount]);
 
   const getMinimumCollateral = (price: bigint, absQuantity: bigint) => {
@@ -197,7 +185,7 @@ export async function deployWithCollateralFixture() {
   };
 }
 
-// ── With liquidatable position ───────────────────────────────────────────────
+// ── With liquidatable position ────────────────────────────────────────────────
 
 export async function deployWithLiquidatablePositionFixture() {
   const data = await deployPerpsFixture();
@@ -222,18 +210,13 @@ export async function deployWithLiquidatablePositionFixture() {
   const initialPrice = (await perpsOwner.read.getMarketPrice()) as bigint;
   const qty = parseUnits("1", config.quantityDecimals);
 
-  // Minimal collateral for seller (just enough to create position)
   const minCollateral = getMinimumCollateral(initialPrice, qty);
   await perpsSeller.write.addCollateral([minCollateral]);
-
-  // More collateral for buyer
   await perpsBuyer.write.addCollateral([minCollateral * 2n]);
 
-  // Create matching orders at initial price
   await perpsSeller.write.createOrder([initialPrice, -qty]);
   await perpsBuyer.write.createOrder([initialPrice, qty]);
 
-  // Seller now has a short position — if price goes up, seller becomes liquidatable
   const makeLiquidatable = async (): Promise<bigint> => {
     const newPrice = initialPrice * 2n;
     const oracle = getContract({

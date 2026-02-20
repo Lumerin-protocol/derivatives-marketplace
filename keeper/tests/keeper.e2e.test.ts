@@ -13,7 +13,10 @@ import {
   type HardhatNode,
   loadFixture,
 } from "./helpers.ts";
-import { deployWithCollateralFixture, deployWithLiquidatablePositionFixture } from "./fixture.ts";
+import {
+  deployWithCollateralFixture,
+  deployWithLiquidatablePositionFixture,
+} from "../../contracts/fixtures/viem.ts";
 import { perpsSimpleAbi } from "../src/abi.ts";
 
 const silentLogger = pino({ level: "silent" });

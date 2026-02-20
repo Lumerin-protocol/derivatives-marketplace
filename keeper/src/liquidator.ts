@@ -39,15 +39,16 @@ export class Liquidator {
 
   async start(): Promise<void> {
     // Read static contract params in a single multicall
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const results = (await this.publicClient.multicall({
       contracts: [
-        { address: this.config.perpsAddress, abi: perpsSimpleAbi, functionName: "liquidationFee" },
-        { address: this.config.perpsAddress, abi: perpsSimpleAbi, functionName: "decimals" },
+        { address: this.config.perpsAddress, abi: perpsSimpleAbi as any, functionName: "liquidationFee" },
+        { address: this.config.perpsAddress, abi: perpsSimpleAbi as any, functionName: "decimals" },
         ...(this.config.ethPriceFeedAddress
           ? [
               {
                 address: this.config.ethPriceFeedAddress,
-                abi: aggregatorV3InterfaceAbi,
+                abi: aggregatorV3InterfaceAbi as any,
                 functionName: "decimals",
               },
             ]
