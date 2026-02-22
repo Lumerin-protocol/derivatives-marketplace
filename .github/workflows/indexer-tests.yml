@@ -4,13 +4,13 @@ on:
   push:
     branches: [main, dev, stg]
     paths:
-      - 'indexer/**'
-      - '.github/workflows/indexer-tests.yml'
+      - "indexer/**"
+      - ".github/workflows/indexer-tests.yml"
 
   pull_request:
     paths:
-      - 'indexer/**'
-      - '.github/workflows/indexer-tests.yml'
+      - "indexer/**"
+      - ".github/workflows/indexer-tests.yml"
 
   workflow_dispatch:
 
@@ -35,7 +35,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: "22"
 
       - name: Enable corepack
         run: corepack enable
@@ -43,6 +43,10 @@ jobs:
       - name: Install dependencies
         working-directory: ./indexer
         run: pnpm install --frozen-lockfile
+
+      - name: Graph codegen
+        working-directory: ./indexer
+        run: pnpm codegen
 
       - name: Run unit tests
         working-directory: ./indexer
