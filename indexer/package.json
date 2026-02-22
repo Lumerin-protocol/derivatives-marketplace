@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "clean": "rm -rf data generated build subgraph.yaml",
-    "codegen": "graph codegen",
+    "codegen": "pnpm prepare-local && graph codegen",
     "prepare:env": "envsubst < subgraph.template.yaml > subgraph.yaml",
     "prepare-local": "set -a && source ../.env && set +a && envsubst < subgraph.template.yaml > subgraph.yaml",
     "build": "graph build",

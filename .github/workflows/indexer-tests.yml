@@ -28,6 +28,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
+    env:
+      PERPS_ADDRESS: "0x0000000000000000000000000000000000000000"
+      PERPS_START_BLOCK: "0"
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -46,7 +50,7 @@ jobs:
 
       - name: Graph codegen
         working-directory: ./indexer
-        run: pnpm prepare:env && pnpm exec graph codegen
+        run: pnpm codegen
 
       - name: Run unit tests
         working-directory: ./indexer
