@@ -44,17 +44,15 @@ jobs:
       - name: Enable corepack
         run: corepack enable
 
-      - name: Get pnpm store directory
-        id: pnpm-store
-        run: echo "path=$(pnpm store path)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache pnpm store
-        uses: actions/cache@v4
+      - name: Restore cache
+        uses: actions/cache/restore@v4
         with:
-          path: ${{ steps.pnpm-store.outputs.path }}
-          key: pnpm-store-${{ runner.os }}-${{ hashFiles('indexer/pnpm-lock.yaml') }}
+          path: |
+            ~/.local/share/pnpm/store
+            indexer/node_modules
+          key: pnpm-${{ runner.os }}-${{ hashFiles('indexer/pnpm-lock.yaml') }}
           restore-keys: |
-            pnpm-store-${{ runner.os }}-
+            pnpm-${{ runner.os }}-
 
       - name: Install dependencies
         working-directory: ./indexer
@@ -67,3 +65,12 @@ jobs:
       - name: Run unit tests
         working-directory: ./indexer
         run: pnpm test
+
+      - name: Save cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: |
+            ~/.local/share/pnpm/store
+            indexer/node_modules
+          key: pnpm-${{ runner.os }}-${{ hashFiles('indexer/pnpm-lock.yaml') }}
