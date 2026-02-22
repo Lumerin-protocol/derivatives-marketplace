@@ -46,7 +46,7 @@ jobs:
 
       - name: Graph codegen
         working-directory: ./indexer
-        run: pnpm codegen
+        run: pnpm prepare:env && pnpm exec graph codegen
 
       - name: Run unit tests
         working-directory: ./indexer
