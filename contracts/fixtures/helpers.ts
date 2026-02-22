@@ -59,7 +59,7 @@ export async function startHardhatNode(): Promise<HardhatNode> {
 
   const proc = spawn("npx", ["hardhat", "node"], {
     cwd: contractsDir,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["inherit", "pipe", "pipe"],
   });
 
   await waitFor(async () => {

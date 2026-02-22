@@ -145,7 +145,7 @@ export async function deployPerpsFixture() {
       buyer2Wallet,
       keeperWallet,
     },
-    contracts: { perpsAddress: perpsProxyAddress, usdcAddress, oracleAddress },
+    contracts: { perpsAddress: perpsProxyAddress, usdcAddress, oracleAddress, perps },
     config: {
       oracle: { price: initialPrice, decimals: oracleDecimals },
       marginPercent,
