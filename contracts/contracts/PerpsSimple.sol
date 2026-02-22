@@ -101,7 +101,8 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         int256 quantity,
         int256 netQuantityAfter,
         uint256 aggregatedEntryPriceAfter,
-        int256 realizedPnl
+        int256 realizedPnl,
+        int256 tradingFee
     );
     event CollateralAdded(address indexed user, uint256 amount);
     event CollateralRemoved(address indexed user, uint256 amount);
@@ -117,6 +118,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     event FundingSettled(address indexed user, int256 amount);
     event FundingParametersUpdated(uint256 maxBps, uint256 period);
     event MinimumMarginPerOrderUpdated(uint256 newMinimumMarginPerOrder);
+
 
     // Errors
     error InvalidPrice();
@@ -314,11 +316,13 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         int256 matchQty = _toSignedQuantity(matchAmt, _remainingQty);
         uint256 notionalValue = _calculateValue(makerPrice, matchAmt);
 
-        _createPosition(_makerOrderId, makerParticipant, _taker, makerPrice, matchQty);
+        int256 takerFee = _calculateMatchFee(notionalValue, true);
+        int256 makerFee = _calculateMatchFee(notionalValue, false);
 
-        // Charge fees at match time
-        _chargeMatchFee(_taker, notionalValue, true); // taker fee
-        _chargeMatchFee(makerParticipant, notionalValue, false); // maker fee
+        _createPosition(_makerOrderId, makerParticipant, _taker, makerPrice, matchQty, takerFee, makerFee);
+
+        _transferFee(_taker, takerFee);
+        _transferFee(makerParticipant, makerFee);
 
         // Update cached order value
         userTotalOrderValue[makerParticipant] -= notionalValue;
@@ -412,11 +416,14 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         address makerParticipant,
         address taker,
         uint256 _price,
-        int256 _quantity
+        int256 _quantity,
+        int256 _takerFee,
+        int256 _makerFee
     ) private {
         // Determine buyer and seller based on quantity sign
         // Positive quantity = taker is buying, negative = taker is selling
         (address buyer, address seller) = _quantity > 0 ? (taker, makerParticipant) : (makerParticipant, taker);
+        (int256 buyerFee, int256 sellerFee) = _quantity > 0 ? (_takerFee, _makerFee) : (_makerFee, _takerFee);
 
         // Use absolute quantity for position updates
         // Buyer always gets positive (long), seller always gets negative (short)
@@ -426,70 +433,67 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
 
         // Skip funding settlement for the taker — already settled once before the loop.
         if (buyer != taker) _settleFunding(buyer);
-        _updateUserPosition(buyer, absQty, _price);
+        _updateUserPosition(buyer, absQty, _price, buyerFee);
 
         if (seller != taker) _settleFunding(seller);
-        _updateUserPosition(seller, -absQty, _price);
+        _updateUserPosition(seller, -absQty, _price, sellerFee);
     }
 
     /// @notice Update a user's net position with aggregated entry price
-    function _updateUserPosition(address _user, int256 _quantity, uint256 _tradePrice) private {
-        // Settle any pending funding at the old position size before changing it.
-
+    function _updateUserPosition(address _user, int256 _quantity, uint256 _tradePrice, int256 _tradingFee) private {
         Position storage position = positions[_user];
-        int256 newNetQuantity = position.netQuantity + _quantity;
-        uint256 absQuantity = _abs(_quantity);
 
         // If no existing position, initialize it
         if (position.netQuantity == 0) {
             position.netQuantity = _quantity;
             position.aggregatedEntryPrice = _tradePrice;
             usersWithPositions.add(_user);
-            // Sync funding snapshot for the new position
             userFundingSnapshot[_user] = cumulativeFundingPerUnit;
-
-            emit PositionTrade(_user, _tradePrice, _quantity, newNetQuantity, position.aggregatedEntryPrice, 0);
+            emit PositionTrade(_user, _tradePrice, _quantity, _quantity, _tradePrice, 0, _tradingFee);
             return;
         }
-
-        uint256 oldAbsQuantity = _abs(position.netQuantity);
-        int256 priceDiff = int256(_tradePrice) - int256(position.aggregatedEntryPrice);
 
         // Same direction - add to position with weighted average entry price
         if (_isSameSign(position.netQuantity, _quantity)) {
-            uint256 newAbsQuantity = _abs(newNetQuantity);
-
-            // Weighted average: (oldQty * oldPrice + newQty * newPrice) / totalQty
-            uint256 oldValue = oldAbsQuantity * position.aggregatedEntryPrice;
-            uint256 newValue = absQuantity * _tradePrice;
-            position.aggregatedEntryPrice = (oldValue + newValue) / newAbsQuantity;
-            position.netQuantity = newNetQuantity;
-
-            emit PositionTrade(_user, _tradePrice, _quantity, newNetQuantity, position.aggregatedEntryPrice, 0);
+            uint256 oldValue = _abs(position.netQuantity) * position.aggregatedEntryPrice;
+            uint256 newValue = _abs(_quantity) * _tradePrice;
+            int256 newNet = position.netQuantity + _quantity;
+            position.aggregatedEntryPrice = (oldValue + newValue) / _abs(newNet);
+            position.netQuantity = newNet;
+            emit PositionTrade(_user, _tradePrice, _quantity, newNet, position.aggregatedEntryPrice, 0, _tradingFee);
             return;
         }
 
-        // Opposite direction: settle the reduced part, then open remainder (if any) in opposite side
-        uint256 settledAbs = absQuantity < oldAbsQuantity ? absQuantity : oldAbsQuantity;
-        int256 settledQuantity = _toSignedQuantity(settledAbs, position.netQuantity);
-        int256 pnl = _settleReducedPosition(_user, priceDiff, settledQuantity);
-        uint256 remainingAbs = absQuantity - settledAbs;
+        // Opposite direction: settle the reduced part, then open remainder (if any)
+        _settleOpposite(_user, _quantity, _tradePrice, _tradingFee);
+    }
 
-        if (remainingAbs > 0) {
+    /// @notice Handle opposite-direction trade (partial/full close or flip)
+    function _settleOpposite(address _user, int256 _quantity, uint256 _tradePrice, int256 _tradingFee) private {
+        Position storage position = positions[_user];
+        uint256 absQuantity = _abs(_quantity);
+        uint256 oldAbsQuantity = _abs(position.netQuantity);
+        uint256 settledAbs = absQuantity < oldAbsQuantity ? absQuantity : oldAbsQuantity;
+        int256 pnl = _settleReducedPosition(
+            _user, int256(_tradePrice) - int256(position.aggregatedEntryPrice), _toSignedQuantity(settledAbs, position.netQuantity)
+        );
+
+        if (absQuantity > oldAbsQuantity) {
             // Flip: emit close then open opposite
             uint256 entryPriceBefore = position.aggregatedEntryPrice;
-            position.netQuantity = _toSignedQuantity(remainingAbs, _quantity);
+            int256 openQty = _toSignedQuantity(absQuantity - oldAbsQuantity, _quantity);
+            position.netQuantity = openQty;
             position.aggregatedEntryPrice = _tradePrice;
             userFundingSnapshot[_user] = cumulativeFundingPerUnit;
-            emit PositionTrade(_user, _tradePrice, settledQuantity, 0, entryPriceBefore, pnl);
-            emit PositionTrade(_user, _tradePrice, position.netQuantity, position.netQuantity, _tradePrice, 0);
-        } else if (newNetQuantity == 0) {
-            emit PositionTrade(_user, _tradePrice, settledQuantity, 0, position.aggregatedEntryPrice, pnl);
+            emit PositionTrade(_user, _tradePrice, _toSignedQuantity(settledAbs, position.netQuantity), 0, entryPriceBefore, pnl, _tradingFee);
+            emit PositionTrade(_user, _tradePrice, openQty, openQty, _tradePrice, 0, 0);
+        } else if (position.netQuantity + _quantity == 0) {
+            emit PositionTrade(_user, _tradePrice, _quantity, 0, position.aggregatedEntryPrice, pnl, _tradingFee);
             delete positions[_user];
             usersWithPositions.remove(_user);
         } else {
-            position.netQuantity = newNetQuantity;
-            emit PositionTrade(_user, _tradePrice, _quantity, newNetQuantity, position.aggregatedEntryPrice, pnl);
+            position.netQuantity += _quantity;
+            emit PositionTrade(_user, _tradePrice, _quantity, position.netQuantity, position.aggregatedEntryPrice, pnl, _tradingFee);
         }
     }
 
@@ -894,13 +898,11 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         }
     }
 
-    /// @notice Charge match fee to a participant (maker or taker)
-    /// @dev Fee is max(notional * feeBps / 10000, liquidationFee) — the liquidation fee
-    ///      acts as a floor to ensure every trade covers potential liquidation costs
-    /// @param _participant Address of the participant
+    /// @notice Calculate match fee for a participant
+    /// @dev Fee is max(notional * feeBps / 10000, liquidationFee) for takers
     /// @param _notionalValue Notional value of the matched trade
     /// @param _isTaker Whether the participant is the taker
-    function _chargeMatchFee(address _participant, uint256 _notionalValue, bool _isTaker) private {
+    function _calculateMatchFee(uint256 _notionalValue, bool _isTaker) private view returns (int256) {
         int16 feeBps = _isTaker ? takerFeeBps : makerFeeBps;
         int256 fee = (int256(_notionalValue) * int256(feeBps)) / 10_000;
 
@@ -910,10 +912,17 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             fee = int256(liquidationFee);
         }
 
-        if (fee > 0) {
-            _transfer(_participant, address(this), uint256(fee));
-        } else if (fee < 0) {
-            _transfer(address(this), _participant, uint256(-fee));
+        return fee;
+    }
+
+    /// @notice Transfer a pre-calculated fee between participant and reserve pool
+    /// @param _participant Address of the participant
+    /// @param _fee Signed fee amount (positive = participant pays, negative = rebate)
+    function _transferFee(address _participant, int256 _fee) private {
+        if (_fee > 0) {
+            _transfer(_participant, address(this), uint256(_fee));
+        } else if (_fee < 0) {
+            _transfer(address(this), _participant, uint256(-_fee));
         }
     }
 

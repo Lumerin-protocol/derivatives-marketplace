@@ -18,7 +18,8 @@
     "setup-local": "pnpm prepare-local && pnpm codegen && pnpm build && pnpm create-local && pnpm deploy-local",
     "test": "graph test",
     "indexer": "docker compose --env-file ../.env up",
-    "test:smoke": "node --test tests/queries.smoke.ts"
+    "test:smoke": "node --test tests/queries.smoke.ts",
+    "graph:api": "open http://localhost:8030/graphql/playground"
   },
   "dependencies": {
     "@graphprotocol/graph-ts": "0.37.0"

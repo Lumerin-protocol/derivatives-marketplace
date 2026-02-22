@@ -711,6 +711,12 @@
         "internalType": "int256",
         "name": "realizedPnl",
         "type": "int256"
+      },
+      {
+        "indexed": false,
+        "internalType": "int256",
+        "name": "tradingFee",
+        "type": "int256"
       }
     ],
     "name": "PositionTrade",

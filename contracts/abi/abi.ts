@@ -821,6 +821,12 @@ export const perpsSimpleAbi = [
         type: 'int256',
         indexed: false,
       },
+      {
+        name: 'tradingFee',
+        internalType: 'int256',
+        type: 'int256',
+        indexed: false,
+      },
     ],
     name: 'PositionTrade',
   },

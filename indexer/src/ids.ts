@@ -15,3 +15,7 @@ export function positionSessionId(blockNumber: BigInt, logIndex: i32): string {
 export function createEventId(transactionHash: Bytes, logIndex: BigInt): Bytes {
   return transactionHash.concatI32(logIndex.toI32());
 }
+
+export function getPriceLevelId(price: BigInt, isBid: boolean): string {
+  return price.toString() + "-" + (isBid ? "bid" : "ask");
+}

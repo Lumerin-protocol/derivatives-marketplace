@@ -1,0 +1,63 @@
+services:
+  # ── Hardhat JSON-RPC node ────────────────────────────────────────────────────
+  # Running inside Docker means graph-node can reach it via the service name
+  # "hardhat" on the shared network — no host-gateway trickery needed.
+  hardhat:
+    build:
+      context: ..
+      dockerfile: e2e/Dockerfile.hardhat
+    ports:
+      - "8545:8545"   # exposed so the test process on the host can deploy contracts
+
+  # ── Graph Protocol infrastructure ────────────────────────────────────────────
+  ipfs:
+    image: ipfs/kubo:v0.17.0
+    ports:
+      - "5001:5001"
+    environment:
+      IPFS_SWARM_KEY_FILE: /dev/null
+    command: ["daemon", "--offline"]
+    volumes:
+      - ./data/ipfs:/data/ipfs
+
+  postgres:
+    image: postgres:14
+    ports:
+      - "5432:5432"
+    command:
+      [
+        "postgres",
+        "-cshared_preload_libraries=pg_stat_statements",
+        "-cmax_connections=200",
+      ]
+    environment:
+      POSTGRES_USER: graph-node
+      POSTGRES_PASSWORD: let-me-in
+      POSTGRES_DB: graph-node
+      PGDATA: "/var/lib/postgresql/data"
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=C"
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+
+  graph-node:
+    image: graphprotocol/graph-node:v0.41.1
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+      - "8020:8020"
+      - "8030:8030"
+      - "8040:8040"
+    depends_on:
+      - hardhat
+      - ipfs
+      - postgres
+    environment:
+      postgres_host: postgres
+      postgres_user: graph-node
+      postgres_pass: let-me-in
+      postgres_db: graph-node
+      ipfs: "ipfs:5001"
+      # Hardhat is a named service on the same Docker network — no host-gateway needed.
+      ethereum: "hardhat:http://hardhat:8545"
+      GRAPH_ETHEREUM_MAX_BLOCK_RANGE_SIZE: 10000
+      GRAPH_LOG: info

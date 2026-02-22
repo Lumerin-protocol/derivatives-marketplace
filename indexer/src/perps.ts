@@ -34,8 +34,8 @@ import {
   BadDebtEvent,
   PositionSession,
 } from "../generated/schema";
-import { isSameSign } from "./lib";
-import { createEventId, positionSessionId } from "./ids";
+import { absBigInt, isSameSign } from "./lib";
+import { createEventId, getPriceLevelId, positionSessionId } from "./ids";
 
 // ============ Helper Functions ============
 
@@ -175,14 +175,6 @@ function getOrCreateUser(address: Address, timestamp: BigInt): User {
   return user;
 }
 
-function abs(value: BigInt): BigInt {
-  return value.lt(BigInt.zero()) ? value.neg() : value;
-}
-
-function getPriceLevelId(price: BigInt, isBid: boolean): string {
-  return price.toString() + "-" + (isBid ? "bid" : "ask");
-}
-
 function getOrCreatePriceLevel(price: BigInt, isBid: boolean): PriceLevel {
   const id = getPriceLevelId(price, isBid);
   let level = PriceLevel.load(id);
@@ -216,7 +208,7 @@ export function handleOrderCreated(event: OrderCreated): void {
 
   const user = getOrCreateUser(event.params.participant, event.block.timestamp);
   const isBuy = event.params.quantity.gt(BigInt.zero());
-  const absQuantity = abs(event.params.quantity);
+  const absQuantity = absBigInt(event.params.quantity);
 
   // Create order
   const order = new Order(event.params.orderId);
@@ -346,7 +338,7 @@ export function handleOrderUpdated(event: OrderUpdated): void {
   }
 
   const oldQuantity = order.quantity;
-  const newQuantity = abs(event.params.newQuantity);
+  const newQuantity = absBigInt(event.params.newQuantity);
   const quantityDiff = oldQuantity.minus(newQuantity);
 
   // Update price level
@@ -402,9 +394,12 @@ export function handlePositionTrade(event: PositionTrade): void {
   const user = getOrCreateUser(event.params.user, event.block.timestamp);
   const netQuantityBefore = event.params.netQuantityAfter.minus(event.params.quantity);
   const netQuantityAfter = event.params.netQuantityAfter;
-  const positionFlipped = !isSameSign(netQuantityBefore, netQuantityAfter);
-  const isPositionClosed = netQuantityAfter.equals(BigInt.zero()) || positionFlipped;
-  const isPositionOpened = positionFlipped;
+  const wasFlat = netQuantityBefore.equals(BigInt.zero());
+  const isNowFlat = netQuantityAfter.equals(BigInt.zero());
+  const positionFlipped =
+    !wasFlat && !isNowFlat && !isSameSign(netQuantityBefore, netQuantityAfter);
+  const isPositionClosed = isNowFlat || positionFlipped;
+  const isPositionOpened = wasFlat || positionFlipped;
 
   let session: PositionSession;
   if (isPositionOpened) {
@@ -414,7 +409,7 @@ export function handlePositionTrade(event: PositionTrade): void {
     session.user = user.id;
     session.entryPrice = event.params.aggregatedEntryPriceAfter;
     session.closePrice = BigInt.zero();
-    session.maxQuantity = abs(event.params.netQuantityAfter);
+    session.maxQuantity = absBigInt(event.params.netQuantityAfter);
     session.closedQuantity = BigInt.zero();
     session.realizedPnl = BigInt.zero();
     session.fundingFees = BigInt.zero();
@@ -436,7 +431,7 @@ export function handlePositionTrade(event: PositionTrade): void {
   }
 
   session.lastTradeAt = event.block.timestamp;
-  const absAfter = abs(netQuantityAfter);
+  const absAfter = absBigInt(netQuantityAfter);
   if (session.maxQuantity.lt(absAfter)) {
     session.maxQuantity = absAfter;
   }
@@ -447,7 +442,7 @@ export function handlePositionTrade(event: PositionTrade): void {
   }
 
   if (!event.params.realizedPnl.equals(BigInt.zero())) {
-    const absQty = abs(event.params.quantity);
+    const absQty = absBigInt(event.params.quantity);
     const oldClosed = session.closedQuantity;
     session.closedQuantity = session.closedQuantity.plus(absQty);
     session.realizedPnl = session.realizedPnl.plus(event.params.realizedPnl);
@@ -459,6 +454,10 @@ export function handlePositionTrade(event: PositionTrade): void {
         .div(session.closedQuantity);
     }
     user.realizedPnl = user.realizedPnl.plus(event.params.realizedPnl);
+  }
+
+  if (!event.params.tradingFee.equals(BigInt.zero())) {
+    session.tradingFees = session.tradingFees.plus(event.params.tradingFee);
   }
 
   session.save();
@@ -473,6 +472,7 @@ export function handlePositionTrade(event: PositionTrade): void {
   trade.netQuantityAfter = event.params.netQuantityAfter;
   trade.aggregatedEntryPriceAfter = event.params.aggregatedEntryPriceAfter;
   trade.realizedPnl = event.params.realizedPnl;
+  trade.tradingFee = event.params.tradingFee;
   trade.timestamp = event.block.timestamp;
   trade.blockNumber = event.block.number;
   trade.transactionHash = event.transaction.hash;
@@ -630,6 +630,16 @@ export function handleFundingSettled(event: FundingSettled): void {
   settlement.timestamp = event.block.timestamp;
   settlement.blockNumber = event.block.number;
   settlement.transactionHash = event.transaction.hash;
+
+  if (user.currentPositionSessionId.length > 0) {
+    const session = PositionSession.load(user.currentPositionSessionId);
+    if (session) {
+      settlement.positionSession = session.id;
+      session.fundingFees = session.fundingFees.plus(event.params.amount);
+      session.save();
+    }
+  }
+
   settlement.save();
 
   if (event.params.amount.gt(BigInt.zero())) {

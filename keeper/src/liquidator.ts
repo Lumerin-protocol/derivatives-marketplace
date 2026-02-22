@@ -280,25 +280,17 @@ export class Liquidator {
         },
         "Liquidation confirmed",
       );
+
+      if (receipt.status === "success") {
+        await this.tracker.syncUser(user.address);
+      }
     } catch (error) {
       const errorStr = String(error);
 
       if (errorStr.includes("NotLiquidatable")) {
         this.logger.warn(logCtx, "Simulation reverted: NotLiquidatable (state drift)");
       } else {
-        const errorDetails: Record<string, string> = {};
-        if (error instanceof BaseError) {
-          error.walk((err) => {
-            if (err && typeof err === "object") {
-              for (const [key, val] of Object.entries(err as Record<string, unknown>)) {
-                const str = typeof val === "string" ? val : JSON.stringify(val);
-                errorDetails[key] = str.length > 100 ? `${str.slice(0, 100)}…` : str;
-              }
-            }
-            return false;
-          });
-        }
-        this.logger.error({ ...logCtx, err: error, errorDetails }, "Liquidation attempt failed");
+        this.logger.error({ logCtx }, "Liquidation attempt failed");
       }
     }
   }

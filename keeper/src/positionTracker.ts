@@ -186,7 +186,7 @@ export class PositionTracker {
       abi: perpsSimpleAbi,
       onLogs: (logs) => {
         for (const log of logs) {
-          this.logger.debug({ log }, "Event received");
+          this.logger.info({ log }, "Event received");
           switch (log.eventName) {
             case "Transfer":
               this.onTransfer(log.args.from!, log.args.to!, log.args.value!);
@@ -274,8 +274,9 @@ export class PositionTracker {
         "Position updated",
       );
     } else {
-      // New user — need balance + order margin from contract (one-time)
-      this.initializeNewUser(user, netQuantityAfter, entryPriceAfter);
+      this.syncUser(user).catch((err) =>
+        this.logger.error({ err, user }, "Failed to initialize new user"),
+      );
     }
   }
 
@@ -293,66 +294,71 @@ export class PositionTracker {
 
   // ── Async helpers ─────────────────────────────────────────────────────
 
-  private async initializeNewUser(
-    user: Address,
-    netQuantity: bigint,
-    entryPrice: bigint,
-  ): Promise<void> {
-    try {
-      const results = await this.publicClient.multicall({
-        contracts: [
-          {
-            address: this.config.perpsAddress,
-            abi: perpsSimpleAbi,
-            functionName: "balanceOf",
-            args: [user],
-          },
-          {
-            address: this.config.perpsAddress,
-            abi: perpsSimpleAbi,
-            functionName: "getMaintenanceMargin",
-            args: [user],
-          },
-          {
-            address: this.config.perpsAddress,
-            abi: perpsSimpleAbi,
-            functionName: "getMarketPrice",
-          },
-        ],
-        allowFailure: false,
-      });
+  async syncUser(user: Address): Promise<void> {
+    const results = await this.publicClient.multicall({
+      contracts: [
+        {
+          address: this.config.perpsAddress,
+          abi: perpsSimpleAbi,
+          functionName: "getUserPosition",
+          args: [user],
+        },
+        {
+          address: this.config.perpsAddress,
+          abi: perpsSimpleAbi,
+          functionName: "balanceOf",
+          args: [user],
+        },
+        {
+          address: this.config.perpsAddress,
+          abi: perpsSimpleAbi,
+          functionName: "getMaintenanceMargin",
+          args: [user],
+        },
+        {
+          address: this.config.perpsAddress,
+          abi: perpsSimpleAbi,
+          functionName: "getMarketPrice",
+        },
+      ],
+      allowFailure: false,
+    });
 
-      const balance = results[0] as bigint;
-      const maintenanceMargin = results[1] as bigint;
-      const marketPrice = results[2] as bigint;
+    const position = results[0] as { netQuantity: bigint; aggregatedEntryPrice: bigint };
+    const balance = results[1] as bigint;
+    const maintenanceMargin = results[2] as bigint;
+    const marketPrice = results[3] as bigint;
 
-      const { orderMargin, liquidationPrice } = computeLiquidationState(
-        netQuantity,
-        entryPrice,
-        balance,
-        maintenanceMargin,
-        marketPrice,
-        this.maintenanceMarginPercent,
-        this.quantityDecimals,
-      );
-
-      this.users.set(user, {
-        address: user,
-        netQuantity,
-        entryPrice,
-        collateral: balance,
-        orderMargin,
-        liquidationPrice,
-        isLong: netQuantity > 0n,
-      });
-
-      this.logger.info(
-        { user, netQuantity, entryPrice, collateral: balance, orderMargin, liquidationPrice },
-        "New user tracked",
-      );
-    } catch (err) {
-      this.logger.error({ err, user }, "Failed to initialize new user");
+    if (position.netQuantity === 0n) {
+      this.users.delete(user);
+      this.logger.info({ user }, "User synced — no position, removed from tracker");
+      return;
     }
+
+    const { orderMargin, liquidationPrice } = computeLiquidationState(
+      position.netQuantity,
+      position.aggregatedEntryPrice,
+      balance,
+      maintenanceMargin,
+      marketPrice,
+      this.maintenanceMarginPercent,
+      this.quantityDecimals,
+    );
+
+    this.users.set(user, {
+      address: user,
+      netQuantity: position.netQuantity,
+      entryPrice: position.aggregatedEntryPrice,
+      collateral: balance,
+      orderMargin,
+      liquidationPrice,
+      isLong: position.netQuantity > 0n,
+    });
+
+    this.logger.info(
+      { user, netQuantity: position.netQuantity, collateral: balance, liquidationPrice },
+      "User synced — position updated",
+    );
   }
 
   private async recomputeFromContract(user: Address): Promise<void> {

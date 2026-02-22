@@ -126,6 +126,7 @@ export async function deployPerpsFixture() {
   }
 
   await perps.write.depositReservePool([collateralAmount]);
+  const startBlock = await publicClient.getBlockNumber();
 
   const getMinimumCollateral = (price: bigint, absQuantity: bigint) => {
     const orderValue = (price * absQuantity) / 10n ** BigInt(quantityDecimals);
@@ -157,6 +158,7 @@ export async function deployPerpsFixture() {
       collateralAmount,
       quantityDecimals,
       tokenDecimals,
+      startBlock,
     },
     getMinimumCollateral,
   };
