@@ -1,4 +1,4 @@
-import type { PublicClient, WalletClient, Account } from "viem";
+import { type PublicClient, type WalletClient, type Account, BaseError } from "viem";
 import { perpsSimpleAbi, aggregatorV3InterfaceAbi } from "./abi.ts";
 import type { Config } from "./config.ts";
 import type { PositionTracker, UserState } from "./positionTracker.ts";
@@ -42,7 +42,11 @@ export class Liquidator {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const results = (await this.publicClient.multicall({
       contracts: [
-        { address: this.config.perpsAddress, abi: perpsSimpleAbi as any, functionName: "liquidationFee" },
+        {
+          address: this.config.perpsAddress,
+          abi: perpsSimpleAbi as any,
+          functionName: "liquidationFee",
+        },
         { address: this.config.perpsAddress, abi: perpsSimpleAbi as any, functionName: "decimals" },
         ...(this.config.ethPriceFeedAddress
           ? [
@@ -282,7 +286,19 @@ export class Liquidator {
       if (errorStr.includes("NotLiquidatable")) {
         this.logger.warn(logCtx, "Simulation reverted: NotLiquidatable (state drift)");
       } else {
-        this.logger.error({ ...logCtx, err: error }, "Liquidation attempt failed");
+        const errorDetails: Record<string, string> = {};
+        if (error instanceof BaseError) {
+          error.walk((err) => {
+            if (err && typeof err === "object") {
+              for (const [key, val] of Object.entries(err as Record<string, unknown>)) {
+                const str = typeof val === "string" ? val : JSON.stringify(val);
+                errorDetails[key] = str.length > 100 ? `${str.slice(0, 100)}…` : str;
+              }
+            }
+            return false;
+          });
+        }
+        this.logger.error({ ...logCtx, err: error, errorDetails }, "Liquidation attempt failed");
       }
     }
   }

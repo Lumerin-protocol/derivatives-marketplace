@@ -42,21 +42,23 @@ export class PositionTracker {
     await this.readContractParams();
     await this.resync();
     this.startEventWatchers();
+
     this.resyncTimer = setInterval(() => {
       this.resync().catch((err) => this.logger.error({ err }, "Resync failed"));
     }, this.config.resyncIntervalMs);
 
-    this.logger.info(
-      {
-        trackedUsers: this.users.size,
-        maintenanceMarginPercent: Number(this.maintenanceMarginPercent),
-      },
-      "Position tracker started",
-    );
+    const meta = {
+      users: this.users.size,
+      maintenanceMarginPercent: this.maintenanceMarginPercent,
+    };
+
+    this.logger.info(meta, "Position tracker started");
   }
 
   stop(): void {
-    for (const unwatch of this.unwatchFns) unwatch();
+    for (const unwatch of this.unwatchFns) {
+      unwatch();
+    }
     this.unwatchFns = [];
     if (this.resyncTimer) {
       clearInterval(this.resyncTimer);
@@ -93,6 +95,8 @@ export class PositionTracker {
   // ── Full resync from contract state ─────────────────────────────────────
 
   async resync(): Promise<void> {
+    await this.readContractParams();
+
     this.logger.info("Resyncing positions from contract…");
 
     const addresses = (await this.publicClient.readContract({
@@ -114,8 +118,6 @@ export class PositionTracker {
       this.logger.info("Resync complete — no positions found");
       return;
     }
-
-    await this.readContractParams();
 
     // Batch-read state for every user in a single multicall
     const calls = addresses.flatMap((addr) => [
@@ -179,76 +181,44 @@ export class PositionTracker {
   // ── Event watchers ──────────────────────────────────────────────────────
 
   private startEventWatchers(): void {
-    // Transfer — local balance tracking
-    this.watch("Transfer", (logs) => {
-      for (const log of logs) {
-        const { from, to, value } = log.args as { from: Address; to: Address; value: bigint };
-        this.onTransfer(from, to, value);
-      }
-    });
-
-    // PositionTrade — position updates from event args (zero RPC for existing users)
-    this.watch("PositionTrade", (logs) => {
-      for (const log of logs) {
-        const args = log.args as {
-          user: Address;
-          netQuantityAfter: bigint;
-          aggregatedEntryPriceAfter: bigint;
-        };
-        this.onPositionTrade(args.user, args.netQuantityAfter, args.aggregatedEntryPriceAfter);
-      }
-    });
-
-    // PositionClosed — detect full closes (no accompanying PositionTrade)
-    this.watch("PositionClosed", (logs) => {
-      for (const log of logs) {
-        const { user } = log.args as { user: Address };
-        this.onPositionClosed(user);
-      }
-    });
-
-    // PositionLiquidated — remove user
-    this.watch("PositionLiquidated", (logs) => {
-      for (const log of logs) {
-        const { user } = log.args as { user: Address };
-        this.onPositionLiquidated(user);
-      }
-    });
-
-    // Order events — order margin changed, need lightweight RPC
-    for (const eventName of [
-      "OrderCreated",
-      "OrderCancelled",
-      "OrderFilled",
-      "OrderUpdated",
-    ] as const) {
-      this.watch(eventName, (logs) => {
-        for (const log of logs) {
-          const { participant } = log.args as { participant: Address };
-          if (participant && this.users.has(participant)) {
-            this.onOrderEvent(participant);
-          }
-        }
-      });
-    }
-
-    this.logger.info("Event watchers started");
-  }
-
-  // biome-ignore lint/suspicious/noExplicitAny: viem event log union types are complex
-  private watch(eventName: string, onLogs: (logs: any[]) => void): void {
     const unwatch = this.publicClient.watchContractEvent({
       address: this.config.perpsAddress,
       abi: perpsSimpleAbi,
-      eventName: eventName as "Transfer",
-      onLogs: onLogs as Parameters<typeof this.publicClient.watchContractEvent>[0] extends {
-        onLogs: infer F;
-      }
-        ? F
-        : never,
-      onError: (error) => this.logger.error({ err: error, eventName }, "Event watcher error"),
+      onLogs: (logs) => {
+        for (const log of logs) {
+          this.logger.debug({ log }, "Event received");
+          switch (log.eventName) {
+            case "Transfer":
+              this.onTransfer(log.args.from!, log.args.to!, log.args.value!);
+              break;
+            case "PositionTrade":
+              this.onPositionTrade(
+                log.args.user!,
+                log.args.netQuantityAfter!,
+                log.args.aggregatedEntryPriceAfter!,
+              );
+              break;
+            case "PositionLiquidated":
+              this.onPositionLiquidated(log.args.user!);
+              break;
+            case "OrderCreated":
+            case "OrderCancelled":
+            case "OrderFilled":
+            case "OrderUpdated":
+              this.onOrderEvent(log.args.participant!);
+              break;
+            default:
+              this.logger.debug({ log }, "Unknown event");
+              break;
+          }
+        }
+      },
+      onError: (error) => this.logger.error({ err: error }, "Event watcher error"),
     });
+
     this.unwatchFns.push(unwatch);
+
+    this.logger.info("Event watchers started");
   }
 
   // ── Event handlers ──────────────────────────────────────────────────────
@@ -307,13 +277,6 @@ export class PositionTracker {
       // New user — need balance + order margin from contract (one-time)
       this.initializeNewUser(user, netQuantityAfter, entryPriceAfter);
     }
-  }
-
-  private onPositionClosed(user: Address): void {
-    // PositionClosed fires for both partial and full closes.
-    // Partial: PositionTrade also fires and already updated state.
-    // Full (no flip): only PositionClosed fires — verify on-chain to be safe.
-    this.verifyAndRemoveIfClosed(user);
   }
 
   private onPositionLiquidated(user: Address): void {
@@ -389,24 +352,6 @@ export class PositionTracker {
       );
     } catch (err) {
       this.logger.error({ err, user }, "Failed to initialize new user");
-    }
-  }
-
-  private async verifyAndRemoveIfClosed(user: Address): Promise<void> {
-    try {
-      const position = (await this.publicClient.readContract({
-        address: this.config.perpsAddress,
-        abi: perpsSimpleAbi,
-        functionName: "getUserPosition",
-        args: [user],
-      })) as { netQuantity: bigint; aggregatedEntryPrice: bigint };
-
-      if (position.netQuantity === 0n) {
-        this.users.delete(user);
-        this.logger.info({ user }, "Position fully closed (verified on-chain)");
-      }
-    } catch (err) {
-      this.logger.error({ err, user }, "Failed to verify position close");
     }
   }
 
