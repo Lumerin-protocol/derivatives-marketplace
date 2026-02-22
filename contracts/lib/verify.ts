@@ -1,10 +1,13 @@
-import { run } from "hardhat";
+import { tasks } from "hardhat";
 
 export async function verifyContract(address: string, constructorArgs?: any[]) {
-  await run("verify:verify", {
-    address,
-    constructorArguments: constructorArgs,
-  }).catch((err) => {
-    console.log(err);
-  });
+  await tasks
+    .getTask("verify")
+    .run({
+      address,
+      constructorArgs: constructorArgs,
+    })
+    .catch((err) => {
+      console.log(err);
+    });
 }

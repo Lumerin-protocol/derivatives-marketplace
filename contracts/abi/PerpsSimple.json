@@ -646,31 +646,6 @@
         "type": "address"
       },
       {
-        "indexed": false,
-        "internalType": "int256",
-        "name": "quantityClosed",
-        "type": "int256"
-      },
-      {
-        "indexed": false,
-        "internalType": "int256",
-        "name": "pnl",
-        "type": "int256"
-      }
-    ],
-    "name": "PositionClosed",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "user",
-        "type": "address"
-      },
-      {
         "indexed": true,
         "internalType": "address",
         "name": "liquidator",
@@ -730,6 +705,18 @@
         "internalType": "uint256",
         "name": "aggregatedEntryPriceAfter",
         "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "int256",
+        "name": "realizedPnl",
+        "type": "int256"
+      },
+      {
+        "indexed": false,
+        "internalType": "int256",
+        "name": "tradingFee",
+        "type": "int256"
       }
     ],
     "name": "PositionTrade",
@@ -1144,11 +1131,6 @@
             "internalType": "int256",
             "name": "quantity",
             "type": "int256"
-          },
-          {
-            "internalType": "uint256",
-            "name": "createdAt",
-            "type": "uint256"
           }
         ],
         "internalType": "struct PerpsSimple.Order",
@@ -1551,6 +1533,13 @@
     "type": "function"
   },
   {
+    "inputs": [],
+    "name": "resetState",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
     "inputs": [
       {
         "internalType": "uint256",
@@ -1649,6 +1638,40 @@
     "name": "setOracle",
     "outputs": [],
     "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_price",
+        "type": "uint256"
+      },
+      {
+        "internalType": "int256",
+        "name": "_quantity",
+        "type": "int256"
+      }
+    ],
+    "name": "simulateOrder",
+    "outputs": [
+      {
+        "internalType": "int256",
+        "name": "filledQuantity",
+        "type": "int256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "averageFillPrice",
+        "type": "uint256"
+      },
+      {
+        "internalType": "int256",
+        "name": "remainingQuantity",
+        "type": "int256"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   },
   {

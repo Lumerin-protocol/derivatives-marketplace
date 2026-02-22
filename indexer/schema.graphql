@@ -57,6 +57,8 @@ type User @entity(immutable: false) {
   # Position state (current net position)
   netQuantity: BigInt!
   aggregatedEntryPrice: BigInt!
+  "ID of the current open position session (empty when flat). Deterministic: blockNumber + padded logIndex of the open event."
+  currentPositionSessionId: String!
 
   # Funding
   totalFundingPaid: BigInt!
@@ -70,14 +72,13 @@ type User @entity(immutable: false) {
 
   # Relations
   orders: [Order!]! @derivedFrom(field: "user")
-  trades: [Trade!]!
-  positionHistory: [PositionSnapshot!]! @derivedFrom(field: "user")
-  positionCloses: [PositionClose!]! @derivedFrom(field: "user")
+  trades: [Trade!]! @derivedFrom(field: "user")
   collateralEvents: [CollateralEvent!]! @derivedFrom(field: "user")
   fundingSettlements: [FundingSettlement!]! @derivedFrom(field: "user")
   badDebts: [BadDebtEvent!]! @derivedFrom(field: "user")
   liquidationsAsUser: [Liquidation!]! @derivedFrom(field: "user")
   liquidationsAsLiquidator: [Liquidation!]! @derivedFrom(field: "liquidator")
+  positionSessions: [PositionSession!]! @derivedFrom(field: "user")
 
   # Timestamps
   createdAt: BigInt!
@@ -111,42 +112,17 @@ enum OrderStatus {
   PARTIAL
 }
 
-# Trade (matched order)
+# One per user per PositionTrade event. Query by user for "my trades"; filter by positionSession for session history; realizedPnl != 0 for closes.
 type Trade @entity(immutable: true) {
   id: Bytes! # tx hash + log index
-  makerOrderId: Bytes!
-  buyer: User!
-  seller: User!
-  price: BigInt!
-  quantity: BigInt!
-  volume: BigInt! # price * quantity
-  # Metadata
-  timestamp: BigInt!
-  blockNumber: BigInt!
-  transactionHash: Bytes!
-}
-
-# Position snapshot after each trade (from PositionTrade event)
-type PositionSnapshot @entity(immutable: true) {
-  id: Bytes! # tx hash + log index
   user: User!
+  positionSession: PositionSession!
   tradePrice: BigInt!
-  tradeQuantity: BigInt! # signed: positive = bought, negative = sold
-  netQuantityAfter: BigInt! # signed: positive = long, negative = short
+  tradeQuantity: BigInt! # signed: positive = bought/long, negative = sold/short
+  netQuantityAfter: BigInt! # signed position after this trade
   aggregatedEntryPriceAfter: BigInt!
-
-  # Metadata
-  timestamp: BigInt!
-  blockNumber: BigInt!
-  transactionHash: Bytes!
-}
-
-# Position close event (full or partial)
-type PositionClose @entity(immutable: true) {
-  id: Bytes! # tx hash + log index
-  user: User!
-  quantityClosed: BigInt! # signed
-  pnl: BigInt! # signed: positive = profit, negative = loss
+  realizedPnl: BigInt! # non-zero when this trade closed (full or partial) size
+  tradingFee: BigInt! # signed: positive = paid, negative = rebate
   # Metadata
   timestamp: BigInt!
   blockNumber: BigInt!
@@ -206,6 +182,7 @@ type FundingUpdate @entity(immutable: true) {
 type FundingSettlement @entity(immutable: true) {
   id: Bytes! # tx hash + log index
   user: User!
+  positionSession: PositionSession
   amount: BigInt! # signed: positive = received, negative = paid
   # Metadata
   timestamp: BigInt!
@@ -237,4 +214,27 @@ type ReservePoolEvent @entity(immutable: true) {
 enum ReservePoolEventType {
   RESERVE
   FEE
+}
+
+# One per open→close cycle. ID = blockNumber (padded) + logIndex (padded) of the open event.
+type PositionSession @entity(immutable: false) {
+  id: String! # blockNumber (12 digits) + logIndex (6 digits), deterministic
+  status: PositionSessionStatus!
+  user: User!
+  entryPrice: BigInt! # average entry price of the position
+  closePrice: BigInt! # average exit price (updated as we close)
+  maxQuantity: BigInt! # maximum absolute quantity reached (non-cumulative)
+  closedQuantity: BigInt! # cumulative quantity closed
+  realizedPnl: BigInt!
+  fundingFees: BigInt! # signed: positive = received, negative = paid
+  tradingFees: BigInt! # signed: positive = paid, negative = rebate received
+  openedAt: BigInt!
+  lastTradeAt: BigInt!
+  trades: [Trade!]! @derivedFrom(field: "positionSession")
+  fundingSettlements: [FundingSettlement!]! @derivedFrom(field: "positionSession")
+}
+
+enum PositionSessionStatus {
+  OPEN
+  CLOSE
 }

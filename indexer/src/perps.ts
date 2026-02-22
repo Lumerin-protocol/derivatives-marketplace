@@ -7,7 +7,6 @@ import {
   OrderUpdated,
   OrderMatched,
   PositionTrade,
-  PositionClosed,
   PositionLiquidated,
   CollateralAdded,
   CollateralRemoved,
@@ -27,15 +26,16 @@ import {
   User,
   Order,
   Trade,
-  PositionSnapshot,
-  PositionClose,
   Liquidation,
   CollateralEvent,
   PriceLevel,
   FundingUpdate,
   FundingSettlement,
   BadDebtEvent,
+  PositionSession,
 } from "../generated/schema";
+import { absBigInt, isSameSign } from "./lib";
+import { createEventId, getPriceLevelId, positionSessionId } from "./ids";
 
 // ============ Helper Functions ============
 
@@ -157,13 +157,13 @@ function getOrCreateUser(address: Address, timestamp: BigInt): User {
     user.totalWithdrawn = BigInt.zero();
     user.netQuantity = BigInt.zero();
     user.aggregatedEntryPrice = BigInt.zero();
+    user.currentPositionSessionId = "";
     user.orderCount = 0;
     user.activeOrderCount = 0;
     user.tradeCount = 0;
     user.realizedPnl = BigInt.zero();
     user.totalFundingPaid = BigInt.zero();
     user.totalFundingReceived = BigInt.zero();
-    user.trades = [];
     user.createdAt = timestamp;
     user.lastActivityAt = timestamp;
 
@@ -173,14 +173,6 @@ function getOrCreateUser(address: Address, timestamp: BigInt): User {
     perps.save();
   }
   return user;
-}
-
-function abs(value: BigInt): BigInt {
-  return value.lt(BigInt.zero()) ? value.neg() : value;
-}
-
-function getPriceLevelId(price: BigInt, isBid: boolean): string {
-  return price.toString() + "-" + (isBid ? "bid" : "ask");
 }
 
 function getOrCreatePriceLevel(price: BigInt, isBid: boolean): PriceLevel {
@@ -194,10 +186,6 @@ function getOrCreatePriceLevel(price: BigInt, isBid: boolean): PriceLevel {
     level.orderCount = 0;
   }
   return level;
-}
-
-function createEventId(transactionHash: Bytes, logIndex: BigInt): Bytes {
-  return transactionHash.concatI32(logIndex.toI32());
 }
 
 // ============ Event Handlers ============
@@ -220,7 +208,7 @@ export function handleOrderCreated(event: OrderCreated): void {
 
   const user = getOrCreateUser(event.params.participant, event.block.timestamp);
   const isBuy = event.params.quantity.gt(BigInt.zero());
-  const absQuantity = abs(event.params.quantity);
+  const absQuantity = absBigInt(event.params.quantity);
 
   // Create order
   const order = new Order(event.params.orderId);
@@ -350,7 +338,7 @@ export function handleOrderUpdated(event: OrderUpdated): void {
   }
 
   const oldQuantity = order.quantity;
-  const newQuantity = abs(event.params.newQuantity);
+  const newQuantity = absBigInt(event.params.newQuantity);
   const quantityDiff = oldQuantity.minus(newQuantity);
 
   // Update price level
@@ -367,7 +355,7 @@ export function handleOrderUpdated(event: OrderUpdated): void {
 }
 
 export function handleOrderMatched(event: OrderMatched): void {
-  log.info("Order matched: maker {} buyer {} seller {} price {} qty {}", [
+  log.info("Order matched: makerOrderId {} buyer {} seller {} price {} qty {}", [
     event.params.makerOrderId.toHexString(),
     event.params.buyer.toHexString(),
     event.params.seller.toHexString(),
@@ -382,32 +370,11 @@ export function handleOrderMatched(event: OrderMatched): void {
   const quantityScale = BigInt.fromI32(10).pow(u8(perps.quantityDecimals));
   const volume = event.params.price.times(event.params.quantity).div(quantityScale);
 
-  // Create trade
-  const tradeId = createEventId(event.transaction.hash, event.logIndex);
-  const trade = new Trade(tradeId);
-  trade.makerOrderId = event.params.makerOrderId;
-  trade.buyer = buyer.id;
-  trade.seller = seller.id;
-  trade.price = event.params.price;
-  trade.quantity = event.params.quantity;
-  trade.volume = volume;
-  trade.timestamp = event.block.timestamp;
-  trade.blockNumber = event.block.number;
-  trade.transactionHash = event.transaction.hash;
-  trade.save();
-
-  // Update users - add trade to both buyer and seller
-  buyer.trades = buyer.trades.concat([trade.id]);
-  buyer.tradeCount++;
   buyer.lastActivityAt = event.block.timestamp;
   buyer.save();
-
-  seller.trades = seller.trades.concat([trade.id]);
-  seller.tradeCount++;
   seller.lastActivityAt = event.block.timestamp;
   seller.save();
 
-  // Update global stats
   perps.totalTrades++;
   perps.totalVolume = perps.totalVolume.plus(volume);
   perps.lastUpdatedAt = event.block.timestamp;
@@ -415,58 +382,106 @@ export function handleOrderMatched(event: OrderMatched): void {
 }
 
 export function handlePositionTrade(event: PositionTrade): void {
-  log.info("Position trade: user {} price {} qty {} netAfter {} entryAfter {}", [
+  log.info("Position trade: user {} price {} qty {} netAfter {} entryAfter {} realizedPnl {}", [
     event.params.user.toHexString(),
     event.params.tradePrice.toString(),
     event.params.quantity.toString(),
     event.params.netQuantityAfter.toString(),
     event.params.aggregatedEntryPriceAfter.toString(),
+    event.params.realizedPnl.toString(),
   ]);
 
   const user = getOrCreateUser(event.params.user, event.block.timestamp);
+  const netQuantityBefore = event.params.netQuantityAfter.minus(event.params.quantity);
+  const netQuantityAfter = event.params.netQuantityAfter;
+  const wasFlat = netQuantityBefore.equals(BigInt.zero());
+  const isNowFlat = netQuantityAfter.equals(BigInt.zero());
+  const positionFlipped =
+    !wasFlat && !isNowFlat && !isSameSign(netQuantityBefore, netQuantityAfter);
+  const isPositionClosed = isNowFlat || positionFlipped;
+  const isPositionOpened = wasFlat || positionFlipped;
 
-  // Create position snapshot
-  const snapshotId = createEventId(event.transaction.hash, event.logIndex);
-  const snapshot = new PositionSnapshot(snapshotId);
-  snapshot.user = user.id;
-  snapshot.tradePrice = event.params.tradePrice;
-  snapshot.tradeQuantity = event.params.quantity;
-  snapshot.netQuantityAfter = event.params.netQuantityAfter;
-  snapshot.aggregatedEntryPriceAfter = event.params.aggregatedEntryPriceAfter;
-  snapshot.timestamp = event.block.timestamp;
-  snapshot.blockNumber = event.block.number;
-  snapshot.transactionHash = event.transaction.hash;
-  snapshot.save();
+  let session: PositionSession;
+  if (isPositionOpened) {
+    const id = positionSessionId(event.block.number, event.logIndex.toI32());
+    session = new PositionSession(id);
+    session.status = "OPEN";
+    session.user = user.id;
+    session.entryPrice = event.params.aggregatedEntryPriceAfter;
+    session.closePrice = BigInt.zero();
+    session.maxQuantity = absBigInt(event.params.netQuantityAfter);
+    session.closedQuantity = BigInt.zero();
+    session.realizedPnl = BigInt.zero();
+    session.fundingFees = BigInt.zero();
+    session.tradingFees = BigInt.zero();
+    session.openedAt = event.block.timestamp;
+    session.lastTradeAt = event.block.timestamp;
+    session.save();
+    user.currentPositionSessionId = id;
+  } else {
+    const loaded = PositionSession.load(user.currentPositionSessionId);
+    if (!loaded) {
+      log.warning("Position session not found for user {} sessionId {}", [
+        user.id.toHexString(),
+        user.currentPositionSessionId,
+      ]);
+      return;
+    }
+    session = loaded;
+  }
 
-  // Update user's current position
+  session.lastTradeAt = event.block.timestamp;
+  const absAfter = absBigInt(netQuantityAfter);
+  if (session.maxQuantity.lt(absAfter)) {
+    session.maxQuantity = absAfter;
+  }
+
+  if (isPositionClosed) {
+    session.status = "CLOSE";
+    user.currentPositionSessionId = "";
+  }
+
+  if (!event.params.realizedPnl.equals(BigInt.zero())) {
+    const absQty = absBigInt(event.params.quantity);
+    const oldClosed = session.closedQuantity;
+    session.closedQuantity = session.closedQuantity.plus(absQty);
+    session.realizedPnl = session.realizedPnl.plus(event.params.realizedPnl);
+    // Weighted average exit price: totalNotional / totalClosedQuantity
+    if (session.closedQuantity.gt(BigInt.zero())) {
+      session.closePrice = session.closePrice
+        .times(oldClosed)
+        .plus(event.params.tradePrice.times(absQty))
+        .div(session.closedQuantity);
+    }
+    user.realizedPnl = user.realizedPnl.plus(event.params.realizedPnl);
+  }
+
+  if (!event.params.tradingFee.equals(BigInt.zero())) {
+    session.tradingFees = session.tradingFees.plus(event.params.tradingFee);
+  }
+
+  session.save();
+
+  // Every trade is linked to its PositionSession (same session we created or loaded above)
+  const tradeId = createEventId(event.transaction.hash, event.logIndex);
+  const trade = new Trade(tradeId);
+  trade.user = user.id;
+  trade.positionSession = session.id; // links Trade → PositionSession; positionSession.trades is @derivedFrom
+  trade.tradePrice = event.params.tradePrice;
+  trade.tradeQuantity = event.params.quantity;
+  trade.netQuantityAfter = event.params.netQuantityAfter;
+  trade.aggregatedEntryPriceAfter = event.params.aggregatedEntryPriceAfter;
+  trade.realizedPnl = event.params.realizedPnl;
+  trade.tradingFee = event.params.tradingFee;
+  trade.timestamp = event.block.timestamp;
+  trade.blockNumber = event.block.number;
+  trade.transactionHash = event.transaction.hash;
+  trade.save();
+
+  user.tradeCount++;
+
   user.netQuantity = event.params.netQuantityAfter;
   user.aggregatedEntryPrice = event.params.aggregatedEntryPriceAfter;
-  user.lastActivityAt = event.block.timestamp;
-  user.save();
-}
-
-export function handlePositionClosed(event: PositionClosed): void {
-  log.info("Position closed: user {} qty {} pnl {}", [
-    event.params.user.toHexString(),
-    event.params.quantityClosed.toString(),
-    event.params.pnl.toString(),
-  ]);
-
-  const user = getOrCreateUser(event.params.user, event.block.timestamp);
-
-  // Create position close record
-  const closeId = createEventId(event.transaction.hash, event.logIndex);
-  const close = new PositionClose(closeId);
-  close.user = user.id;
-  close.quantityClosed = event.params.quantityClosed;
-  close.pnl = event.params.pnl;
-  close.timestamp = event.block.timestamp;
-  close.blockNumber = event.block.number;
-  close.transactionHash = event.transaction.hash;
-  close.save();
-
-  // Update user's realized PnL
-  user.realizedPnl = user.realizedPnl.plus(event.params.pnl);
   user.lastActivityAt = event.block.timestamp;
   user.save();
 }
@@ -496,9 +511,18 @@ export function handlePositionLiquidated(event: PositionLiquidated): void {
   liquidation.transactionHash = event.transaction.hash;
   liquidation.save();
 
-  // Update user - position is now closed
+  // Update user - position is now closed; mark current session as CLOSE if any
+  if (user.currentPositionSessionId.length > 0) {
+    const session = PositionSession.load(user.currentPositionSessionId);
+    if (session) {
+      session.status = "CLOSE";
+      session.lastTradeAt = event.block.timestamp;
+      session.save();
+    }
+  }
   user.netQuantity = BigInt.zero();
   user.aggregatedEntryPrice = BigInt.zero();
+  user.currentPositionSessionId = "";
   user.realizedPnl = user.realizedPnl.plus(event.params.pnl);
   user.lastActivityAt = event.block.timestamp;
   user.save();
@@ -606,6 +630,16 @@ export function handleFundingSettled(event: FundingSettled): void {
   settlement.timestamp = event.block.timestamp;
   settlement.blockNumber = event.block.number;
   settlement.transactionHash = event.transaction.hash;
+
+  if (user.currentPositionSessionId.length > 0) {
+    const session = PositionSession.load(user.currentPositionSessionId);
+    if (session) {
+      settlement.positionSession = session.id;
+      session.fundingFees = session.fundingFees.plus(event.params.amount);
+      session.save();
+    }
+  }
+
   settlement.save();
 
   if (event.params.amount.gt(BigInt.zero())) {

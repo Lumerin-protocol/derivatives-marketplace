@@ -25,37 +25,40 @@ export class HealthCheck {
     this.logger = logger;
   }
 
-  start(): void {
-    this.startedAt = Date.now();
+  start(): Promise<void> {
+    return new Promise((resolve) => {
+      this.startedAt = Date.now();
 
-    this.server = createServer((req, res) => {
-      if (req.method === "GET" && req.url === "/health") {
-        const { lastPrice, lastCheckAt, liquidationsExecuted } = this.liquidator.stats;
-        const body = JSON.stringify({
-          status: "running",
-          trackedPositions: this.tracker.getUsers().size,
-          lastPriceCheckAt: lastCheckAt?.toISOString() ?? null,
-          lastPrice: lastPrice.toString(),
-          liquidationsExecuted,
-          uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
-          dryRun: this.config.dryRun,
-        });
+      this.server = createServer((req, res) => {
+        if (req.method === "GET" && req.url === "/health") {
+          const { lastPrice, lastCheckAt, liquidationsExecuted } = this.liquidator.stats;
+          const body = JSON.stringify({
+            status: "running",
+            trackedPositions: this.tracker.getUsers().size,
+            lastPriceCheckAt: lastCheckAt?.toISOString() ?? null,
+            lastPrice: lastPrice.toString(),
+            liquidationsExecuted,
+            uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
+            dryRun: this.config.dryRun,
+          });
 
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(body);
-      } else {
-        res.writeHead(404);
-        res.end();
-      }
-    });
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(body);
+        } else {
+          res.writeHead(404);
+          res.end();
+        }
+      });
 
-    const logger = this.logger;
+      const logger = this.logger;
 
-    this.server.listen(this.config.healthPort, () => {
-      logger.info(
-        { url: `http://localhost:${this.config.healthPort}/health` },
-        "Health endpoint started",
-      );
+      this.server.listen(this.config.healthPort, () => {
+        logger.info(
+          { url: `http://localhost:${this.config.healthPort}/health` },
+          "Health endpoint started",
+        );
+        resolve();
+      });
     });
   }
 

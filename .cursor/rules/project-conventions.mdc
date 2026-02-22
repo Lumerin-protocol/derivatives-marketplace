@@ -1,0 +1,77 @@
+---
+description: Coding conventions for the titan/perps project — a perpetual futures protocol with contracts, subgraph indexer, keeper bot, and e2e tests.
+alwaysApply: true
+---
+
+# Project Overview
+
+Multi-package repo (not a workspace monorepo). Each package is independent with its own `package.json` and pnpm lockfile.
+
+| Package | Language | Runtime | Purpose |
+|---------|----------|---------|---------|
+| `contracts/` | Solidity 0.8.28 | Hardhat 3 | On-chain CLOB perps contract (UUPS upgradeable) |
+| `indexer/` | AssemblyScript | Graph Protocol (WASM) | Subgraph event indexer |
+| `keeper/` | TypeScript | Node.js 22+ | Liquidation bot |
+| `e2e/` | TypeScript | Node.js 22+ | Full-stack integration tests |
+
+# General Style
+
+- Package manager: **pnpm** (v10)
+- Indentation: 2 spaces
+- Quotes: double quotes
+- Semicolons: yes
+- Linter: Biome (formatter disabled, linter enabled). Run from root.
+- No `any` — use proper types. `any` triggers a biome warning.
+- Use `type` imports for type-only symbols: `import type { Foo } from "./bar.ts"`
+
+# TypeScript (keeper, e2e)
+
+- Target ES2022, module NodeNext, strict mode
+- Always use `.ts` extensions in imports: `import { foo } from "./bar.ts"`
+- Use Node.js built-in test runner (`node --test`), not Jest/Vitest
+- Assertions: `import assert from "node:assert/strict"`
+- Logging: pino with structured context objects — `logger.info({ user, price }, "message")`
+- Ethereum: viem for all contract interactions (read, write, simulate, multicall, events)
+- Config: environment variables loaded via `--env-file ../.env`
+
+# AssemblyScript (indexer)
+
+AssemblyScript is NOT TypeScript. Key differences:
+- No closures, no union types, no optional chaining, no nullish coalescing
+- `null` only valid for reference types (not primitives)
+- Use `BigInt` from `@graphprotocol/graph-ts`, not native bigint
+- Use `==` / `!=` for value comparison (biome `noDoubleEquals` is off for indexer)
+- Use `log.info()` / `log.warning()` from graph-ts, not console.log
+- No `try`/`catch` — handle missing entities with null checks and early returns
+- Entity pattern: `getOrCreate*` functions that load-or-initialize, then caller calls `.save()`
+
+## Indexer test conventions (Matchstick)
+
+- Framework: matchstick-as
+- Run: `pnpm test` (calls `graph test`)
+- `clearStore()` and `setupDataSourceMock()` in every `beforeEach`
+- Create events with `newTypedMockEventWithParams<T>()`
+- Use helpers from `tests/helpers.ts`: `userAddress(id)`, `paramAddr`, `paramUint`, `paramInt`
+- Assertions: `assert.entityCount()`, `assert.fieldEquals(entityType, id, field, value)`
+- Name test variables descriptively — avoid magic numbers
+
+# Solidity (contracts)
+
+- Use custom errors, not require strings
+- NatSpec on all public/external functions (`/// @notice`, `/// @param`)
+- UUPS upgrade pattern with OpenZeppelin
+- Formatting: `forge fmt` (foundry.toml config)
+- Tests use Hardhat fixtures via `loadFixture()`
+- Shared fixtures live in `contracts/fixtures/viem.ts`
+
+# Testing
+
+| Package | Runner | Command |
+|---------|--------|---------|
+| contracts | Hardhat | `pnpm test` |
+| indexer | Matchstick | `pnpm test` |
+| keeper | node --test | `pnpm test` |
+| e2e | node --test | `pnpm test` |
+
+- ABIs are generated in contracts and copied to keeper (`contracts/abi/abi.ts` → `keeper/src/abi.ts`)
+- Keeper/e2e tests use shared fixtures from `contracts/fixtures/`

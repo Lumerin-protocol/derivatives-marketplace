@@ -1,0 +1,27 @@
+{
+  "name": "perps-e2e",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "scripts": {
+    "pretest": "cd ../contracts && pnpm hardhat compile && cp ./abi/abi.ts ../keeper/src/abi.ts",
+    "up": "docker compose up -d --build",
+    "down": "docker compose down --volumes",
+    "reset": "docker compose down --volumes && rm -rf data && docker compose up -d --build",
+    "test": "node --test --test-force-exit 'tests/**/*.test.ts'",
+    "test:bail": "node --test --test-force-exit --test-reporter=@reporters/bail --test-reporter-destination=stderr  --test-reporter=spec --test-reporter-destination=stdout 'tests/**/*.test.ts'"
+  },
+  "dependencies": {
+    "graphql-request": "^7.4.0",
+    "viem": "^2.46.2"
+  },
+  "devDependencies": {
+    "@reporters/bail": "^1.3.1",
+    "@types/node": "^22.19.11",
+    "typescript": "^5.9.3"
+  },
+  "packageManager": "pnpm@10.28.1"
+}

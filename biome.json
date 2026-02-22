@@ -1,31 +1,42 @@
 {
   "$schema": "./contracts/node_modules/@biomejs/biome/configuration_schema.json",
+  "files": {
+    "includes": [
+      "**",
+      "!!**/generated",
+      "!!**/build",
+      "!!**/node_modules",
+      "!!**/coverage",
+      "!!**/artifacts",
+      "!!**/cache"
+    ]
+  },
   "overrides": [
     {
       "includes": [
-        "indexer/src/**"
+        "indexer/src/**",
+        "indexer/tests/**"
       ],
       "linter": {
         "rules": {
           "complexity": {
             "noForEach": "off"
           },
+          "correctness": {
+            "noUnusedImports": "warn"
+          },
           "style": {
             "useImportType": "off",
             "useTemplate": "off"
           },
           "suspicious": {
-            "noShadowRestrictedNames": "off"
+            "noShadowRestrictedNames": "off",
+            "noDoubleEquals": "off"
           }
         }
       }
     }
   ],
-  "files": {
-    "includes": [
-      "**"
-    ]
-  },
   "assist": {
     "actions": {
       "source": {

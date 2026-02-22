@@ -1,4 +1,4 @@
-import type { PublicClient, WalletClient, Account } from "viem";
+import { type PublicClient, type WalletClient, type Account, BaseError } from "viem";
 import { perpsSimpleAbi, aggregatorV3InterfaceAbi } from "./abi.ts";
 import type { Config } from "./config.ts";
 import type { PositionTracker, UserState } from "./positionTracker.ts";
@@ -39,15 +39,20 @@ export class Liquidator {
 
   async start(): Promise<void> {
     // Read static contract params in a single multicall
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const results = (await this.publicClient.multicall({
       contracts: [
-        { address: this.config.perpsAddress, abi: perpsSimpleAbi, functionName: "liquidationFee" },
-        { address: this.config.perpsAddress, abi: perpsSimpleAbi, functionName: "decimals" },
+        {
+          address: this.config.perpsAddress,
+          abi: perpsSimpleAbi as any,
+          functionName: "liquidationFee",
+        },
+        { address: this.config.perpsAddress, abi: perpsSimpleAbi as any, functionName: "decimals" },
         ...(this.config.ethPriceFeedAddress
           ? [
               {
                 address: this.config.ethPriceFeedAddress,
-                abi: aggregatorV3InterfaceAbi,
+                abi: aggregatorV3InterfaceAbi as any,
                 functionName: "decimals",
               },
             ]
@@ -275,13 +280,17 @@ export class Liquidator {
         },
         "Liquidation confirmed",
       );
+
+      if (receipt.status === "success") {
+        await this.tracker.syncUser(user.address);
+      }
     } catch (error) {
       const errorStr = String(error);
 
       if (errorStr.includes("NotLiquidatable")) {
         this.logger.warn(logCtx, "Simulation reverted: NotLiquidatable (state drift)");
       } else {
-        this.logger.error({ ...logCtx, err: error }, "Liquidation attempt failed");
+        this.logger.error({ logCtx }, "Liquidation attempt failed");
       }
     }
   }

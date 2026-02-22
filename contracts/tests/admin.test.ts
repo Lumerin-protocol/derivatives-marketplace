@@ -1,18 +1,19 @@
-import { expect } from "chai";
-import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { network } from "hardhat";
 import { parseUnits, zeroAddress } from "viem";
-import { deployPerpsFixture, deployPerpsWithCollateralFixture } from "./fixtures";
-import { viem } from "hardhat";
-import { catchError } from "../lib/lib";
+import { deployPerpsFixture, deployPerpsWithCollateralFixture } from "./fixtures.ts";
+import { catchError } from "../lib/lib.ts";
+
+const { viem, networkHelpers } = await network.connect();
 
 describe("PerpsSimple - Admin Functions", function () {
   describe("setOracle", function () {
     it("should allow owner to set new oracle", async function () {
-      const { contracts, accounts } = await loadFixture(deployPerpsFixture);
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { perps } = contracts;
       const { owner } = accounts;
 
-      // Deploy a new mock oracle with proper timestamp handling
       const newPrice = parseUnits("100000", 6);
       const newOracle = await viem.deployContract("contracts/PriceOracleMock.sol:PriceOracleMock", [
         newPrice,
@@ -22,89 +23,98 @@ describe("PerpsSimple - Admin Functions", function () {
       await perps.write.setOracle([newOracle.address], { account: owner.account });
 
       const marketPrice = await perps.read.getMarketPrice();
-      expect(marketPrice).to.equal(newPrice);
+      assert.equal(marketPrice, newPrice);
     });
 
     it("should revert when non-owner tries to set oracle", async function () {
-      const { contracts, accounts } = await loadFixture(deployPerpsFixture);
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { perps, priceOracle } = contracts;
       const { buyer } = accounts;
 
-      await expect(
+      await viem.assertions.revertWithCustomError(
         perps.write.setOracle([priceOracle.address], { account: buyer.account }),
-      ).to.be.rejectedWith("OwnableUnauthorizedAccount");
+        perps,
+        "OwnableUnauthorizedAccount",
+      );
     });
 
     it("should revert when setting zero address", async function () {
-      const { contracts, accounts } = await loadFixture(deployPerpsFixture);
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { perps } = contracts;
       const { owner } = accounts;
 
-      await expect(
+      await viem.assertions.revertWithCustomError(
         perps.write.setOracle([zeroAddress], { account: owner.account }),
-      ).to.be.rejectedWith("InvalidOracle");
+        perps,
+        "InvalidOracle",
+      );
     });
   });
 
   describe("setMarginPercent", function () {
     it("should allow owner to set margin percent", async function () {
-      const { contracts, accounts } = await loadFixture(deployPerpsFixture);
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { perps } = contracts;
       const { owner } = accounts;
 
       await perps.write.setMarginPercent([20], { account: owner.account });
 
       const marginPercent = await perps.read.marginPercent();
-      expect(marginPercent).to.equal(20);
+      assert.equal(marginPercent, 20);
     });
 
     it("should revert when non-owner tries to set margin percent", async function () {
-      const { contracts, accounts } = await loadFixture(deployPerpsFixture);
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { perps } = contracts;
       const { buyer } = accounts;
 
-      await expect(
+      await viem.assertions.revertWithCustomError(
         perps.write.setMarginPercent([20], { account: buyer.account }),
-      ).to.be.rejectedWith("OwnableUnauthorizedAccount");
+        perps,
+        "OwnableUnauthorizedAccount",
+      );
     });
 
     it("should revert when margin percent is 0", async function () {
-      const { contracts, accounts } = await loadFixture(deployPerpsFixture);
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { perps } = contracts;
       const { owner } = accounts;
 
-      await expect(
+      await viem.assertions.revertWithCustomError(
         perps.write.setMarginPercent([0], { account: owner.account }),
-      ).to.be.rejectedWith("InvalidMarginPercent");
+        perps,
+        "InvalidMarginPercent",
+      );
     });
 
     it("should revert when margin percent is greater than 100", async function () {
-      const { contracts, accounts } = await loadFixture(deployPerpsFixture);
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { perps } = contracts;
       const { owner } = accounts;
 
-      await expect(
+      await viem.assertions.revertWithCustomError(
         perps.write.setMarginPercent([101], { account: owner.account }),
-      ).to.be.rejectedWith("InvalidMarginPercent");
+        perps,
+        "InvalidMarginPercent",
+      );
     });
 
     it("should revert when margin percent is less than maintenance margin", async function () {
-      const { contracts, accounts, config } = await loadFixture(deployPerpsFixture);
+      const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { perps } = contracts;
       const { owner } = accounts;
 
-      // Maintenance margin is 5%, try to set margin to 5% (not greater)
-      await expect(
-        perps.write.setMarginPercent([config.maintenanceMarginPercent], {
-          account: owner.account,
-        }),
-      ).to.be.rejectedWith("InvalidMarginPercent");
+      await viem.assertions.revertWithCustomError(
+        perps.write.setMarginPercent([config.maintenanceMarginPercent], { account: owner.account }),
+        perps,
+        "InvalidMarginPercent",
+      );
     });
   });
 
   describe("setMaintenanceMarginPercent", function () {
     it("should allow owner to set maintenance margin percent", async function () {
-      const { contracts, accounts } = await loadFixture(deployPerpsFixture);
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { perps } = contracts;
       const { owner } = accounts;
 
@@ -113,46 +123,49 @@ describe("PerpsSimple - Admin Functions", function () {
       await perps.write.setMaintenanceMarginPercent([margin], { account: owner.account });
 
       const maintenanceMarginPercent = await perps.read.maintenanceMarginPercent();
-      expect(maintenanceMarginPercent).to.equal(margin);
+      assert.equal(maintenanceMarginPercent, margin);
     });
 
     it("should revert when non-owner tries to set", async function () {
-      const { contracts, accounts } = await loadFixture(deployPerpsFixture);
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { perps } = contracts;
       const { buyer } = accounts;
 
-      await expect(
+      await viem.assertions.revertWithCustomError(
         perps.write.setMaintenanceMarginPercent([3], { account: buyer.account }),
-      ).to.be.rejectedWith("OwnableUnauthorizedAccount");
+        perps,
+        "OwnableUnauthorizedAccount",
+      );
     });
 
     it("should revert when maintenance margin is 0", async function () {
-      const { contracts, accounts } = await loadFixture(deployPerpsFixture);
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { perps } = contracts;
       const { owner } = accounts;
 
-      await expect(
+      await viem.assertions.revertWithCustomError(
         perps.write.setMaintenanceMarginPercent([0], { account: owner.account }),
-      ).to.be.rejectedWith("InvalidMarginPercent");
+        perps,
+        "InvalidMarginPercent",
+      );
     });
 
     it("should revert when maintenance margin >= margin percent", async function () {
-      const { contracts, accounts, config } = await loadFixture(deployPerpsFixture);
+      const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { perps } = contracts;
       const { owner } = accounts;
 
-      // Try to set maintenance margin equal to margin percent
-      await expect(
-        perps.write.setMaintenanceMarginPercent([config.marginPercent], {
-          account: owner.account,
-        }),
-      ).to.be.rejectedWith("InvalidMarginPercent");
+      await viem.assertions.revertWithCustomError(
+        perps.write.setMaintenanceMarginPercent([config.marginPercent], { account: owner.account }),
+        perps,
+        "InvalidMarginPercent",
+      );
     });
   });
 
   describe("setLiquidationFee", function () {
     it("should allow owner to set liquidation fee", async function () {
-      const { contracts, accounts } = await loadFixture(deployPerpsFixture);
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { perps } = contracts;
       const { owner } = accounts;
 
@@ -160,34 +173,36 @@ describe("PerpsSimple - Admin Functions", function () {
       await perps.write.setLiquidationFee([newFee], { account: owner.account });
 
       const liquidationFee = await perps.read.liquidationFee();
-      expect(liquidationFee).to.equal(newFee);
+      assert.equal(liquidationFee, newFee);
     });
 
     it("should revert when non-owner tries to set", async function () {
-      const { contracts, accounts } = await loadFixture(deployPerpsFixture);
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { perps } = contracts;
       const { buyer } = accounts;
 
-      await expect(
+      await viem.assertions.revertWithCustomError(
         perps.write.setLiquidationFee([parseUnits("20", 6)], { account: buyer.account }),
-      ).to.be.rejectedWith("OwnableUnauthorizedAccount");
+        perps,
+        "OwnableUnauthorizedAccount",
+      );
     });
 
     it("should allow setting to 0", async function () {
-      const { contracts, accounts } = await loadFixture(deployPerpsFixture);
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { perps } = contracts;
       const { owner } = accounts;
 
       await perps.write.setLiquidationFee([0n], { account: owner.account });
 
       const liquidationFee = await perps.read.liquidationFee();
-      expect(liquidationFee).to.equal(0n);
+      assert.equal(liquidationFee, 0n);
     });
   });
 
   describe("setMatchFee", function () {
     it("should allow owner to set maker and taker fees", async function () {
-      const { contracts, accounts } = await loadFixture(deployPerpsFixture);
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { perps } = contracts;
       const { owner } = accounts;
 
@@ -195,16 +210,18 @@ describe("PerpsSimple - Admin Functions", function () {
 
       const takerFeeBps = await perps.read.takerFeeBps();
       const makerFeeBps = await perps.read.makerFeeBps();
-      expect(takerFeeBps).to.equal(10);
-      expect(makerFeeBps).to.equal(2);
+      assert.equal(takerFeeBps, 10);
+      assert.equal(makerFeeBps, 2);
     });
 
     it("should revert when non-owner tries to set", async function () {
-      const { contracts, accounts } = await loadFixture(deployPerpsFixture);
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { perps } = contracts;
       const { buyer } = accounts;
 
-      await expect(perps.write.setMatchFee([10, 0], { account: buyer.account })).to.be.rejectedWith(
+      await viem.assertions.revertWithCustomError(
+        perps.write.setMatchFee([10, 0], { account: buyer.account }),
+        perps,
         "OwnableUnauthorizedAccount",
       );
     });
@@ -212,7 +229,7 @@ describe("PerpsSimple - Admin Functions", function () {
 
   describe("depositReservePool", function () {
     it("should allow anyone to deposit to reserve pool", async function () {
-      const { contracts, accounts } = await loadFixture(deployPerpsFixture);
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { perps } = contracts;
       const { buyer } = accounts;
 
@@ -222,11 +239,11 @@ describe("PerpsSimple - Admin Functions", function () {
       await perps.write.depositReservePool([amount], { account: buyer.account });
 
       const reserveAfter = await perps.read.balanceOf([perps.address]);
-      expect(reserveAfter - reserveBefore).to.equal(amount);
+      assert.equal(reserveAfter - reserveBefore, amount);
     });
 
     it("should transfer tokens from depositor to contract", async function () {
-      const { contracts, accounts } = await loadFixture(deployPerpsFixture);
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { perps, usdcMock } = contracts;
       const { buyer } = accounts;
 
@@ -239,14 +256,14 @@ describe("PerpsSimple - Admin Functions", function () {
       const buyerBalanceAfter = await usdcMock.read.balanceOf([buyer.account.address]);
       const contractBalanceAfter = await usdcMock.read.balanceOf([perps.address]);
 
-      expect(buyerBalanceBefore - buyerBalanceAfter).to.equal(amount);
-      expect(contractBalanceAfter - contractBalanceBefore).to.equal(amount);
+      assert.equal(buyerBalanceBefore - buyerBalanceAfter, amount);
+      assert.equal(contractBalanceAfter - contractBalanceBefore, amount);
     });
   });
 
   describe("withdrawReservePool", function () {
     it("should allow owner to withdraw from reserve pool", async function () {
-      const { contracts, accounts } = await loadFixture(deployPerpsFixture);
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { perps } = contracts;
       const { owner } = accounts;
 
@@ -256,21 +273,23 @@ describe("PerpsSimple - Admin Functions", function () {
       await perps.write.withdrawReservePool([amount], { account: owner.account });
 
       const reserveAfter = await perps.read.balanceOf([perps.address]);
-      expect(reserveBefore - reserveAfter).to.equal(amount);
+      assert.equal(reserveBefore - reserveAfter, amount);
     });
 
     it("should revert when non-owner tries to withdraw", async function () {
-      const { contracts, accounts } = await loadFixture(deployPerpsFixture);
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { perps } = contracts;
       const { buyer } = accounts;
 
-      await expect(
+      await viem.assertions.revertWithCustomError(
         perps.write.withdrawReservePool([parseUnits("100", 6)], { account: buyer.account }),
-      ).to.be.rejectedWith("OwnableUnauthorizedAccount");
+        perps,
+        "OwnableUnauthorizedAccount",
+      );
     });
 
     it("should revert when withdrawing more than available", async function () {
-      const { contracts, accounts } = await loadFixture(deployPerpsFixture);
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { perps } = contracts;
       const { owner } = accounts;
 
@@ -283,7 +302,7 @@ describe("PerpsSimple - Admin Functions", function () {
     });
 
     it("should transfer tokens to owner", async function () {
-      const { contracts, accounts } = await loadFixture(deployPerpsFixture);
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { perps, usdcMock } = contracts;
       const { owner } = accounts;
 
@@ -293,7 +312,7 @@ describe("PerpsSimple - Admin Functions", function () {
       await perps.write.withdrawReservePool([amount], { account: owner.account });
 
       const ownerBalanceAfter = await usdcMock.read.balanceOf([owner.account.address]);
-      expect(ownerBalanceAfter - ownerBalanceBefore).to.equal(amount);
+      assert.equal(ownerBalanceAfter - ownerBalanceBefore, amount);
     });
   });
 });
