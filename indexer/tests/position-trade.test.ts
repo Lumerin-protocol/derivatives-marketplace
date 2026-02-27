@@ -126,6 +126,41 @@ describe("handlePositionTrade", () => {
     assert.fieldEquals("PositionSession", sessionId, "status", "CLOSE");
   });
 
+  test("tracks entryPrice from aggregatedEntryPriceAfter across scale-ins and partial close", () => {
+    const address = userAddress(1);
+    const oneUnit = BigInt.fromI32(1000000);
+    const twoUnits = BigInt.fromI32(2000000);
+    const price1 = BigInt.fromI32(3000000);
+    const price2 = BigInt.fromI32(3200000);
+    const avgEntry = BigInt.fromI32(3100000);
+    const exitPrice = BigInt.fromI32(3500000);
+
+    const open = createPositionTradeEvent(
+      address, price1, oneUnit, oneUnit, price1, BigInt.zero(),
+    );
+    open.logIndex = BigInt.fromI32(1);
+    handlePositionTrade(open);
+
+    const sessionId = positionSessionId(open.block.number, open.logIndex.toI32());
+    assert.fieldEquals("PositionSession", sessionId, "entryPrice", price1.toString());
+
+    const scaleIn = createPositionTradeEvent(
+      address, price2, oneUnit, twoUnits, avgEntry, BigInt.zero(),
+    );
+    scaleIn.logIndex = BigInt.fromI32(2);
+    handlePositionTrade(scaleIn);
+
+    assert.fieldEquals("PositionSession", sessionId, "entryPrice", avgEntry.toString());
+
+    const partialClose = createPositionTradeEvent(
+      address, exitPrice, oneUnit.neg(), oneUnit, avgEntry, BigInt.fromI32(400000),
+    );
+    partialClose.logIndex = BigInt.fromI32(3);
+    handlePositionTrade(partialClose);
+
+    assert.fieldEquals("PositionSession", sessionId, "entryPrice", avgEntry.toString());
+  });
+
   test("it groups trades related to the same position session", () => {
     const address = userAddress(1);
     const entryPrice = BigInt.fromI32(3000000);

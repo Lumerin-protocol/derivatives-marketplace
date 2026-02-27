@@ -664,25 +664,6 @@ export const perpsSimpleAbi = [
     anonymous: false,
     inputs: [
       {
-        name: 'orderId',
-        internalType: 'bytes32',
-        type: 'bytes32',
-        indexed: true,
-      },
-      {
-        name: 'participant',
-        internalType: 'address',
-        type: 'address',
-        indexed: true,
-      },
-    ],
-    name: 'OrderFilled',
-  },
-  {
-    type: 'event',
-    anonymous: false,
-    inputs: [
-      {
         name: 'makerOrderId',
         internalType: 'bytes32',
         type: 'bytes32',

@@ -407,16 +407,15 @@ export function handlePositionTrade(event: PositionTrade): void {
     session = new PositionSession(id);
     session.status = "OPEN";
     session.user = user.id;
-    session.entryPrice = event.params.aggregatedEntryPriceAfter;
+    session.openedAt = event.block.timestamp;
+
     session.closePrice = BigInt.zero();
-    session.maxQuantity = absBigInt(event.params.netQuantityAfter);
     session.closedQuantity = BigInt.zero();
     session.realizedPnl = BigInt.zero();
-    session.fundingFees = BigInt.zero();
+    session.maxQuantity = BigInt.zero();
     session.tradingFees = BigInt.zero();
-    session.openedAt = event.block.timestamp;
-    session.lastTradeAt = event.block.timestamp;
-    session.save();
+    session.fundingFees = BigInt.zero();
+
     user.currentPositionSessionId = id;
   } else {
     const loaded = PositionSession.load(user.currentPositionSessionId);
@@ -430,7 +429,9 @@ export function handlePositionTrade(event: PositionTrade): void {
     session = loaded;
   }
 
+  session.entryPrice = event.params.aggregatedEntryPriceAfter;
   session.lastTradeAt = event.block.timestamp;
+
   const absAfter = absBigInt(netQuantityAfter);
   if (session.maxQuantity.lt(absAfter)) {
     session.maxQuantity = absAfter;

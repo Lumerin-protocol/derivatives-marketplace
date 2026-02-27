@@ -12,7 +12,7 @@ import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils
 import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import { ERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
 import { AggregatorV3Interface } from "./AggregatorV3Interface.sol";
-// import { console } from "hardhat/console.sol";
+import { console } from "hardhat/console.sol";
 
 /// @title PerpsSimple
 /// @notice Simple perpetual trading contract with on-chain order book
@@ -88,8 +88,6 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
 
     // Events
     event OrderCreated(bytes32 indexed orderId, address indexed participant, uint256 price, int256 quantity);
-    // TODO: expose average fill price for the order or connect it with the trade event
-    event OrderFilled(bytes32 indexed orderId, address indexed participant);
     event OrderCancelled(bytes32 indexed orderId, address indexed participant);
     event OrderUpdated(bytes32 indexed orderId, address indexed participant, int256 newQuantity);
     event OrderMatched(
@@ -118,7 +116,6 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     event FundingSettled(address indexed user, int256 amount);
     event FundingParametersUpdated(uint256 maxBps, uint256 period);
     event MinimumMarginPerOrderUpdated(uint256 newMinimumMarginPerOrder);
-
 
     // Errors
     error InvalidPrice();
@@ -223,9 +220,14 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         _settleFunding(sender);
 
         bool isBuy = _quantity > 0;
-        int256 remainingQuantity = _quantity;
+        bytes32 orderId = bytes32(++nonce);
+        emit OrderCreated(orderId, sender, _price, _quantity);
 
-        remainingQuantity = _matchWithOppositeOrders(sender, _price, remainingQuantity);
+        int256 remainingQuantity = _matchWithOppositeOrders(sender, _price, _quantity);
+
+        if (remainingQuantity != _quantity) {
+            emit OrderUpdated(orderId, sender, remainingQuantity);
+        }
 
         if (remainingQuantity != 0) {
             // Validate minimum margin per resting order
@@ -237,18 +239,19 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
                 }
             }
 
+            // Validate max orders per participant
             EnumerableSet.Bytes32Set storage participantOrders = participantOrderIdsIndex[sender];
             if (participantOrders.length() >= MAX_ORDERS_PER_PARTICIPANT) {
                 revert MaxOrdersPerParticipantReached();
             }
 
-            StructuredLinkedList.List storage orderQueue = _priceOrderIds(_price, isBuy);
-
-            bytes32 orderId = _createOrder(sender, _price, remainingQuantity);
-            orderQueue.pushBack(uint256(orderId));
+            // Create order with quantity that was not matched
+            orders[orderId] = Order({ participant: sender, price: _price, quantity: remainingQuantity });
+            userTotalOrderValue[sender] += _calculateValue(_price, _abs(remainingQuantity));
             participantOrders.add(orderId);
+            StructuredLinkedList.List storage orderQueue = _priceOrderIds(_price, isBuy);
+            orderQueue.pushBack(uint256(orderId));
 
-            // Add price level to sorted list
             _addPriceLevel(_price, isBuy);
         }
 
@@ -330,7 +333,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         _makerOrder.quantity = newMakerQty;
 
         if (newMakerQty == 0) {
-            emit OrderFilled(_makerOrderId, makerParticipant);
+            emit OrderUpdated(_makerOrderId, makerParticipant, 0);
             // Maker is a bid when the taker is selling (_remainingQty < 0).
             _removeOrder(_makerOrderId, makerParticipant, makerPrice, _remainingQty < 0);
         } else {
@@ -394,19 +397,6 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         _priceOrderIds(_price, _isBid).remove(uint256(_orderId));
         participantOrderIdsIndex[_participant].remove(_orderId);
         delete orders[_orderId];
-    }
-
-    /// @notice Create a new order
-    /// @dev Order IDs use sequential counter — cheap and unique within contract (keccak was ~200+ gas per order).
-    function _createOrder(address _participant, uint256 _price, int256 _quantity) private returns (bytes32) {
-        bytes32 orderId = bytes32(++nonce);
-        orders[orderId] = Order({ participant: _participant, price: _price, quantity: _quantity });
-
-        // Update cached total order value for user
-        userTotalOrderValue[_participant] += _calculateValue(_price, _abs(_quantity));
-
-        emit OrderCreated(orderId, _participant, _price, _quantity);
-        return orderId;
     }
 
     /// @notice Update net positions when orders match
@@ -475,7 +465,9 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         uint256 oldAbsQuantity = _abs(position.netQuantity);
         uint256 settledAbs = absQuantity < oldAbsQuantity ? absQuantity : oldAbsQuantity;
         int256 pnl = _settleReducedPosition(
-            _user, int256(_tradePrice) - int256(position.aggregatedEntryPrice), _toSignedQuantity(settledAbs, position.netQuantity)
+            _user,
+            int256(_tradePrice) - int256(position.aggregatedEntryPrice),
+            _toSignedQuantity(settledAbs, position.netQuantity)
         );
 
         if (absQuantity > oldAbsQuantity) {
@@ -485,7 +477,15 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             position.netQuantity = openQty;
             position.aggregatedEntryPrice = _tradePrice;
             userFundingSnapshot[_user] = cumulativeFundingPerUnit;
-            emit PositionTrade(_user, _tradePrice, _toSignedQuantity(settledAbs, position.netQuantity), 0, entryPriceBefore, pnl, _tradingFee);
+            emit PositionTrade(
+                _user,
+                _tradePrice,
+                _toSignedQuantity(settledAbs, position.netQuantity),
+                0,
+                entryPriceBefore,
+                pnl,
+                _tradingFee
+            );
             emit PositionTrade(_user, _tradePrice, openQty, openQty, _tradePrice, 0, 0);
         } else if (position.netQuantity + _quantity == 0) {
             emit PositionTrade(_user, _tradePrice, _quantity, 0, position.aggregatedEntryPrice, pnl, _tradingFee);
@@ -493,7 +493,9 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             usersWithPositions.remove(_user);
         } else {
             position.netQuantity += _quantity;
-            emit PositionTrade(_user, _tradePrice, _quantity, position.netQuantity, position.aggregatedEntryPrice, pnl, _tradingFee);
+            emit PositionTrade(
+                _user, _tradePrice, _quantity, position.netQuantity, position.aggregatedEntryPrice, pnl, _tradingFee
+            );
         }
     }
 
