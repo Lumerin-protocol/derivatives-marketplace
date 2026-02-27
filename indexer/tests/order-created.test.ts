@@ -37,6 +37,13 @@ describe("handleOrderCreated", () => {
     assert.fieldEquals("Order", id.toHexString(), "isBuy", "true");
     assert.fieldEquals("Order", id.toHexString(), "price", event.params.price.toString());
     assert.fieldEquals("Order", id.toHexString(), "quantity", event.params.quantity.toString());
+    assert.fieldEquals("Order", id.toHexString(), "originalQuantity", event.params.quantity.toString());
+    assert.fieldEquals("Order", id.toHexString(), "filledQuantity", "0");
+    assert.fieldEquals("Order", id.toHexString(), "user", address.toHexString());
+    assert.fieldEquals("Order", id.toHexString(), "createdAt", event.block.timestamp.toString());
+    assert.fieldEquals("Order", id.toHexString(), "updatedAt", event.block.timestamp.toString());
+    assert.fieldEquals("Order", id.toHexString(), "blockNumber", event.block.number.toString());
+    assert.fieldEquals("Order", id.toHexString(), "transactionHash", event.transaction.hash.toHexString());
 
     assert.fieldEquals(
       "PriceLevel",
@@ -45,6 +52,8 @@ describe("handleOrderCreated", () => {
       event.params.quantity.abs().toString(),
     );
     assert.fieldEquals("PriceLevel", priceLevel(event.params.price, true), "orderCount", "1");
+    assert.fieldEquals("PriceLevel", priceLevel(event.params.price, true), "price", event.params.price.toString());
+    assert.fieldEquals("PriceLevel", priceLevel(event.params.price, true), "isBid", "true");
 
     assert.fieldEquals("Perps", "0", "totalUsers", "1");
     assert.fieldEquals("Perps", "0", "totalOrders", "1");
@@ -52,6 +61,9 @@ describe("handleOrderCreated", () => {
 
     assert.fieldEquals("User", address.toHexString(), "orderCount", "1");
     assert.fieldEquals("User", address.toHexString(), "activeOrderCount", "1");
+    assert.fieldEquals("User", address.toHexString(), "address", address.toHexString());
+    assert.fieldEquals("User", address.toHexString(), "createdAt", event.block.timestamp.toString());
+    assert.fieldEquals("User", address.toHexString(), "lastActivityAt", event.block.timestamp.toString());
   });
 
   test("creates sell order and ask price level", () => {

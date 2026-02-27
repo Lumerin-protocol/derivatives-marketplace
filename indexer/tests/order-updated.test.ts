@@ -80,11 +80,15 @@ describe("handleOrderUpdated", () => {
     const originalQty = BigInt.fromI32(1000000);
 
     handleOrderCreated(createOrderCreatedEvent(id, address, price, originalQty));
-    handleOrderUpdated(createOrderUpdatedEvent(id, address, BigInt.zero()));
+
+    const updateEvent = createOrderUpdatedEvent(id, address, BigInt.zero());
+    handleOrderUpdated(updateEvent);
 
     assert.fieldEquals("Order", id.toHexString(), "status", "FILLED");
     assert.fieldEquals("Order", id.toHexString(), "quantity", BigInt.zero().toString());
     assert.fieldEquals("Order", id.toHexString(), "filledQuantity", originalQty.toString());
+    assert.fieldEquals("Order", id.toHexString(), "closedAt", updateEvent.block.timestamp.toString());
+    assert.fieldEquals("Order", id.toHexString(), "updatedAt", updateEvent.block.timestamp.toString());
 
     assert.fieldEquals(
       "PriceLevel",

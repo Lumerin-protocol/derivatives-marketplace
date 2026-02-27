@@ -6,7 +6,7 @@ import { OrderMatched } from "../generated/PerpsSimple/PerpsSimple";
 import { Perps } from "../generated/schema";
 import { assert } from "matchstick-as/assembly/index";
 import { userAddress, orderId, paramAddr, paramBytes, paramUint, paramInt, setupDataSourceMock } from "./helpers";
-import { positionSessionId } from "../src/ids";
+import { positionSessionId, createEventId } from "../src/ids";
 
 function setupPerps(): void {
   const perps = new Perps(0);
@@ -79,10 +79,11 @@ describe("handleOrderMatched", () => {
     const taker = userAddress(2);
     const price = BigInt.fromI32(3000000);
     const qty = BigInt.fromI32(1000000);
+    const mOid = orderId(1);
 
     // Taker buys (+qty), maker sells (-qty)
     const event = createOrderMatchedEvent(
-      orderId(1), maker, taker, price,
+      mOid, maker, taker, price,
       qty, BigInt.zero(), BigInt.zero(),
       qty.neg(), qty, price, price,
     );
@@ -97,6 +98,83 @@ describe("handleOrderMatched", () => {
     assert.entityCount("Trade", 2);
     assert.entityCount("PositionSession", 2);
     assert.fieldEquals("Perps", "0", "totalTrades", "1");
+
+    // volume = price * absQty / quantityScale = 3000000 * 1000000 / 1000000 = 3000000
+    assert.fieldEquals("Perps", "0", "totalVolume", "3000000");
+
+    // Fill IDs: createEventId(txHash, logIndex).concatI32(sideIndex)
+    const baseId = createEventId(event.transaction.hash, event.logIndex);
+    const takerFillId = baseId.concatI32(0).toHexString();
+    const makerFillId = baseId.concatI32(1).toHexString();
+
+    // Taker fill (buyer, +qty)
+    assert.fieldEquals("Fill", takerFillId, "fillPrice", price.toString());
+    assert.fieldEquals("Fill", takerFillId, "fillQuantity", qty.toString());
+    assert.fieldEquals("Fill", takerFillId, "netQuantityAfter", qty.toString());
+    assert.fieldEquals("Fill", takerFillId, "aggregatedEntryPriceAfter", price.toString());
+    assert.fieldEquals("Fill", takerFillId, "realizedPnl", "0");
+    assert.fieldEquals("Fill", takerFillId, "tradingFee", "0");
+    assert.fieldEquals("Fill", takerFillId, "user", taker.toHexString());
+    assert.fieldEquals("Fill", takerFillId, "counterparty", maker.toHexString());
+    assert.fieldEquals("Fill", takerFillId, "makerOrderId", mOid.toHexString());
+    assert.fieldEquals("Fill", takerFillId, "timestamp", event.block.timestamp.toString());
+    assert.fieldEquals("Fill", takerFillId, "blockNumber", event.block.number.toString());
+    assert.fieldEquals("Fill", takerFillId, "transactionHash", event.transaction.hash.toHexString());
+
+    // Maker fill (seller, -qty)
+    assert.fieldEquals("Fill", makerFillId, "fillPrice", price.toString());
+    assert.fieldEquals("Fill", makerFillId, "fillQuantity", qty.neg().toString());
+    assert.fieldEquals("Fill", makerFillId, "netQuantityAfter", qty.neg().toString());
+    assert.fieldEquals("Fill", makerFillId, "aggregatedEntryPriceAfter", price.toString());
+    assert.fieldEquals("Fill", makerFillId, "realizedPnl", "0");
+    assert.fieldEquals("Fill", makerFillId, "tradingFee", "0");
+    assert.fieldEquals("Fill", makerFillId, "user", maker.toHexString());
+    assert.fieldEquals("Fill", makerFillId, "counterparty", taker.toHexString());
+    assert.fieldEquals("Fill", makerFillId, "makerOrderId", mOid.toHexString());
+
+    // Trade assertions (taker)
+    const takerTradeId = event.transaction.hash.concat(taker).toHexString();
+    assert.fieldEquals("Trade", takerTradeId, "user", taker.toHexString());
+    assert.fieldEquals("Trade", takerTradeId, "averagePrice", price.toString());
+    assert.fieldEquals("Trade", takerTradeId, "totalQuantity", qty.toString());
+    assert.fieldEquals("Trade", takerTradeId, "totalFee", "0");
+    assert.fieldEquals("Trade", takerTradeId, "realizedPnl", "0");
+    assert.fieldEquals("Trade", takerTradeId, "netQuantityAfter", qty.toString());
+    assert.fieldEquals("Trade", takerTradeId, "aggregatedEntryPriceAfter", price.toString());
+    assert.fieldEquals("Trade", takerTradeId, "fillCount", "1");
+    assert.fieldEquals("Trade", takerTradeId, "timestamp", event.block.timestamp.toString());
+    assert.fieldEquals("Trade", takerTradeId, "blockNumber", event.block.number.toString());
+    assert.fieldEquals("Trade", takerTradeId, "transactionHash", event.transaction.hash.toHexString());
+
+    // Trade assertions (maker)
+    const makerTradeId = event.transaction.hash.concat(maker).toHexString();
+    assert.fieldEquals("Trade", makerTradeId, "user", maker.toHexString());
+    assert.fieldEquals("Trade", makerTradeId, "totalQuantity", qty.neg().toString());
+    assert.fieldEquals("Trade", makerTradeId, "totalFee", "0");
+    assert.fieldEquals("Trade", makerTradeId, "realizedPnl", "0");
+    assert.fieldEquals("Trade", makerTradeId, "netQuantityAfter", qty.neg().toString());
+    assert.fieldEquals("Trade", makerTradeId, "aggregatedEntryPriceAfter", price.toString());
+
+    // PositionSession assertions (taker: sideIndex=0)
+    const takerSessionId = positionSessionId(event.block.number, event.logIndex.toI32() * 2);
+    assert.fieldEquals("PositionSession", takerSessionId, "status", "OPEN");
+    assert.fieldEquals("PositionSession", takerSessionId, "user", taker.toHexString());
+    assert.fieldEquals("PositionSession", takerSessionId, "entryPrice", price.toString());
+    assert.fieldEquals("PositionSession", takerSessionId, "closePrice", "0");
+    assert.fieldEquals("PositionSession", takerSessionId, "maxQuantity", qty.toString());
+    assert.fieldEquals("PositionSession", takerSessionId, "closedQuantity", "0");
+    assert.fieldEquals("PositionSession", takerSessionId, "realizedPnl", "0");
+    assert.fieldEquals("PositionSession", takerSessionId, "tradingFees", "0");
+    assert.fieldEquals("PositionSession", takerSessionId, "fundingFees", "0");
+    assert.fieldEquals("PositionSession", takerSessionId, "openedAt", event.block.timestamp.toString());
+    assert.fieldEquals("PositionSession", takerSessionId, "lastTradeAt", event.block.timestamp.toString());
+
+    // User currentPositionSessionId
+    assert.fieldEquals("User", taker.toHexString(), "currentPositionSessionId", takerSessionId);
+
+    // Fill links to session and trade
+    assert.fieldEquals("Fill", takerFillId, "positionSession", takerSessionId);
+    assert.fieldEquals("Fill", takerFillId, "trade", takerTradeId);
   });
 
   test("computes realized PnL when closing a long position", () => {
@@ -201,7 +279,7 @@ describe("handleOrderMatched", () => {
     assert.fieldEquals("Trade", takerTradeId, "averagePrice", price.toString());
   });
 
-  test("closes position session on full close", () => {
+  test("closes position session on full close with all session fields", () => {
     const maker1 = userAddress(1);
     const trader = userAddress(2);
     const maker2 = userAddress(3);
@@ -218,10 +296,12 @@ describe("handleOrderMatched", () => {
     openEvent.transaction.hash = orderId(100);
     handleOrderMatched(openEvent);
 
-    // Taker is sideIndex=0, session ID uses logIndex*2+0
     const sessionId = positionSessionId(openEvent.block.number, openEvent.logIndex.toI32() * 2);
     assert.fieldEquals("PositionSession", sessionId, "status", "OPEN");
     assert.fieldEquals("PositionSession", sessionId, "entryPrice", entryPrice.toString());
+    assert.fieldEquals("PositionSession", sessionId, "openedAt", openEvent.block.timestamp.toString());
+    assert.fieldEquals("PositionSession", sessionId, "user", trader.toHexString());
+    assert.fieldEquals("User", trader.toHexString(), "currentPositionSessionId", sessionId);
 
     const closeEvent = createOrderMatchedEvent(
       orderId(2), maker2, trader, exitPrice,
@@ -235,5 +315,51 @@ describe("handleOrderMatched", () => {
     assert.fieldEquals("PositionSession", sessionId, "status", "CLOSE");
     assert.fieldEquals("PositionSession", sessionId, "realizedPnl", "100000");
     assert.fieldEquals("PositionSession", sessionId, "closedQuantity", qty.toString());
+    assert.fieldEquals("PositionSession", sessionId, "closePrice", exitPrice.toString());
+    assert.fieldEquals("PositionSession", sessionId, "maxQuantity", qty.toString());
+    assert.fieldEquals("PositionSession", sessionId, "tradingFees", "0");
+    assert.fieldEquals("PositionSession", sessionId, "lastTradeAt", closeEvent.block.timestamp.toString());
+
+    assert.fieldEquals("User", trader.toHexString(), "currentPositionSessionId", "");
+
+    // Close-side Trade should have realizedPnl
+    const closeTradeId = closeEvent.transaction.hash.concat(trader).toHexString();
+    assert.fieldEquals("Trade", closeTradeId, "realizedPnl", "100000");
+    assert.fieldEquals("Trade", closeTradeId, "totalQuantity", qty.neg().toString());
+  });
+
+  test("trading fees flow to Fill, Trade, and PositionSession", () => {
+    const maker = userAddress(1);
+    const taker = userAddress(2);
+    const price = BigInt.fromI32(3000000);
+    const qty = BigInt.fromI32(1000000);
+    const takerFee = BigInt.fromI32(5000);
+    const makerFee = BigInt.fromI32(-2000);
+
+    const event = createOrderMatchedEvent(
+      orderId(1), maker, taker, price,
+      qty, makerFee, takerFee,
+      qty.neg(), qty, price, price,
+    );
+    event.logIndex = BigInt.fromI32(1);
+    event.transaction.hash = orderId(100);
+    handleOrderMatched(event);
+
+    const baseId = createEventId(event.transaction.hash, event.logIndex);
+    const takerFillId = baseId.concatI32(0).toHexString();
+    const makerFillId = baseId.concatI32(1).toHexString();
+
+    assert.fieldEquals("Fill", takerFillId, "tradingFee", takerFee.toString());
+    assert.fieldEquals("Fill", makerFillId, "tradingFee", makerFee.toString());
+
+    const takerTradeId = event.transaction.hash.concat(taker).toHexString();
+    const makerTradeId = event.transaction.hash.concat(maker).toHexString();
+    assert.fieldEquals("Trade", takerTradeId, "totalFee", takerFee.toString());
+    assert.fieldEquals("Trade", makerTradeId, "totalFee", makerFee.toString());
+
+    const takerSessionId = positionSessionId(event.block.number, event.logIndex.toI32() * 2);
+    const makerSessionId = positionSessionId(event.block.number, event.logIndex.toI32() * 2 + 1);
+    assert.fieldEquals("PositionSession", takerSessionId, "tradingFees", takerFee.toString());
+    assert.fieldEquals("PositionSession", makerSessionId, "tradingFees", makerFee.toString());
   });
 });

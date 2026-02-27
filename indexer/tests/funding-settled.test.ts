@@ -142,6 +142,21 @@ describe("handleFundingSettled", () => {
     assert.entityCount("FundingSettlement", 2);
     assert.fieldEquals("FundingSettlement", mockEventId(2), "positionSession", sessionId);
     assert.fieldEquals("FundingSettlement", mockEventId(3), "positionSession", sessionId);
+
+    // FundingSettlement entity fields
+    assert.fieldEquals("FundingSettlement", mockEventId(2), "user", trader.toHexString());
+    assert.fieldEquals("FundingSettlement", mockEventId(2), "amount", fundingPaid.toString());
+    assert.fieldEquals("FundingSettlement", mockEventId(2), "timestamp", settle1.block.timestamp.toString());
+    assert.fieldEquals("FundingSettlement", mockEventId(2), "blockNumber", settle1.block.number.toString());
+    assert.fieldEquals("FundingSettlement", mockEventId(2), "transactionHash", settle1.transaction.hash.toHexString());
+
+    assert.fieldEquals("FundingSettlement", mockEventId(3), "user", trader.toHexString());
+    assert.fieldEquals("FundingSettlement", mockEventId(3), "amount", fundingReceived.toString());
+
+    // User funding totals: fundingPaid stores abs of negative, fundingReceived stores positive
+    assert.fieldEquals("User", trader.toHexString(), "totalFundingPaid", fundingPaid.abs().toString());
+    assert.fieldEquals("User", trader.toHexString(), "totalFundingReceived", fundingReceived.toString());
+    assert.fieldEquals("User", trader.toHexString(), "lastActivityAt", settle2.block.timestamp.toString());
   });
 
   test("funding settled before close is linked to the session being closed", () => {
