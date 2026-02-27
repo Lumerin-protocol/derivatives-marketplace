@@ -332,12 +332,9 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         int256 newMakerQty = _reduceQuantity(makerQty, matchAmt);
         _makerOrder.quantity = newMakerQty;
 
+        emit OrderUpdated(_makerOrderId, makerParticipant, newMakerQty);
         if (newMakerQty == 0) {
-            emit OrderUpdated(_makerOrderId, makerParticipant, 0);
-            // Maker is a bid when the taker is selling (_remainingQty < 0).
             _removeOrder(_makerOrderId, makerParticipant, makerPrice, _remainingQty < 0);
-        } else {
-            emit OrderUpdated(_makerOrderId, makerParticipant, newMakerQty);
         }
 
         unchecked {

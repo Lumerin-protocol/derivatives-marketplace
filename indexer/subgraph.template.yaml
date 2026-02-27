@@ -37,8 +37,6 @@ dataSources:
         # Order events
         - event: OrderCreated(indexed bytes32,indexed address,uint256,int256)
           handler: handleOrderCreated
-        - event: OrderFilled(indexed bytes32,indexed address)
-          handler: handleOrderFilled
         - event: OrderCancelled(indexed bytes32,indexed address)
           handler: handleOrderCancelled
         - event: OrderUpdated(indexed bytes32,indexed address,int256)

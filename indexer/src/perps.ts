@@ -2,7 +2,6 @@ import { BigInt, Address, Bytes, dataSource, log } from "@graphprotocol/graph-ts
 import {
   Initialized,
   OrderCreated,
-  OrderFilled,
   OrderCancelled,
   OrderUpdated,
   OrderMatched,
@@ -245,47 +244,6 @@ export function handleOrderCreated(event: OrderCreated): void {
   perps.save();
 }
 
-export function handleOrderFilled(event: OrderFilled): void {
-  log.info("Order filled: {} by {}", [
-    event.params.orderId.toHexString(),
-    event.params.participant.toHexString(),
-  ]);
-
-  const order = Order.load(event.params.orderId);
-  if (!order) {
-    log.warning("Order not found: {}", [event.params.orderId.toHexString()]);
-    return;
-  }
-
-  // Update price level
-  const level = getOrCreatePriceLevel(order.price, order.isBuy);
-  level.totalQuantity = level.totalQuantity.minus(order.quantity);
-  level.orderCount--;
-  level.save();
-
-  // Update order
-  order.status = "FILLED";
-  order.filledQuantity = order.originalQuantity;
-  order.quantity = BigInt.zero();
-  order.closedAt = event.block.timestamp;
-  order.updatedAt = event.block.timestamp;
-  order.save();
-
-  // Update user
-  const user = User.load(order.user);
-  if (user) {
-    user.activeOrderCount--;
-    user.lastActivityAt = event.block.timestamp;
-    user.save();
-  }
-
-  // Update global stats
-  const perps = getOrCreatePerps();
-  perps.activeOrders--;
-  perps.lastUpdatedAt = event.block.timestamp;
-  perps.save();
-}
-
 export function handleOrderCancelled(event: OrderCancelled): void {
   log.info("Order cancelled: {} by {}", [
     event.params.orderId.toHexString(),
@@ -340,17 +298,42 @@ export function handleOrderUpdated(event: OrderUpdated): void {
   const oldQuantity = order.quantity;
   const newQuantity = absBigInt(event.params.newQuantity);
   const quantityDiff = oldQuantity.minus(newQuantity);
+  const isFilled = event.params.newQuantity.equals(BigInt.zero());
 
   // Update price level
   const level = getOrCreatePriceLevel(order.price, order.isBuy);
   level.totalQuantity = level.totalQuantity.minus(quantityDiff);
+  if (isFilled) {
+    level.orderCount--;
+  }
   level.save();
 
   // Update order
   order.quantity = newQuantity;
   order.filledQuantity = order.originalQuantity.minus(newQuantity);
-  order.status = "PARTIAL";
   order.updatedAt = event.block.timestamp;
+
+  if (isFilled) {
+    order.status = "FILLED";
+    order.closedAt = event.block.timestamp;
+
+    // Update user
+    const user = User.load(order.user);
+    if (user) {
+      user.activeOrderCount--;
+      user.lastActivityAt = event.block.timestamp;
+      user.save();
+    }
+
+    // Update global stats
+    const perps = getOrCreatePerps();
+    perps.activeOrders--;
+    perps.lastUpdatedAt = event.block.timestamp;
+    perps.save();
+  } else {
+    order.status = "PARTIAL";
+  }
+
   order.save();
 }
 
