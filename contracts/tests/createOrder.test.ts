@@ -126,7 +126,7 @@ describe("PerpsSimple - createOrder", function () {
       const position = await perps.read.getUserPosition([buyer2.account.address]);
       assert.equal(position.netQuantity, qty);
       assert.equal(position.aggregatedEntryPrice, marketPrice + tick);
-      assert.equal(orderMatchedEvent.args.buyer, getAddress(buyer2.account.address));
+      assert.equal(orderMatchedEvent.args.taker, getAddress(buyer2.account.address));
     });
 
     it("should match sell order with higher-priced buy orders", async function () {

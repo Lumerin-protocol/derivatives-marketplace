@@ -91,16 +91,17 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     event OrderCancelled(bytes32 indexed orderId, address indexed participant);
     event OrderUpdated(bytes32 indexed orderId, address indexed participant, int256 newQuantity);
     event OrderMatched(
-        bytes32 indexed makerOrderId, address indexed buyer, address indexed seller, uint256 price, uint256 quantity
-    );
-    event PositionTrade(
-        address indexed user,
+        bytes32 indexed makerOrderId,
+        address indexed maker,
+        address indexed taker,
         uint256 tradePrice,
-        int256 quantity,
-        int256 netQuantityAfter,
-        uint256 aggregatedEntryPriceAfter,
-        int256 realizedPnl,
-        int256 tradingFee
+        int256 takerQuantity,
+        int256 makerFee,
+        int256 takerFee,
+        int256 makerNetQtyAfter,
+        int256 takerNetQtyAfter,
+        uint256 makerEntryPriceAfter,
+        uint256 takerEntryPriceAfter
     );
     event CollateralAdded(address indexed user, uint256 amount);
     event CollateralRemoved(address indexed user, uint256 amount);
@@ -316,13 +317,13 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         address makerParticipant = _makerOrder.participant;
         int256 makerQty = _makerOrder.quantity;
         uint256 matchAmt = _min(_abs(makerQty), _abs(_remainingQty));
-        int256 matchQty = _toSignedQuantity(matchAmt, _remainingQty);
+        int256 takerQty = _toSignedQuantity(matchAmt, _remainingQty);
         uint256 notionalValue = _calculateValue(makerPrice, matchAmt);
 
         int256 takerFee = _calculateMatchFee(notionalValue, true);
         int256 makerFee = _calculateMatchFee(notionalValue, false);
 
-        _createPosition(_makerOrderId, makerParticipant, _taker, makerPrice, matchQty, takerFee, makerFee);
+        _createPosition(_makerOrderId, makerParticipant, _taker, makerPrice, takerQty, takerFee, makerFee);
 
         _transferFee(_taker, takerFee);
         _transferFee(makerParticipant, makerFee);
@@ -338,7 +339,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         }
 
         unchecked {
-            return _remainingQty - matchQty;
+            return _remainingQty - takerQty;
         }
     }
 
@@ -403,31 +404,55 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         address makerParticipant,
         address taker,
         uint256 _price,
-        int256 _quantity,
+        int256 _takerQty,
         int256 _takerFee,
         int256 _makerFee
     ) private {
-        // Determine buyer and seller based on quantity sign
-        // Positive quantity = taker is buying, negative = taker is selling
-        (address buyer, address seller) = _quantity > 0 ? (taker, makerParticipant) : (makerParticipant, taker);
-        (int256 buyerFee, int256 sellerFee) = _quantity > 0 ? (_takerFee, _makerFee) : (_makerFee, _takerFee);
+        // Determine buyer and seller based on taker quantity sign
+        // Positive = taker is buying, negative = taker is selling
+        (address buyer, address seller) = _takerQty > 0 ? (taker, makerParticipant) : (makerParticipant, taker);
 
         // Use absolute quantity for position updates
         // Buyer always gets positive (long), seller always gets negative (short)
-        int256 absQty = int256(_abs(_quantity));
-
-        emit OrderMatched(matchedOrderId, buyer, seller, _price, uint256(absQty));
+        int256 absQty = int256(_abs(_takerQty));
 
         // Skip funding settlement for the taker — already settled once before the loop.
         if (buyer != taker) _settleFunding(buyer);
-        _updateUserPosition(buyer, absQty, _price, buyerFee);
+        _updateUserPosition(buyer, absQty, _price);
 
         if (seller != taker) _settleFunding(seller);
-        _updateUserPosition(seller, -absQty, _price, sellerFee);
+        _updateUserPosition(seller, -absQty, _price);
+
+        Position storage makerPos = positions[makerParticipant];
+        Position storage takerPos = positions[taker];
+        _emitOrderMatched(
+            matchedOrderId, makerParticipant, taker, _price, _takerQty, _makerFee, _takerFee,
+            makerPos.netQuantity, takerPos.netQuantity,
+            makerPos.aggregatedEntryPrice, takerPos.aggregatedEntryPrice
+        );
+    }
+
+    function _emitOrderMatched(
+        bytes32 matchedOrderId,
+        address maker,
+        address taker,
+        uint256 price,
+        int256 takerQty,
+        int256 makerFee,
+        int256 takerFee,
+        int256 makerNetQty,
+        int256 takerNetQty,
+        uint256 makerEntry,
+        uint256 takerEntry
+    ) private {
+        emit OrderMatched(
+            matchedOrderId, maker, taker, price, takerQty, makerFee, takerFee,
+            makerNetQty, takerNetQty, makerEntry, takerEntry
+        );
     }
 
     /// @notice Update a user's net position with aggregated entry price
-    function _updateUserPosition(address _user, int256 _quantity, uint256 _tradePrice, int256 _tradingFee) private {
+    function _updateUserPosition(address _user, int256 _quantity, uint256 _tradePrice) private {
         Position storage position = positions[_user];
 
         // If no existing position, initialize it
@@ -436,7 +461,6 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             position.aggregatedEntryPrice = _tradePrice;
             usersWithPositions.add(_user);
             userFundingSnapshot[_user] = cumulativeFundingPerUnit;
-            emit PositionTrade(_user, _tradePrice, _quantity, _quantity, _tradePrice, 0, _tradingFee);
             return;
         }
 
@@ -447,52 +471,36 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             int256 newNet = position.netQuantity + _quantity;
             position.aggregatedEntryPrice = (oldValue + newValue) / _abs(newNet);
             position.netQuantity = newNet;
-            emit PositionTrade(_user, _tradePrice, _quantity, newNet, position.aggregatedEntryPrice, 0, _tradingFee);
             return;
         }
 
         // Opposite direction: settle the reduced part, then open remainder (if any)
-        _settleOpposite(_user, _quantity, _tradePrice, _tradingFee);
+        _settleOpposite(_user, _quantity, _tradePrice);
     }
 
     /// @notice Handle opposite-direction trade (partial/full close or flip)
-    function _settleOpposite(address _user, int256 _quantity, uint256 _tradePrice, int256 _tradingFee) private {
+    function _settleOpposite(address _user, int256 _quantity, uint256 _tradePrice) private {
         Position storage position = positions[_user];
         uint256 absQuantity = _abs(_quantity);
         uint256 oldAbsQuantity = _abs(position.netQuantity);
         uint256 settledAbs = absQuantity < oldAbsQuantity ? absQuantity : oldAbsQuantity;
-        int256 pnl = _settleReducedPosition(
+        _settleReducedPosition(
             _user,
             int256(_tradePrice) - int256(position.aggregatedEntryPrice),
             _toSignedQuantity(settledAbs, position.netQuantity)
         );
 
         if (absQuantity > oldAbsQuantity) {
-            // Flip: emit close then open opposite
-            uint256 entryPriceBefore = position.aggregatedEntryPrice;
+            // Flip: close old position and open opposite
             int256 openQty = _toSignedQuantity(absQuantity - oldAbsQuantity, _quantity);
             position.netQuantity = openQty;
             position.aggregatedEntryPrice = _tradePrice;
             userFundingSnapshot[_user] = cumulativeFundingPerUnit;
-            emit PositionTrade(
-                _user,
-                _tradePrice,
-                _toSignedQuantity(settledAbs, position.netQuantity),
-                0,
-                entryPriceBefore,
-                pnl,
-                _tradingFee
-            );
-            emit PositionTrade(_user, _tradePrice, openQty, openQty, _tradePrice, 0, 0);
         } else if (position.netQuantity + _quantity == 0) {
-            emit PositionTrade(_user, _tradePrice, _quantity, 0, position.aggregatedEntryPrice, pnl, _tradingFee);
             delete positions[_user];
             usersWithPositions.remove(_user);
         } else {
             position.netQuantity += _quantity;
-            emit PositionTrade(
-                _user, _tradePrice, _quantity, position.netQuantity, position.aggregatedEntryPrice, pnl, _tradingFee
-            );
         }
     }
 

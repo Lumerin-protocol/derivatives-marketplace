@@ -191,19 +191,14 @@ export class PositionTracker {
             case "Transfer":
               this.onTransfer(log.args.from!, log.args.to!, log.args.value!);
               break;
-            case "PositionTrade":
-              this.onPositionTrade(
-                log.args.user!,
-                log.args.netQuantityAfter!,
-                log.args.aggregatedEntryPriceAfter!,
-              );
+            case "OrderMatched":
+              this.onOrderMatched(log.args.maker!, log.args.taker!);
               break;
             case "PositionLiquidated":
               this.onPositionLiquidated(log.args.user!);
               break;
             case "OrderCreated":
             case "OrderCancelled":
-            case "OrderFilled":
             case "OrderUpdated":
               this.onOrderEvent(log.args.participant!);
               break;
@@ -250,34 +245,13 @@ export class PositionTracker {
     }
   }
 
-  private onPositionTrade(user: Address, netQuantityAfter: bigint, entryPriceAfter: bigint): void {
-    if (netQuantityAfter === 0n) {
-      this.users.delete(user);
-      this.logger.info({ user }, "Position closed via PositionTrade (zero quantity)");
-      return;
-    }
-
-    const existing = this.users.get(user);
-    if (existing) {
-      // Update position from event args — zero RPC
-      existing.netQuantity = netQuantityAfter;
-      existing.entryPrice = entryPriceAfter;
-      existing.isLong = netQuantityAfter > 0n;
-      this.recomputeLiquidationPrice(existing);
-      this.logger.debug(
-        {
-          user,
-          netQuantity: netQuantityAfter,
-          entryPrice: entryPriceAfter,
-          liqPrice: existing.liquidationPrice,
-        },
-        "Position updated",
-      );
-    } else {
-      this.syncUser(user).catch((err) =>
-        this.logger.error({ err, user }, "Failed to initialize new user"),
-      );
-    }
+  private onOrderMatched(maker: Address, taker: Address): void {
+    this.syncUser(maker).catch((err) =>
+      this.logger.error({ err, user: maker }, "Failed to sync maker after OrderMatched"),
+    );
+    this.syncUser(taker).catch((err) =>
+      this.logger.error({ err, user: taker }, "Failed to sync taker after OrderMatched"),
+    );
   }
 
   private onPositionLiquidated(user: Address): void {

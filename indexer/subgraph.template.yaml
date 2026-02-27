@@ -41,11 +41,8 @@ dataSources:
           handler: handleOrderCancelled
         - event: OrderUpdated(indexed bytes32,indexed address,int256)
           handler: handleOrderUpdated
-        - event: OrderMatched(indexed bytes32,indexed address,indexed address,uint256,uint256)
+        - event: OrderMatched(indexed bytes32,indexed address,indexed address,uint256,int256,int256,int256,int256,int256,uint256,uint256)
           handler: handleOrderMatched
-        # Position events
-        - event: PositionTrade(indexed address,uint256,int256,int256,uint256,int256,int256)
-          handler: handlePositionTrade
         - event: PositionLiquidated(indexed address,indexed address,int256,int256,uint256)
           handler: handlePositionLiquidated
         # Collateral events

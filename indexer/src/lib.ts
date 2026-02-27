@@ -8,3 +8,7 @@ export function isSameSign(a: BigInt, b: BigInt): boolean {
 export function absBigInt(value: BigInt): BigInt {
   return value.lt(BigInt.zero()) ? value.neg() : value;
 }
+
+export function minBigInt(a: BigInt, b: BigInt): BigInt {
+  return a.lt(b) ? a : b;
+}
