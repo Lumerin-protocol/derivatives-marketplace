@@ -16,13 +16,13 @@ inputs:
 
 outputs:
   tag_name:
-    description: "Full tag name (e.g., indexer-v2.0.5-abc1234 or indexer-v2.0.5-dev-abc1234)"
+    description: "Full tag name (e.g., v2.0.5-abc1234 or v2.0.5-dev-abc1234)"
     value: ${{ steps.gen_tag.outputs.tag_name }}
   vtag:
     description: "Version tag (same as tag_name)"
     value: ${{ steps.gen_tag.outputs.vtag }}
   version:
-    description: "Version string with v prefix (e.g., v2.0.5-abc1234 or v2.0.5-dev-abc1234)"
+    description: "Version string with v prefix (e.g., v2.0.5-abc1234 or v2.0.5-dev-abc1234). Same as vtag."
     value: ${{ steps.gen_tag.outputs.version }}
   vfull:
     description: "Semantic version without prefix (e.g., 2.0.5)"
@@ -80,7 +80,7 @@ runs:
       shell: bash
       run: |
         # Component-based versioning for monorepo
-        # Pattern: <component>-v<major>.<minor>.<patch>[-env]
+        # Pattern: v<major>.<minor>.<patch>[-env]-<sha>
         COMPONENT="${{ inputs.component }}"
         VMAJ_NEW=${{ inputs.major_version }}
         VMIN_NEW=0
@@ -118,7 +118,7 @@ runs:
                 VPAT=0
             fi
             VFULL=${VMAJ}.${VMIN}.${VPAT}
-            VTAG=${COMPONENT}-v${VFULL}-${SHORT_SHA}
+            VTAG=v${VFULL}-${SHORT_SHA}
             VERSION="v${VFULL}-${SHORT_SHA}"
         else
             # Non-production - use commit count as patch for uniqueness
@@ -131,7 +131,7 @@ runs:
             VFULL=${VMAJ}.${VMIN}.${VPAT}
             RNAME=${GITHUB_REF_NAME##*/}
             [ "$GITHUB_EVENT_NAME" = "pull_request" ] && RNAME=pr${GITHUB_REF_NAME%/merge}
-            VTAG=${COMPONENT}-v${VFULL}-${RNAME}-${SHORT_SHA}
+            VTAG=v${VFULL}-${RNAME}-${SHORT_SHA}
             VERSION="v${VFULL}-${RNAME}-${SHORT_SHA}"
         fi
 
