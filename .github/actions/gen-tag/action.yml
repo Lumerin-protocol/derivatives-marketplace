@@ -16,13 +16,13 @@ inputs:
 
 outputs:
   tag_name:
-    description: "Full tag name (e.g., indexer-v2.0.5-dev)"
+    description: "Full tag name (e.g., indexer-v2.0.5-abc1234 or indexer-v2.0.5-dev-abc1234)"
     value: ${{ steps.gen_tag.outputs.tag_name }}
   vtag:
     description: "Version tag (same as tag_name)"
     value: ${{ steps.gen_tag.outputs.vtag }}
   version:
-    description: "Version string with v prefix (e.g., v2.0.5-dev)"
+    description: "Version string with v prefix (e.g., v2.0.5-abc1234 or v2.0.5-dev-abc1234)"
     value: ${{ steps.gen_tag.outputs.version }}
   vfull:
     description: "Semantic version without prefix (e.g., 2.0.5)"
@@ -103,6 +103,7 @@ runs:
         fi
 
         ENV="${{ steps.determine_env.outputs.environment }}"
+        SHORT_SHA=$(git rev-parse --short HEAD)
 
         if [ "$ENV" = "main" ]; then
             # Production release - increment version
@@ -117,8 +118,8 @@ runs:
                 VPAT=0
             fi
             VFULL=${VMAJ}.${VMIN}.${VPAT}
-            VTAG=${COMPONENT}-v${VFULL}
-            VERSION="v${VFULL}"
+            VTAG=${COMPONENT}-v${VFULL}-${SHORT_SHA}
+            VERSION="v${VFULL}-${SHORT_SHA}"
         else
             # Non-production - use commit count as patch for uniqueness
             if git rev-parse refs/remotes/origin/main &>/dev/null; then
@@ -130,8 +131,8 @@ runs:
             VFULL=${VMAJ}.${VMIN}.${VPAT}
             RNAME=${GITHUB_REF_NAME##*/}
             [ "$GITHUB_EVENT_NAME" = "pull_request" ] && RNAME=pr${GITHUB_REF_NAME%/merge}
-            VTAG=${COMPONENT}-v${VFULL}-${RNAME}
-            VERSION="v${VFULL}-${RNAME}"
+            VTAG=${COMPONENT}-v${VFULL}-${RNAME}-${SHORT_SHA}
+            VERSION="v${VFULL}-${RNAME}-${SHORT_SHA}"
         fi
 
         # Output variables
