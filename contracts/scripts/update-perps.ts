@@ -46,7 +46,7 @@ async function main() {
   logStep("Deployed", addrUrl(pc, newImpl.address));
 
   console.log("Verifying new implementation...");
-  await verifyContract(newImpl.address, [BigInt(env.MINIMUM_PRICE_INCREMENT)]);
+  await verifyContract(newImpl.address, [env.MINIMUM_PRICE_INCREMENT]);
   logStep("Verified", addrUrl(pc, newImpl.address));
 
   // Upgrade proxy to new implementation

@@ -88,7 +88,7 @@ describe("Subgraph indexing", () => {
     assert.ok(Number(data.user.orderCount) > 0, "seller should have at least one order");
   });
 
-  it("indexes PositionTrade events", { timeout: 40_000 }, async (t) => {
+  it("indexes OrderMatched events and creates positions", { timeout: 40_000 }, async (t) => {
     const { clients } = deployment;
     const sellerAddress = clients.sellerWallet.account.address.toLowerCase();
 

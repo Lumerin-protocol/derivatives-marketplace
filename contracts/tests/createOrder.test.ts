@@ -9,7 +9,9 @@ const { viem, networkHelpers } = await network.connect();
 describe("PerpsSimple - createOrder", function () {
   describe("Order Creation", function () {
     it("should create a buy order successfully", async function () {
-      const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
+      const { contracts, accounts, config } = await networkHelpers.loadFixture(
+        deployPerpsWithCollateralFixture,
+      );
       const { perps } = contracts;
       const { buyer } = accounts;
 
@@ -29,7 +31,9 @@ describe("PerpsSimple - createOrder", function () {
     });
 
     it("should create a sell order successfully", async function () {
-      const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
+      const { contracts, accounts, config } = await networkHelpers.loadFixture(
+        deployPerpsWithCollateralFixture,
+      );
       const { perps } = contracts;
       const { seller } = accounts;
 
@@ -48,7 +52,9 @@ describe("PerpsSimple - createOrder", function () {
     });
 
     it("should revert on zero quantity", async function () {
-      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
+      const { contracts, accounts } = await networkHelpers.loadFixture(
+        deployPerpsWithCollateralFixture,
+      );
       const { perps } = contracts;
       const { buyer } = accounts;
 
@@ -62,7 +68,9 @@ describe("PerpsSimple - createOrder", function () {
     });
 
     it("should revert on zero price", async function () {
-      const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
+      const { contracts, accounts, config } = await networkHelpers.loadFixture(
+        deployPerpsWithCollateralFixture,
+      );
       const { perps } = contracts;
       const { buyer } = accounts;
 
@@ -76,7 +84,9 @@ describe("PerpsSimple - createOrder", function () {
     });
 
     it("should revert when price is not a multiple of minimumPriceIncrement", async function () {
-      const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
+      const { contracts, accounts, config } = await networkHelpers.loadFixture(
+        deployPerpsWithCollateralFixture,
+      );
       const { perps } = contracts;
       const { buyer } = accounts;
 
@@ -94,7 +104,9 @@ describe("PerpsSimple - createOrder", function () {
 
   describe("Limit Price Matching", function () {
     it("should match buy order with lower-priced sell orders", async function () {
-      const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithOrdersFixture);
+      const { contracts, accounts, config } = await networkHelpers.loadFixture(
+        deployPerpsWithOrdersFixture,
+      );
       const { perps } = contracts;
       const { buyer2, pc } = accounts;
       const { marketPrice, qty } = config;
@@ -114,11 +126,13 @@ describe("PerpsSimple - createOrder", function () {
       const position = await perps.read.getUserPosition([buyer2.account.address]);
       assert.equal(position.netQuantity, qty);
       assert.equal(position.aggregatedEntryPrice, marketPrice + tick);
-      assert.equal(orderMatchedEvent.args.buyer, getAddress(buyer2.account.address));
+      assert.equal(orderMatchedEvent.args.taker, getAddress(buyer2.account.address));
     });
 
     it("should match sell order with higher-priced buy orders", async function () {
-      const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithOrdersFixture);
+      const { contracts, accounts, config } = await networkHelpers.loadFixture(
+        deployPerpsWithOrdersFixture,
+      );
       const { perps } = contracts;
       const { marketPrice, qty } = config;
       const tick = config.minimumPriceIncrement;
@@ -134,7 +148,9 @@ describe("PerpsSimple - createOrder", function () {
     });
 
     it("should partially match and leave remaining as resting order", async function () {
-      const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithOrdersFixture);
+      const { contracts, accounts, config } = await networkHelpers.loadFixture(
+        deployPerpsWithOrdersFixture,
+      );
       const { perps } = contracts;
       const { buyer2 } = accounts;
       const { marketPrice, qty } = config;
@@ -154,11 +170,68 @@ describe("PerpsSimple - createOrder", function () {
       const remainingOrder = await perps.read.getOrder([orders[0]]);
       assert.equal(remainingOrder.quantity, qty);
     });
+
+    it("should emit OrderCreated with original qty then OrderUpdated after partial fill", async function () {
+      const { contracts, accounts, config } = await networkHelpers.loadFixture(
+        deployPerpsWithOrdersFixture,
+      );
+      const { perps } = contracts;
+      const { buyer2, pc } = accounts;
+      const { marketPrice, qty } = config;
+      const tick = config.minimumPriceIncrement;
+
+      const buyPrice = marketPrice + tick;
+      const originalQty = qty * 2n;
+
+      const hash = await perps.write.createOrder([buyPrice, originalQty], {
+        account: buyer2.account,
+      });
+      const receipt = await pc.waitForTransactionReceipt({ hash });
+
+      const orderCreatedEvents = parseEventLogs({
+        logs: receipt.logs,
+        abi: perps.abi,
+        eventName: "OrderCreated",
+      });
+
+      assert.equal(orderCreatedEvents.length, 1, "expected exactly one OrderCreated event");
+
+      const [created] = orderCreatedEvents;
+      assert.equal(created.args.participant, getAddress(buyer2.account.address));
+      assert.equal(created.args.price, buyPrice);
+      assert.equal(
+        created.args.quantity,
+        originalQty,
+        "OrderCreated should carry the original quantity, not the remainder",
+      );
+
+      const orderUpdatedEvents = parseEventLogs({
+        logs: receipt.logs,
+        abi: perps.abi,
+        eventName: "OrderUpdated",
+        args: {
+          orderId: created.args.orderId,
+        },
+      });
+
+      assert.equal(
+        orderUpdatedEvents.length,
+        1,
+        "expected OrderUpdated after partial fill reduces the taker order",
+      );
+      assert.equal(
+        orderUpdatedEvents[0].args.newQuantity,
+        qty,
+        "OrderUpdated should carry the remaining quantity",
+      );
+    });
   });
 
   describe("Self-Trade", function () {
     it("should self-trade own opposite orders at matching prices", async function () {
-      const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
+      const { contracts, accounts, config } = await networkHelpers.loadFixture(
+        deployPerpsWithCollateralFixture,
+      );
       const { perps } = contracts;
       const { buyer } = accounts;
 
@@ -181,7 +254,9 @@ describe("PerpsSimple - createOrder", function () {
     });
 
     it("should partially self-trade own orders", async function () {
-      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
+      const { contracts, accounts } = await networkHelpers.loadFixture(
+        deployPerpsWithCollateralFixture,
+      );
       const { perps } = contracts;
       const { buyer } = accounts;
 
@@ -203,7 +278,9 @@ describe("PerpsSimple - createOrder", function () {
 
   describe("Margin Requirements", function () {
     it("should revert when insufficient margin for order", async function () {
-      const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
+      const { contracts, accounts, config } = await networkHelpers.loadFixture(
+        deployPerpsWithCollateralFixture,
+      );
       const { perps } = contracts;
       const { buyer } = accounts;
 
@@ -223,7 +300,9 @@ describe("PerpsSimple - createOrder", function () {
 
   describe("Match Fees", function () {
     it("should not deduct fee when order rests (no match)", async function () {
-      const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
+      const { contracts, accounts, config } = await networkHelpers.loadFixture(
+        deployPerpsWithCollateralFixture,
+      );
       const { perps } = contracts;
       const { buyer } = accounts;
 
@@ -241,7 +320,9 @@ describe("PerpsSimple - createOrder", function () {
     });
 
     it("should charge taker fee on match with liquidationFee as floor", async function () {
-      const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
+      const { contracts, accounts, config } = await networkHelpers.loadFixture(
+        deployPerpsWithCollateralFixture,
+      );
       const { perps } = contracts;
       const { buyer, seller } = accounts;
 
@@ -263,7 +344,9 @@ describe("PerpsSimple - createOrder", function () {
     });
 
     it("should not charge maker fee when makerFeeBps is 0", async function () {
-      const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
+      const { contracts, accounts, config } = await networkHelpers.loadFixture(
+        deployPerpsWithCollateralFixture,
+      );
       const { perps } = contracts;
       const { buyer, seller } = accounts;
 
@@ -287,7 +370,9 @@ describe("PerpsSimple - createOrder", function () {
 
   describe("Max Orders Limit", function () {
     it("should revert when max orders per participant reached", async function () {
-      const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
+      const { contracts, accounts, config } = await networkHelpers.loadFixture(
+        deployPerpsWithCollateralFixture,
+      );
       const { perps } = contracts;
       const { buyer } = accounts;
 

@@ -73,6 +73,7 @@ type User @entity(immutable: false) {
   # Relations
   orders: [Order!]! @derivedFrom(field: "user")
   trades: [Trade!]! @derivedFrom(field: "user")
+  fills: [Fill!]! @derivedFrom(field: "user")
   collateralEvents: [CollateralEvent!]! @derivedFrom(field: "user")
   fundingSettlements: [FundingSettlement!]! @derivedFrom(field: "user")
   badDebts: [BadDebtEvent!]! @derivedFrom(field: "user")
@@ -112,16 +113,37 @@ enum OrderStatus {
   PARTIAL
 }
 
-# One per user per PositionTrade event. Query by user for "my trades"; filter by positionSession for session history; realizedPnl != 0 for closes.
-type Trade @entity(immutable: true) {
-  id: Bytes! # tx hash + log index
+# Aggregate of all fills in a single transaction for one user. This is what the UI shows in trade history.
+type Trade @entity(immutable: false) {
+  id: Bytes! # tx hash + user address
   user: User!
+  averagePrice: BigInt! # volume-weighted average fill price
+  totalQuantity: BigInt! # signed sum of all fill quantities
+  totalFee: BigInt! # sum of all trading fees
+  realizedPnl: BigInt! # sum of all fill PnLs
+  netQuantityAfter: BigInt! # position after the last fill
+  aggregatedEntryPriceAfter: BigInt! # entry price after the last fill
+  fillCount: Int!
+  fills: [Fill!]! @derivedFrom(field: "trade")
+  # Metadata
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  transactionHash: Bytes!
+}
+
+# One per user per OrderMatched event. Individual execution against a counterparty.
+type Fill @entity(immutable: true) {
+  id: Bytes! # tx hash + log index + side suffix
+  trade: Trade!
+  user: User!
+  counterparty: User!
+  makerOrderId: Bytes!
   positionSession: PositionSession!
-  tradePrice: BigInt!
-  tradeQuantity: BigInt! # signed: positive = bought/long, negative = sold/short
-  netQuantityAfter: BigInt! # signed position after this trade
-  aggregatedEntryPriceAfter: BigInt!
-  realizedPnl: BigInt! # non-zero when this trade closed (full or partial) size
+  fillPrice: BigInt!
+  fillQuantity: BigInt! # signed: positive = bought/long, negative = sold/short
+  netQuantityAfter: BigInt! # signed position after this fill (computed by indexer)
+  aggregatedEntryPriceAfter: BigInt! # computed by indexer
+  realizedPnl: BigInt! # computed by indexer; non-zero when this fill closed (full or partial) size
   tradingFee: BigInt! # signed: positive = paid, negative = rebate
   # Metadata
   timestamp: BigInt!
@@ -230,7 +252,7 @@ type PositionSession @entity(immutable: false) {
   tradingFees: BigInt! # signed: positive = paid, negative = rebate received
   openedAt: BigInt!
   lastTradeAt: BigInt!
-  trades: [Trade!]! @derivedFrom(field: "positionSession")
+  fills: [Fill!]! @derivedFrom(field: "positionSession")
   fundingSettlements: [FundingSettlement!]! @derivedFrom(field: "positionSession")
 }
 

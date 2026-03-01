@@ -24,9 +24,14 @@ describe("handleCollateralAdded", () => {
 
     assert.fieldEquals("User", address.toHexString(), "collateralBalance", event.params.amount.toString());
     assert.fieldEquals("User", address.toHexString(), "totalDeposited", event.params.amount.toString());
+    assert.fieldEquals("User", address.toHexString(), "lastActivityAt", event.block.timestamp.toString());
 
     assert.fieldEquals("CollateralEvent", eventId.toHexString(), "amount", event.params.amount.toString());
     assert.fieldEquals("CollateralEvent", eventId.toHexString(), "isDeposit", "true");
+    assert.fieldEquals("CollateralEvent", eventId.toHexString(), "user", address.toHexString());
+    assert.fieldEquals("CollateralEvent", eventId.toHexString(), "timestamp", event.block.timestamp.toString());
+    assert.fieldEquals("CollateralEvent", eventId.toHexString(), "blockNumber", event.block.number.toString());
+    assert.fieldEquals("CollateralEvent", eventId.toHexString(), "transactionHash", event.transaction.hash.toHexString());
   });
 
   test("adds to existing user collateral", () => {
@@ -80,9 +85,15 @@ describe("handleCollateralRemoved", () => {
     handleCollateralRemoved(removeEvent);
 
     const collateralBalance = addEvent.params.amount.minus(removeEvent.params.amount);
+    const removeEventId = createEventId(removeEvent.transaction.hash, removeEvent.logIndex);
 
     assert.fieldEquals("User", address.toHexString(), "collateralBalance", collateralBalance.toString());
     assert.fieldEquals("User", address.toHexString(), "totalWithdrawn", removeEvent.params.amount.toString());
+    assert.fieldEquals("User", address.toHexString(), "lastActivityAt", removeEvent.block.timestamp.toString());
+
+    assert.fieldEquals("CollateralEvent", removeEventId.toHexString(), "amount", removeEvent.params.amount.toString());
+    assert.fieldEquals("CollateralEvent", removeEventId.toHexString(), "isDeposit", "false");
+    assert.fieldEquals("CollateralEvent", removeEventId.toHexString(), "user", address.toHexString());
   });
 });
 
