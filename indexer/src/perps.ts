@@ -380,15 +380,16 @@ export function handleOrderMatched(event: OrderMatched): void {
 }
 
 /** Load or create the per-user per-transaction Trade aggregate. */
-function getOrCreateTrade(txHash: Bytes, userId: Bytes, timestamp: BigInt, blockNumber: BigInt): Trade {
+function getOrCreateTrade(txHash: Bytes, userId: Bytes, positionSessionId: string, timestamp: BigInt, blockNumber: BigInt): Trade {
   const tradeId = txHash.concat(userId);
   let trade = Trade.load(tradeId);
   if (!trade) {
     trade = new Trade(tradeId);
     trade.user = userId;
-    trade.averagePrice = BigInt.zero();
-    trade.totalQuantity = BigInt.zero();
-    trade.totalFee = BigInt.zero();
+    trade.positionSession = positionSessionId;
+    trade.tradePrice = BigInt.zero();
+    trade.tradeQuantity = BigInt.zero();
+    trade.tradingFee = BigInt.zero();
     trade.realizedPnl = BigInt.zero();
     trade.netQuantityAfter = BigInt.zero();
     trade.aggregatedEntryPriceAfter = BigInt.zero();
@@ -397,6 +398,7 @@ function getOrCreateTrade(txHash: Bytes, userId: Bytes, timestamp: BigInt, block
     trade.blockNumber = blockNumber;
     trade.transactionHash = txHash;
   }
+  trade.positionSession = positionSessionId;
   return trade;
 }
 
@@ -404,18 +406,18 @@ function getOrCreateTrade(txHash: Bytes, userId: Bytes, timestamp: BigInt, block
 function updateTradeAggregate(trade: Trade, fillPrice: BigInt, fillQty: BigInt, fee: BigInt, pnl: BigInt, netQtyAfter: BigInt, entryPriceAfter: BigInt): void {
   const zero = BigInt.zero();
   const absFillQty = absBigInt(fillQty);
-  const oldAbsTotal = absBigInt(trade.totalQuantity);
+  const oldAbsTotal = absBigInt(trade.tradeQuantity);
   const newAbsTotal = oldAbsTotal.plus(absFillQty);
 
   if (newAbsTotal.gt(zero)) {
-    trade.averagePrice = trade.averagePrice
+    trade.tradePrice = trade.tradePrice
       .times(oldAbsTotal)
       .plus(fillPrice.times(absFillQty))
       .div(newAbsTotal);
   }
 
-  trade.totalQuantity = trade.totalQuantity.plus(fillQty);
-  trade.totalFee = trade.totalFee.plus(fee);
+  trade.tradeQuantity = trade.tradeQuantity.plus(fillQty);
+  trade.tradingFee = trade.tradingFee.plus(fee);
   trade.realizedPnl = trade.realizedPnl.plus(pnl);
   trade.netQuantityAfter = netQtyAfter;
   trade.aggregatedEntryPriceAfter = entryPriceAfter;
@@ -528,7 +530,7 @@ function handleFlip(
       oldSession.save();
 
       const closeQty = tradeQty.gt(zero) ? absOld : absOld.neg();
-      const trade = getOrCreateTrade(txHash, user.id, timestamp, blockNumber);
+      const trade = getOrCreateTrade(txHash, user.id, oldSession.id, timestamp, blockNumber);
       const closeFill = new Fill(baseTradeId.concatI32(sideIndex * 2));
       closeFill.trade = trade.id;
       closeFill.user = user.id;
@@ -570,7 +572,7 @@ function handleFlip(
 
   user.currentPositionSessionId = newSessionId;
 
-  const trade = getOrCreateTrade(txHash, user.id, timestamp, blockNumber);
+  const trade = getOrCreateTrade(txHash, user.id, newSessionId, timestamp, blockNumber);
   const openFill = new Fill(baseTradeId.concatI32(sideIndex * 2 + 1));
   openFill.trade = trade.id;
   openFill.user = user.id;
@@ -675,7 +677,7 @@ function handleNonFlip(
 
   session.save();
 
-  const trade = getOrCreateTrade(txHash, user.id, timestamp, blockNumber);
+  const trade = getOrCreateTrade(txHash, user.id, session.id, timestamp, blockNumber);
   const fill = new Fill(baseTradeId.concatI32(sideIndex));
   fill.trade = trade.id;
   fill.user = user.id;

@@ -117,9 +117,10 @@ enum OrderStatus {
 type Trade @entity(immutable: false) {
   id: Bytes! # tx hash + user address
   user: User!
-  averagePrice: BigInt! # volume-weighted average fill price
-  totalQuantity: BigInt! # signed sum of all fill quantities
-  totalFee: BigInt! # sum of all trading fees
+  positionSession: PositionSession!
+  tradePrice: BigInt! # volume-weighted average fill price
+  tradeQuantity: BigInt! # signed sum of all fill quantities
+  tradingFee: BigInt! # sum of all trading fees
   realizedPnl: BigInt! # sum of all fill PnLs
   netQuantityAfter: BigInt! # position after the last fill
   aggregatedEntryPriceAfter: BigInt! # entry price after the last fill
@@ -253,6 +254,7 @@ type PositionSession @entity(immutable: false) {
   openedAt: BigInt!
   lastTradeAt: BigInt!
   fills: [Fill!]! @derivedFrom(field: "positionSession")
+  trades: [Trade!]! @derivedFrom(field: "positionSession")
   fundingSettlements: [FundingSettlement!]! @derivedFrom(field: "positionSession")
 }
 
