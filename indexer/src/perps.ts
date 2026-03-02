@@ -68,6 +68,7 @@ function getOrCreatePerps(): Perps {
     perps.totalBadDebt = BigInt.zero();
     perps.initializedAt = BigInt.zero();
     perps.lastUpdatedAt = BigInt.zero();
+    loadPerpsFromContract(perps);
   }
   return perps;
 }

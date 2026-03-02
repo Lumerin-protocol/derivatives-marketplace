@@ -13,12 +13,14 @@ import {
   paramInt,
   priceLevel,
   setupDataSourceMock,
+  setupPerps,
 } from "./helpers";
 
 describe("handleOrderCreated", () => {
   beforeEach(() => {
     clearStore();
     setupDataSourceMock();
+    setupPerps();
   });
 
   test("creates user, order, price level and updates perps stats for buy order", () => {

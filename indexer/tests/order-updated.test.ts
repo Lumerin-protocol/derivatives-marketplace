@@ -13,6 +13,7 @@ import {
   paramInt,
   priceLevel,
   setupDataSourceMock,
+  setupPerps,
 } from "./helpers";
 
 function createOrderCreatedEvent(
@@ -45,6 +46,7 @@ describe("handleOrderUpdated", () => {
   beforeEach(() => {
     clearStore();
     setupDataSourceMock();
+    setupPerps();
   });
 
   test("partial fill sets status to PARTIAL and updates quantity", () => {
