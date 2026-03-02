@@ -13,6 +13,7 @@ import {
   paramInt,
   priceLevel,
   setupDataSourceMock,
+  setupPerps,
 } from "./helpers";
 
 function createOrderCreatedEvent(
@@ -43,6 +44,7 @@ describe("handleOrderCancelled", () => {
   beforeEach(() => {
     clearStore();
     setupDataSourceMock();
+    setupPerps();
   });
 
   test("cancels active order and updates all related entities", () => {

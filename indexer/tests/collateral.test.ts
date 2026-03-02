@@ -4,12 +4,13 @@ import { newTypedMockEventWithParams } from "matchstick-as/assembly/defaults";
 import { handleCollateralAdded, handleCollateralRemoved } from "../src/perps";
 import { CollateralAdded, CollateralRemoved } from "../generated/PerpsSimple/PerpsSimple";
 import { assert } from "matchstick-as/assembly/index";
-import { userAddress, paramAddr, paramUint, setupDataSourceMock } from "./helpers";
+import { userAddress, paramAddr, paramUint, setupDataSourceMock, setupPerps } from "./helpers";
 import { createEventId } from "../src/ids";
 describe("handleCollateralAdded", () => {
   beforeEach(() => {
     clearStore();
     setupDataSourceMock();
+    setupPerps();
   });
 
   test("creates user, collateral event and updates user balance", () => {
@@ -74,6 +75,7 @@ describe("handleCollateralRemoved", () => {
   beforeEach(() => {
     clearStore();
     setupDataSourceMock();
+    setupPerps();
   });
 
   test("creates user, collateral event and decrements user balance", () => {

@@ -3,41 +3,9 @@ import { Address, BigInt, Bytes } from "@graphprotocol/graph-ts";
 import { newTypedMockEventWithParams } from "matchstick-as/assembly/defaults";
 import { handleOrderMatched } from "../src/perps";
 import { OrderMatched } from "../generated/PerpsSimple/PerpsSimple";
-import { Perps } from "../generated/schema";
 import { assert } from "matchstick-as/assembly/index";
-import { userAddress, orderId, paramAddr, paramBytes, paramUint, paramInt, setupDataSourceMock } from "./helpers";
+import { userAddress, orderId, paramAddr, paramBytes, paramUint, paramInt, setupDataSourceMock, setupPerps } from "./helpers";
 import { positionSessionId, createEventId } from "../src/ids";
-
-function setupPerps(): void {
-  const perps = new Perps(0);
-  perps.contractAddress = Bytes.empty();
-  perps.collateralToken = Bytes.empty();
-  perps.priceOracle = Bytes.empty();
-  perps.quantityDecimals = 6;
-  perps.minimumPriceIncrement = BigInt.zero();
-  perps.marginPercent = 0;
-  perps.maintenanceMarginPercent = 0;
-  perps.liquidationFee = BigInt.zero();
-  perps.takerFeeBps = 0;
-  perps.makerFeeBps = 0;
-  perps.fundingRateMaxBps = BigInt.zero();
-  perps.fundingPeriod = BigInt.zero();
-  perps.cumulativeFundingPerUnit = BigInt.zero();
-  perps.lastFundingUpdateTime = BigInt.zero();
-  perps.minimumMarginPerOrder = BigInt.zero();
-  perps.reservePoolBalance = BigInt.zero();
-  perps.collectedFeesBalance = BigInt.zero();
-  perps.totalUsers = 0;
-  perps.totalOrders = 0;
-  perps.activeOrders = 0;
-  perps.totalTrades = 0;
-  perps.totalVolume = BigInt.zero();
-  perps.totalLiquidations = 0;
-  perps.totalBadDebt = BigInt.zero();
-  perps.initializedAt = BigInt.zero();
-  perps.lastUpdatedAt = BigInt.zero();
-  perps.save();
-}
 
 function createOrderMatchedEvent(
   makerOrderId: Bytes,
@@ -332,6 +300,296 @@ describe("handleOrderMatched", () => {
     assert.fieldEquals("Trade", closeTradeId, "positionSession", sessionId);
     assert.fieldEquals("Trade", closeTradeId, "realizedPnl", "100000");
     assert.fieldEquals("Trade", closeTradeId, "tradeQuantity", qty.neg().toString());
+  });
+
+  test("computes realized PnL when closing a short position", () => {
+    const maker1 = userAddress(1);
+    const trader = userAddress(2);
+    const maker2 = userAddress(3);
+    const entryPrice = BigInt.fromI32(3000000);
+    const exitPrice = BigInt.fromI32(2900000);
+    const qty = BigInt.fromI32(1000000);
+
+    // Open: trader (taker) sells -qty at entryPrice → short
+    const openEvent = createOrderMatchedEvent(
+      orderId(1), maker1, trader, entryPrice,
+      qty.neg(), BigInt.zero(), BigInt.zero(),
+      qty, qty.neg(), entryPrice, entryPrice,
+    );
+    openEvent.logIndex = BigInt.fromI32(1);
+    openEvent.transaction.hash = orderId(100);
+    handleOrderMatched(openEvent);
+
+    assert.fieldEquals("User", trader.toHexString(), "netQuantity", qty.neg().toString());
+
+    // Close: trader (taker) buys +qty at exitPrice → flat
+    const closeEvent = createOrderMatchedEvent(
+      orderId(2), maker2, trader, exitPrice,
+      qty, BigInt.zero(), BigInt.zero(),
+      qty.neg(), BigInt.zero(), exitPrice, BigInt.zero(),
+    );
+    closeEvent.logIndex = BigInt.fromI32(2);
+    closeEvent.transaction.hash = orderId(101);
+    handleOrderMatched(closeEvent);
+
+    // PnL = (2900000 - 3000000) * (-1000000) / 1000000 = 100000
+    assert.fieldEquals("User", trader.toHexString(), "netQuantity", "0");
+    assert.fieldEquals("User", trader.toHexString(), "realizedPnl", "100000");
+
+    const closeFillId = createEventId(closeEvent.transaction.hash, closeEvent.logIndex)
+      .concatI32(0).toHexString();
+    assert.fieldEquals("Fill", closeFillId, "realizedPnl", "100000");
+
+    const closeTradeId = closeEvent.transaction.hash.concat(trader).toHexString();
+    assert.fieldEquals("Trade", closeTradeId, "realizedPnl", "100000");
+
+    const sessionId = positionSessionId(openEvent.block.number, openEvent.logIndex.toI32() * 2);
+    assert.fieldEquals("PositionSession", sessionId, "realizedPnl", "100000");
+    assert.fieldEquals("PositionSession", sessionId, "status", "CLOSE");
+  });
+
+  test("computes negative realized PnL when closing at a loss", () => {
+    const maker1 = userAddress(1);
+    const trader = userAddress(2);
+    const maker2 = userAddress(3);
+    const entryPrice = BigInt.fromI32(3100000);
+    const exitPrice = BigInt.fromI32(3000000);
+    const qty = BigInt.fromI32(1000000);
+
+    // Open: trader buys +qty at entryPrice
+    const openEvent = createOrderMatchedEvent(
+      orderId(1), maker1, trader, entryPrice,
+      qty, BigInt.zero(), BigInt.zero(),
+      qty.neg(), qty, entryPrice, entryPrice,
+    );
+    openEvent.logIndex = BigInt.fromI32(1);
+    openEvent.transaction.hash = orderId(100);
+    handleOrderMatched(openEvent);
+
+    // Close: trader sells -qty at exitPrice (loss)
+    const closeEvent = createOrderMatchedEvent(
+      orderId(2), maker2, trader, exitPrice,
+      qty.neg(), BigInt.zero(), BigInt.zero(),
+      qty, BigInt.zero(), exitPrice, BigInt.zero(),
+    );
+    closeEvent.logIndex = BigInt.fromI32(2);
+    closeEvent.transaction.hash = orderId(101);
+    handleOrderMatched(closeEvent);
+
+    // PnL = (3000000 - 3100000) * 1000000 / 1000000 = -100000
+    assert.fieldEquals("User", trader.toHexString(), "realizedPnl", "-100000");
+
+    const closeFillId = createEventId(closeEvent.transaction.hash, closeEvent.logIndex)
+      .concatI32(0).toHexString();
+    assert.fieldEquals("Fill", closeFillId, "realizedPnl", "-100000");
+
+    const closeTradeId = closeEvent.transaction.hash.concat(trader).toHexString();
+    assert.fieldEquals("Trade", closeTradeId, "realizedPnl", "-100000");
+
+    const sessionId = positionSessionId(openEvent.block.number, openEvent.logIndex.toI32() * 2);
+    assert.fieldEquals("PositionSession", sessionId, "realizedPnl", "-100000");
+  });
+
+  test("computes PnL on partial close proportional to settled quantity", () => {
+    const maker1 = userAddress(1);
+    const trader = userAddress(2);
+    const maker2 = userAddress(3);
+    const entryPrice = BigInt.fromI32(3000000);
+    const exitPrice = BigInt.fromI32(3100000);
+    const qty = BigInt.fromI32(2000000);
+    const halfQty = BigInt.fromI32(1000000);
+
+    // Open: trader buys 2 units at entryPrice
+    const openEvent = createOrderMatchedEvent(
+      orderId(1), maker1, trader, entryPrice,
+      qty, BigInt.zero(), BigInt.zero(),
+      qty.neg(), qty, entryPrice, entryPrice,
+    );
+    openEvent.logIndex = BigInt.fromI32(1);
+    openEvent.transaction.hash = orderId(100);
+    handleOrderMatched(openEvent);
+
+    // Partial close: trader sells 1 unit at exitPrice
+    const closeEvent = createOrderMatchedEvent(
+      orderId(2), maker2, trader, exitPrice,
+      halfQty.neg(), BigInt.zero(), BigInt.zero(),
+      halfQty, halfQty, exitPrice, entryPrice,
+    );
+    closeEvent.logIndex = BigInt.fromI32(2);
+    closeEvent.transaction.hash = orderId(101);
+    handleOrderMatched(closeEvent);
+
+    // PnL = (3100000 - 3000000) * 1000000 / 1000000 = 100000
+    assert.fieldEquals("User", trader.toHexString(), "netQuantity", halfQty.toString());
+    assert.fieldEquals("User", trader.toHexString(), "realizedPnl", "100000");
+
+    const sessionId = positionSessionId(openEvent.block.number, openEvent.logIndex.toI32() * 2);
+    assert.fieldEquals("PositionSession", sessionId, "status", "OPEN");
+    assert.fieldEquals("PositionSession", sessionId, "realizedPnl", "100000");
+    assert.fieldEquals("PositionSession", sessionId, "closedQuantity", halfQty.toString());
+    assert.fieldEquals("PositionSession", sessionId, "closePrice", exitPrice.toString());
+
+    const closeFillId = createEventId(closeEvent.transaction.hash, closeEvent.logIndex)
+      .concatI32(0).toHexString();
+    assert.fieldEquals("Fill", closeFillId, "realizedPnl", "100000");
+  });
+
+  test("computes PnL on position flip and creates two sessions", () => {
+    const maker1 = userAddress(1);
+    const trader = userAddress(2);
+    const maker2 = userAddress(3);
+    const entryPrice = BigInt.fromI32(3000000);
+    const flipPrice = BigInt.fromI32(3100000);
+    const qty = BigInt.fromI32(1000000);
+
+    // Open: trader buys +1 unit at entryPrice
+    const openEvent = createOrderMatchedEvent(
+      orderId(1), maker1, trader, entryPrice,
+      qty, BigInt.zero(), BigInt.zero(),
+      qty.neg(), qty, entryPrice, entryPrice,
+    );
+    openEvent.logIndex = BigInt.fromI32(1);
+    openEvent.transaction.hash = orderId(100);
+    handleOrderMatched(openEvent);
+
+    const oldSessionId = positionSessionId(openEvent.block.number, openEvent.logIndex.toI32() * 2);
+    assert.fieldEquals("PositionSession", oldSessionId, "status", "OPEN");
+
+    // Flip: trader sells 2 units at flipPrice → goes from +1 to -1
+    const flipEvent = createOrderMatchedEvent(
+      orderId(2), maker2, trader, flipPrice,
+      qty.times(BigInt.fromI32(-2)), BigInt.zero(), BigInt.zero(),
+      qty.times(BigInt.fromI32(2)), qty.neg(), flipPrice, flipPrice,
+    );
+    flipEvent.logIndex = BigInt.fromI32(2);
+    flipEvent.transaction.hash = orderId(101);
+    handleOrderMatched(flipEvent);
+
+    // PnL on closed 1 unit: (3100000 - 3000000) * 1000000 / 1000000 = 100000
+    assert.fieldEquals("User", trader.toHexString(), "netQuantity", qty.neg().toString());
+    assert.fieldEquals("User", trader.toHexString(), "realizedPnl", "100000");
+
+    // Old session closed with PnL
+    assert.fieldEquals("PositionSession", oldSessionId, "status", "CLOSE");
+    assert.fieldEquals("PositionSession", oldSessionId, "realizedPnl", "100000");
+
+    // New session opened with zero PnL
+    const newSessionId = positionSessionId(flipEvent.block.number, flipEvent.logIndex.toI32() * 2);
+    assert.fieldEquals("PositionSession", newSessionId, "status", "OPEN");
+    assert.fieldEquals("PositionSession", newSessionId, "realizedPnl", "0");
+    assert.fieldEquals("PositionSession", newSessionId, "entryPrice", flipPrice.toString());
+
+    // Close fill carries PnL, open fill has zero
+    const baseId = createEventId(flipEvent.transaction.hash, flipEvent.logIndex);
+    const closeFillId = baseId.concatI32(0).toHexString();
+    const openFillId = baseId.concatI32(1).toHexString();
+    assert.fieldEquals("Fill", closeFillId, "realizedPnl", "100000");
+    assert.fieldEquals("Fill", openFillId, "realizedPnl", "0");
+
+    // Single trade aggregates both fills
+    const tradeId = flipEvent.transaction.hash.concat(trader).toHexString();
+    assert.fieldEquals("Trade", tradeId, "realizedPnl", "100000");
+    assert.fieldEquals("Trade", tradeId, "fillCount", "2");
+  });
+
+  test("accumulates realized PnL across multiple round-trips", () => {
+    const maker1 = userAddress(1);
+    const trader = userAddress(2);
+    const maker2 = userAddress(3);
+    const maker3 = userAddress(4);
+    const maker4 = userAddress(5);
+    const qty = BigInt.fromI32(1000000);
+
+    // Round 1: open long at 3000000, close at 3100000 → +100000
+    const open1 = createOrderMatchedEvent(
+      orderId(1), maker1, trader, BigInt.fromI32(3000000),
+      qty, BigInt.zero(), BigInt.zero(),
+      qty.neg(), qty, BigInt.fromI32(3000000), BigInt.fromI32(3000000),
+    );
+    open1.logIndex = BigInt.fromI32(1);
+    open1.transaction.hash = orderId(100);
+    handleOrderMatched(open1);
+
+    const close1 = createOrderMatchedEvent(
+      orderId(2), maker2, trader, BigInt.fromI32(3100000),
+      qty.neg(), BigInt.zero(), BigInt.zero(),
+      qty, BigInt.zero(), BigInt.fromI32(3100000), BigInt.zero(),
+    );
+    close1.logIndex = BigInt.fromI32(2);
+    close1.transaction.hash = orderId(101);
+    handleOrderMatched(close1);
+
+    assert.fieldEquals("User", trader.toHexString(), "realizedPnl", "100000");
+
+    // Round 2: open long at 3200000, close at 3000000 → -200000
+    const open2 = createOrderMatchedEvent(
+      orderId(3), maker3, trader, BigInt.fromI32(3200000),
+      qty, BigInt.zero(), BigInt.zero(),
+      qty.neg(), qty, BigInt.fromI32(3200000), BigInt.fromI32(3200000),
+    );
+    open2.logIndex = BigInt.fromI32(3);
+    open2.transaction.hash = orderId(102);
+    handleOrderMatched(open2);
+
+    const close2 = createOrderMatchedEvent(
+      orderId(4), maker4, trader, BigInt.fromI32(3000000),
+      qty.neg(), BigInt.zero(), BigInt.zero(),
+      qty, BigInt.zero(), BigInt.fromI32(3000000), BigInt.zero(),
+    );
+    close2.logIndex = BigInt.fromI32(4);
+    close2.transaction.hash = orderId(103);
+    handleOrderMatched(close2);
+
+    // Cumulative: 100000 + (-200000) = -100000
+    assert.fieldEquals("User", trader.toHexString(), "realizedPnl", "-100000");
+  });
+
+  test("aggregates realized PnL across multiple close fills in one trade", () => {
+    const maker1 = userAddress(1);
+    const trader = userAddress(2);
+    const maker2 = userAddress(3);
+    const maker3 = userAddress(4);
+    const entryPrice = BigInt.fromI32(3000000);
+    const qty = BigInt.fromI32(2000000);
+    const halfQty = BigInt.fromI32(1000000);
+    const closeTxHash = orderId(101);
+
+    // Open: trader buys 2 units at 3000000
+    const openEvent = createOrderMatchedEvent(
+      orderId(1), maker1, trader, entryPrice,
+      qty, BigInt.zero(), BigInt.zero(),
+      qty.neg(), qty, entryPrice, entryPrice,
+    );
+    openEvent.logIndex = BigInt.fromI32(1);
+    openEvent.transaction.hash = orderId(100);
+    handleOrderMatched(openEvent);
+
+    // Close fill 1 (same tx): sell 1 unit at 3100000
+    const close1 = createOrderMatchedEvent(
+      orderId(2), maker2, trader, BigInt.fromI32(3100000),
+      halfQty.neg(), BigInt.zero(), BigInt.zero(),
+      halfQty, halfQty, BigInt.fromI32(3100000), entryPrice,
+    );
+    close1.logIndex = BigInt.fromI32(2);
+    close1.transaction.hash = closeTxHash;
+    handleOrderMatched(close1);
+
+    // Close fill 2 (same tx): sell 1 unit at 3200000
+    const close2 = createOrderMatchedEvent(
+      orderId(3), maker3, trader, BigInt.fromI32(3200000),
+      halfQty.neg(), BigInt.zero(), BigInt.zero(),
+      halfQty, BigInt.zero(), BigInt.fromI32(3200000), BigInt.zero(),
+    );
+    close2.logIndex = BigInt.fromI32(3);
+    close2.transaction.hash = closeTxHash;
+    handleOrderMatched(close2);
+
+    // Fill 1 PnL = (3100000 - 3000000) * 1000000 / 1000000 = 100000
+    // Fill 2 PnL = (3200000 - 3000000) * 1000000 / 1000000 = 200000
+    const tradeId = closeTxHash.concat(trader).toHexString();
+    assert.fieldEquals("Trade", tradeId, "realizedPnl", "300000");
+    assert.fieldEquals("Trade", tradeId, "fillCount", "2");
+    assert.fieldEquals("User", trader.toHexString(), "realizedPnl", "300000");
   });
 
   test("trading fees flow to Fill, Trade, and PositionSession", () => {

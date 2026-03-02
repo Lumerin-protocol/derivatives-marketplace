@@ -3,41 +3,9 @@ import { Address, BigInt, Bytes } from "@graphprotocol/graph-ts";
 import { newTypedMockEventWithParams } from "matchstick-as/assembly/defaults";
 import { handleFundingSettled, handleOrderMatched } from "../src/perps";
 import { FundingSettled, OrderMatched } from "../generated/PerpsSimple/PerpsSimple";
-import { Perps } from "../generated/schema";
 import { assert } from "matchstick-as/assembly/index";
-import { userAddress, orderId, paramAddr, paramBytes, paramUint, paramInt, setupDataSourceMock, mockEventId } from "./helpers";
+import { userAddress, orderId, paramAddr, paramBytes, paramUint, paramInt, setupDataSourceMock, mockEventId, setupPerps } from "./helpers";
 import { positionSessionId } from "../src/ids";
-
-function setupPerps(): void {
-  const perps = new Perps(0);
-  perps.contractAddress = Bytes.empty();
-  perps.collateralToken = Bytes.empty();
-  perps.priceOracle = Bytes.empty();
-  perps.quantityDecimals = 6;
-  perps.minimumPriceIncrement = BigInt.zero();
-  perps.marginPercent = 0;
-  perps.maintenanceMarginPercent = 0;
-  perps.liquidationFee = BigInt.zero();
-  perps.takerFeeBps = 0;
-  perps.makerFeeBps = 0;
-  perps.fundingRateMaxBps = BigInt.zero();
-  perps.fundingPeriod = BigInt.zero();
-  perps.cumulativeFundingPerUnit = BigInt.zero();
-  perps.lastFundingUpdateTime = BigInt.zero();
-  perps.minimumMarginPerOrder = BigInt.zero();
-  perps.reservePoolBalance = BigInt.zero();
-  perps.collectedFeesBalance = BigInt.zero();
-  perps.totalUsers = 0;
-  perps.totalOrders = 0;
-  perps.activeOrders = 0;
-  perps.totalTrades = 0;
-  perps.totalVolume = BigInt.zero();
-  perps.totalLiquidations = 0;
-  perps.totalBadDebt = BigInt.zero();
-  perps.initializedAt = BigInt.zero();
-  perps.lastUpdatedAt = BigInt.zero();
-  perps.save();
-}
 
 /** Open a long position for `trader` (taker buys +qty). */
 function openLongPosition(

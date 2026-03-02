@@ -4,6 +4,7 @@
  */
 import { Address, BigInt, Bytes, ethereum } from "@graphprotocol/graph-ts";
 import { dataSourceMock } from "matchstick-as/assembly/index";
+import { Perps } from "../generated/schema";
 
 function padLeft(s: string, len: i32, char: string): string {
   while (s.length < len) {
@@ -54,6 +55,38 @@ export function paramInt(name: string, value: BigInt): ethereum.EventParam {
 /** Price level ID for assertions. e.g. priceLevel(price, true) => "{price}-bid" */
 export function priceLevel(price: BigInt, isBid: boolean): string {
   return price.toString() + (isBid ? "-bid" : "-ask");
+}
+
+/** Pre-create Perps singleton so handlers don't call loadPerpsFromContract. */
+export function setupPerps(): void {
+  const perps = new Perps(0);
+  perps.contractAddress = Bytes.empty();
+  perps.collateralToken = Bytes.empty();
+  perps.priceOracle = Bytes.empty();
+  perps.quantityDecimals = 6;
+  perps.minimumPriceIncrement = BigInt.zero();
+  perps.marginPercent = 0;
+  perps.maintenanceMarginPercent = 0;
+  perps.liquidationFee = BigInt.zero();
+  perps.takerFeeBps = 0;
+  perps.makerFeeBps = 0;
+  perps.fundingRateMaxBps = BigInt.zero();
+  perps.fundingPeriod = BigInt.zero();
+  perps.cumulativeFundingPerUnit = BigInt.zero();
+  perps.lastFundingUpdateTime = BigInt.zero();
+  perps.minimumMarginPerOrder = BigInt.zero();
+  perps.reservePoolBalance = BigInt.zero();
+  perps.collectedFeesBalance = BigInt.zero();
+  perps.totalUsers = 0;
+  perps.totalOrders = 0;
+  perps.activeOrders = 0;
+  perps.totalTrades = 0;
+  perps.totalVolume = BigInt.zero();
+  perps.totalLiquidations = 0;
+  perps.totalBadDebt = BigInt.zero();
+  perps.initializedAt = BigInt.zero();
+  perps.lastUpdatedAt = BigInt.zero();
+  perps.save();
 }
 
 /** Tx hash from matchstick mock defaults */
