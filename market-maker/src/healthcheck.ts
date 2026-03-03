@@ -8,9 +8,19 @@ import type { GasTracker } from "./gasTracker.ts";
 import type { RiskManager } from "./riskManager.ts";
 import type pino from "pino";
 
+export interface ExecutorStats {
+  ordersPlaced: number;
+  ordersCancelled: number;
+  reconcileCount: number;
+}
+
 export class HealthCheck {
   private server: Server | null = null;
   private startedAt = Date.now();
+
+  tickCount = 0;
+  lastTickAt = 0;
+  executorStats: ExecutorStats | null = null;
 
   private readonly config: MakerConfig;
   private readonly oracle: OracleTracker;
@@ -62,6 +72,11 @@ export class HealthCheck {
             gasSpiking: this.gas.isGasSpiking,
             gasSpikePct: this.gas.gasSpikePct.toFixed(0),
             cumulativeGasCostUsd: this.risk.cumulativeGasCostUsd.toString(),
+            tickCount: this.tickCount,
+            lastTickAt: this.lastTickAt,
+            ordersPlaced: this.executorStats?.ordersPlaced ?? 0,
+            ordersCancelled: this.executorStats?.ordersCancelled ?? 0,
+            reconcileCount: this.executorStats?.reconcileCount ?? 0,
             uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
             dryRun: this.config.dryRun,
           });

@@ -124,11 +124,13 @@ export class GasTracker {
     return BigInt(totalOrders) * this.roundTripCostUsd;
   }
 
-  /** Compute the maxFeePerGas to use, capped relative to median. */
+  /** Compute the maxFeePerGas to use, capped relative to median but never below current gas price. */
   cappedGasPrice(): bigint {
     const medianBig = BigInt(Math.round(this.medianGasPrice));
+    if (medianBig === 0n) return this.currentGasPrice;
     const cap = medianBig * BigInt(Math.round(this.config.gasCapMultiplier * 100)) / 100n;
-    return this.currentGasPrice < cap ? this.currentGasPrice : cap;
+    // Never go below current gas price — a cap below base fee causes tx failure
+    return this.currentGasPrice < cap ? cap : this.currentGasPrice;
   }
 
   private gasCostUsd(gasUnits: bigint): bigint {

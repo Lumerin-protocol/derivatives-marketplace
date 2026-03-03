@@ -228,7 +228,7 @@ describe("GasTracker cost calculations", () => {
 });
 
 describe("GasTracker.cappedGasPrice", () => {
-  it("returns current price when below cap", () => {
+  it("returns cap when current gas is below cap", () => {
     const mockClient = { getGasPrice: async () => 1_000_000_000n };
     const tracker = new GasTracker(mockClient as never, makeConfig({ gasCapMultiplier: 2.0 }), makeLogger());
 
@@ -236,26 +236,28 @@ describe("GasTracker.cappedGasPrice", () => {
     tracker.medianGasPrice = 1_000_000_000;
 
     const capped = tracker.cappedGasPrice();
-    assert.equal(capped, 1_000_000_000n);
+    // cap = median(1G) * 2.0 = 2G; current(1G) < cap(2G) → returns cap
+    assert.equal(capped, 2_000_000_000n);
   });
 
-  it("caps gas price to median * multiplier when spiking", () => {
+  it("returns current gas price when spiking above cap (never below base fee)", () => {
     const tracker = new GasTracker({} as never, makeConfig({ gasCapMultiplier: 2.0 }), makeLogger());
 
     tracker.currentGasPrice = 10_000_000_000n;
     tracker.medianGasPrice = 1_000_000_000;
 
     const capped = tracker.cappedGasPrice();
-    assert.equal(capped, 2_000_000_000n);
+    // cap = 2G; current(10G) > cap(2G) → returns current to avoid tx failure
+    assert.equal(capped, 10_000_000_000n);
   });
 
-  it("handles median of 0 (returns 0 cap)", () => {
+  it("returns current gas price when median is 0", () => {
     const tracker = new GasTracker({} as never, makeConfig({ gasCapMultiplier: 2.0 }), makeLogger());
 
     tracker.currentGasPrice = 1_000_000_000n;
     tracker.medianGasPrice = 0;
 
     const capped = tracker.cappedGasPrice();
-    assert.equal(capped, 0n);
+    assert.equal(capped, 1_000_000_000n);
   });
 });

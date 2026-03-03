@@ -10,6 +10,8 @@ import { perpsSimpleAbi } from "./abi.ts";
 import { bigAbs } from "./math.ts";
 
 export class OrderExecutor {
+  readonly stats = { ordersPlaced: 0, ordersCancelled: 0, reconcileCount: 0 };
+
   private lastRequoteAt = 0;
   private lastQuoteMidPrice = 0n;
 
@@ -94,6 +96,7 @@ export class OrderExecutor {
 
     this.lastRequoteAt = Date.now();
     this.lastQuoteMidPrice = this.oracle.currentPrice;
+    this.stats.reconcileCount++;
   }
 
   /** Cancel all MM orders (used by circuit breaker). */
@@ -214,6 +217,7 @@ export class OrderExecutor {
       const gasCost = this.computeTxGasCost(receipt);
       this.risk.recordGasCost(gasCost);
 
+      this.stats.ordersCancelled++;
       this.logger.info({ orderId, gas: receipt.gasUsed.toString() }, "order cancelled");
     } catch (err) {
       this.logger.error({ orderId, err }, "cancel failed");
@@ -250,6 +254,7 @@ export class OrderExecutor {
       const gasCost = this.computeTxGasCost(receipt);
       this.risk.recordGasCost(gasCost);
 
+      this.stats.ordersPlaced++;
       this.logger.info(
         { price: price.toString(), qty: signedQty.toString(), gas: receipt.gasUsed.toString() },
         "order placed",
