@@ -11,6 +11,14 @@ export default defineConfig({
         rebuild: "pnpm hardhat compile",
       },
     }),
+    hardhat({
+      artifacts: "./artifacts/@openzeppelin/contracts/token/ERC20/IERC20.sol",
+      project: ".",
+      commands: {
+        build: "pnpm hardhat compile",
+        rebuild: "pnpm hardhat compile",
+      },
+    }),
   ],
   out: "./abi/abi.ts",
 });

@@ -68,8 +68,17 @@ function createStack(
   const risk = new RiskManager(config, inventory, gas, oracle, silentLogger);
   const quoter = new Quoter(publicClient, config, oracle, gas, inventory, risk, silentLogger);
   const executor = new OrderExecutor(
-    publicClient, mmWallet, mmWallet.account, hardhat, config,
-    quoter, book, gas, risk, oracle, silentLogger,
+    publicClient,
+    mmWallet,
+    mmWallet.account,
+    hardhat,
+    config,
+    quoter,
+    book,
+    gas,
+    risk,
+    oracle,
+    silentLogger,
   );
   const health = new HealthCheck(config, oracle, inventory, book, gas, risk, silentLogger);
 
@@ -106,7 +115,9 @@ describe("MM quoting", () => {
   afterEach(async () => {
     try {
       await stack.executor.cancelAll();
-    } catch { /* may already be cancelled */ }
+    } catch {
+      /* may already be cancelled */
+    }
     stopStack(stack);
   });
 
@@ -217,7 +228,9 @@ describe("MM fill handling", () => {
   afterEach(async () => {
     try {
       await stack.executor.cancelAll();
-    } catch { /* may already be cancelled */ }
+    } catch {
+      /* may already be cancelled */
+    }
     stopStack(stack);
   });
 
@@ -231,11 +244,13 @@ describe("MM fill handling", () => {
     const bestAsk = desired.asks[0];
     const takerQty = parseUnits("1", deployment.config.quantityDecimals);
 
-    await (perps as unknown as { write: { createOrder: (args: [bigint, bigint], opts: unknown) => Promise<void> } })
-      .write.createOrder(
-        [bestAsk.price, takerQty],
-        { account: deployment.clients.buyerWallet.account },
-      );
+    await (
+      perps as unknown as {
+        write: { createOrder: (args: [bigint, bigint], opts: unknown) => Promise<void> };
+      }
+    ).write.createOrder([bestAsk.price, takerQty], {
+      account: deployment.clients.buyerWallet.account,
+    });
 
     await stack.inventory.update();
     assert.ok(stack.inventory.netQuantity < 0n, "MM should be short after selling to taker");
@@ -249,11 +264,13 @@ describe("MM fill handling", () => {
     // Fill the MM's ask
     const bestAsk = desired.asks[0];
     const takerQty = parseUnits("1", deployment.config.quantityDecimals);
-    await (perps as unknown as { write: { createOrder: (args: [bigint, bigint], opts: unknown) => Promise<void> } })
-      .write.createOrder(
-        [bestAsk.price, takerQty],
-        { account: deployment.clients.buyerWallet.account },
-      );
+    await (
+      perps as unknown as {
+        write: { createOrder: (args: [bigint, bigint], opts: unknown) => Promise<void> };
+      }
+    ).write.createOrder([bestAsk.price, takerQty], {
+      account: deployment.clients.buyerWallet.account,
+    });
 
     // Update state
     await stack.oracle.update();
@@ -284,7 +301,9 @@ describe("MM requote on price change", () => {
   afterEach(async () => {
     try {
       await stack.executor.cancelAll();
-    } catch { /* may already be cancelled */ }
+    } catch {
+      /* may already be cancelled */
+    }
     stopStack(stack);
   });
 
@@ -325,7 +344,9 @@ describe("MM risk controls", () => {
     if (stack) {
       try {
         await stack.executor.cancelAll();
-      } catch { /* may already be cancelled */ }
+      } catch {
+        /* may already be cancelled */
+      }
       stopStack(stack);
     }
   });
@@ -418,7 +439,7 @@ describe("MM health endpoint", () => {
     const body = await res.json();
     assert.equal(body.status, "running");
     assert.ok(BigInt(body.oraclePrice) > 0n, "oraclePrice should be positive");
-    assert.ok(BigInt(body.collateral) > 0n, "collateral should be positive");
+    assert.ok(BigInt(body.collateralBalance) > 0n, "collateral should be positive");
     assert.equal(body.gasSpiking, false);
     assert.equal(body.dryRun, false);
     assert.ok(typeof body.uptimeSeconds === "number");
@@ -453,7 +474,9 @@ describe("MM full tick cycle", () => {
   afterEach(async () => {
     try {
       await stack.executor.cancelAll();
-    } catch { /* may already be cancelled */ }
+    } catch {
+      /* may already be cancelled */
+    }
     stopStack(stack);
   });
 

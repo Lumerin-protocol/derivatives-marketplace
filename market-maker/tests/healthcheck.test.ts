@@ -7,6 +7,7 @@ import type { InventoryManager } from "../src/inventoryManager.ts";
 import type { BookTracker } from "../src/bookTracker.ts";
 import type { GasTracker } from "../src/gasTracker.ts";
 import type { RiskManager } from "../src/riskManager.ts";
+import pino from "pino";
 
 const noop = () => {};
 function makeLogger(): never {
@@ -24,6 +25,8 @@ function makeDeps() {
     collateralBalance: 500_000_000n,
     inventorySkew: 0.05,
     utilizationPct: 15,
+    tokenBalance: 500_000_000n,
+    ethBalance: 500_000_000n,
   } as InventoryManager;
   const book = {
     ownOrders: new Map(),
@@ -56,11 +59,14 @@ describe("HealthCheck", () => {
 
   it("starts and responds to /health with JSON", async () => {
     const { config, oracle, inventory, book, gas, risk, port } = makeDeps();
-    health = new HealthCheck(config, oracle, inventory, book, gas, risk, makeLogger());
+    health = new HealthCheck(config, oracle, inventory, book, gas, risk, pino());
     health.status = "running";
+    console.log("starting health");
     await health.start();
+    console.log("health started", port);
 
     const res = await fetch(`http://localhost:${port}/health`);
+    console.log("===========", res);
     assert.equal(res.status, 200);
     assert.equal(res.headers.get("content-type"), "application/json");
 
@@ -68,7 +74,9 @@ describe("HealthCheck", () => {
     assert.equal(body.status, "running");
     assert.equal(body.oraclePrice, "100000000");
     assert.equal(body.netPosition, "5000000");
-    assert.equal(body.collateral, "500000000");
+    assert.equal(body.collateralBalance, "500000000");
+    assert.equal(body.ethBalance, "500000000");
+    assert.equal(body.tokenBalance, "500000000");
     assert.equal(body.inventorySkew, 0.05);
     assert.equal(body.utilizationPct, 15);
     assert.equal(body.bestBid, "99000000");

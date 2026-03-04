@@ -17,6 +17,16 @@ function makeLogger(): never {
 }
 
 const MM_ADDRESS = "0x0000000000000000000000000000000000000099" as `0x${string}`;
+const TOKEN_ADDRESS = "0x0000000000000000000000000000000000000042" as `0x${string}`;
+const MULTICALL3_ADDRESS = "0xcA11bde05977b3631167028862bE2a173976CA11" as `0x${string}`;
+
+function makeMockClient(multicallResults: unknown[]) {
+  return {
+    readContract: async () => TOKEN_ADDRESS,
+    chain: { contracts: { multicall3: { address: MULTICALL3_ADDRESS } } },
+    multicall: async () => multicallResults,
+  };
+}
 
 describe("InventoryManager", () => {
   it("starts with zero values", () => {
@@ -53,35 +63,35 @@ describe("InventoryManager", () => {
   });
 
   it("update sets fields from multicall results", async () => {
-    const mockClient = {
-      multicall: async () => [
-        { status: "success", result: { netQuantity: 10_000_000n, aggregatedEntryPrice: 50_000_000n } },
-        { status: "success", result: 500_000_000n },
-        { status: "success", result: 100_000_000n },
-      ],
-    };
-    const inv = new InventoryManager(mockClient as never, makeConfig(), MM_ADDRESS, makeLogger());
+    const client = makeMockClient([
+      { netQuantity: 10_000_000n, aggregatedEntryPrice: 50_000_000n },
+      500_000_000n,
+      250_000_000n,
+      100_000_000n,
+      1_000_000_000_000_000_000n,
+    ]);
+    const inv = new InventoryManager(client as never, makeConfig(), MM_ADDRESS, makeLogger());
     await inv.update();
 
     assert.equal(inv.netQuantity, 10_000_000n);
     assert.equal(inv.entryPrice, 50_000_000n);
     assert.equal(inv.collateralBalance, 500_000_000n);
+    assert.equal(inv.tokenBalance, 250_000_000n);
     assert.equal(inv.requiredMargin, 100_000_000n);
+    assert.equal(inv.ethBalance, 1_000_000_000_000_000_000n);
     assert.equal(inv.availableMargin, 400_000_000n);
     assert.equal(inv.utilizationPct, 20);
     assert.ok(inv.inventorySkew > 0, "positive net qty → positive skew");
   });
 
   it("update handles failed multicall results gracefully", async () => {
-    const mockClient = {
-      multicall: async () => [
-        { status: "failure" },
-        { status: "failure" },
-        { status: "failure" },
-      ],
+    const client = {
+      readContract: async () => TOKEN_ADDRESS,
+      chain: { contracts: { multicall3: { address: MULTICALL3_ADDRESS } } },
+      multicall: async () => { throw new Error("multicall failed"); },
     };
-    const inv = new InventoryManager(mockClient as never, makeConfig(), MM_ADDRESS, makeLogger());
-    await inv.update();
+    const inv = new InventoryManager(client as never, makeConfig(), MM_ADDRESS, makeLogger());
+    await assert.rejects(() => inv.update(), { message: "multicall failed" });
 
     assert.equal(inv.netQuantity, 0n);
     assert.equal(inv.collateralBalance, 0n);
@@ -89,56 +99,56 @@ describe("InventoryManager", () => {
   });
 
   it("clamps inventory skew to [-1, 1]", async () => {
-    const mockClient = {
-      multicall: async () => [
-        { status: "success", result: { netQuantity: 999_000_000n, aggregatedEntryPrice: 50_000_000n } },
-        { status: "success", result: 1_000_000_000n },
-        { status: "success", result: 0n },
-      ],
-    };
-    const inv = new InventoryManager(mockClient as never, makeConfig({ maxPositionSize: 100_000_000n }), MM_ADDRESS, makeLogger());
+    const client = makeMockClient([
+      { netQuantity: 999_000_000n, aggregatedEntryPrice: 50_000_000n },
+      1_000_000_000n,
+      0n,
+      0n,
+      0n,
+    ]);
+    const inv = new InventoryManager(client as never, makeConfig({ maxPositionSize: 100_000_000n }), MM_ADDRESS, makeLogger());
     await inv.update();
 
     assert.equal(inv.inventorySkew, 1);
   });
 
   it("clamps negative inventory skew to -1", async () => {
-    const mockClient = {
-      multicall: async () => [
-        { status: "success", result: { netQuantity: -999_000_000n, aggregatedEntryPrice: 50_000_000n } },
-        { status: "success", result: 1_000_000_000n },
-        { status: "success", result: 0n },
-      ],
-    };
-    const inv = new InventoryManager(mockClient as never, makeConfig({ maxPositionSize: 100_000_000n }), MM_ADDRESS, makeLogger());
+    const client = makeMockClient([
+      { netQuantity: -999_000_000n, aggregatedEntryPrice: 50_000_000n },
+      1_000_000_000n,
+      0n,
+      0n,
+      0n,
+    ]);
+    const inv = new InventoryManager(client as never, makeConfig({ maxPositionSize: 100_000_000n }), MM_ADDRESS, makeLogger());
     await inv.update();
 
     assert.equal(inv.inventorySkew, -1);
   });
 
   it("sets availableMargin to 0 when requiredMargin exceeds collateral", async () => {
-    const mockClient = {
-      multicall: async () => [
-        { status: "success", result: { netQuantity: 0n, aggregatedEntryPrice: 0n } },
-        { status: "success", result: 100_000_000n },
-        { status: "success", result: 200_000_000n },
-      ],
-    };
-    const inv = new InventoryManager(mockClient as never, makeConfig(), MM_ADDRESS, makeLogger());
+    const client = makeMockClient([
+      { netQuantity: 0n, aggregatedEntryPrice: 0n },
+      100_000_000n,
+      0n,
+      200_000_000n,
+      0n,
+    ]);
+    const inv = new InventoryManager(client as never, makeConfig(), MM_ADDRESS, makeLogger());
     await inv.update();
 
     assert.equal(inv.availableMargin, 0n);
   });
 
   it("sets skew to 0 when maxPositionSize is 0", async () => {
-    const mockClient = {
-      multicall: async () => [
-        { status: "success", result: { netQuantity: 10_000_000n, aggregatedEntryPrice: 50_000_000n } },
-        { status: "success", result: 500_000_000n },
-        { status: "success", result: 100_000_000n },
-      ],
-    };
-    const inv = new InventoryManager(mockClient as never, makeConfig({ maxPositionSize: 0n }), MM_ADDRESS, makeLogger());
+    const client = makeMockClient([
+      { netQuantity: 10_000_000n, aggregatedEntryPrice: 50_000_000n },
+      500_000_000n,
+      0n,
+      100_000_000n,
+      0n,
+    ]);
+    const inv = new InventoryManager(client as never, makeConfig({ maxPositionSize: 0n }), MM_ADDRESS, makeLogger());
     await inv.update();
 
     assert.equal(inv.inventorySkew, 0);
