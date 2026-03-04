@@ -1,9 +1,9 @@
-import { requireEnvsSet } from "../lib/env";
-import { viem } from "hardhat";
-import { writeAndWait } from "../lib/writeContract";
-import { verifyContract } from "../lib/verify";
-import { txUrl, addrUrl } from "../lib/explorer";
-import { logTitle, logInfo, logStep, logSuccess, logPrompt } from "../lib/log";
+import { requireEnvsSet } from "../lib/env.ts";
+import { network } from "hardhat";
+import { writeAndWait } from "../lib/writeContract.ts";
+import { verifyContract } from "../lib/verify.ts";
+import { txUrl, addrUrl } from "../lib/explorer.ts";
+import { logTitle, logInfo, logStep, logSuccess, logPrompt } from "../lib/log.ts";
 
 async function main() {
   logTitle("PerpsSimple Upgrade");
@@ -12,6 +12,7 @@ async function main() {
 
   const proxyAddress = env.PERPS_ADDRESS as `0x${string}`;
 
+  const { viem } = await network.connect();
   const [deployer] = await viem.getWalletClients();
   const pc = await viem.getPublicClient();
   logInfo("deployer", { Address: addrUrl(pc, deployer.account.address) });
@@ -45,7 +46,7 @@ async function main() {
   logStep("Deployed", addrUrl(pc, newImpl.address));
 
   console.log("Verifying new implementation...");
-  await verifyContract(newImpl.address, [BigInt(env.MINIMUM_PRICE_INCREMENT)]);
+  await verifyContract(newImpl.address, [env.MINIMUM_PRICE_INCREMENT]);
   logStep("Verified", addrUrl(pc, newImpl.address));
 
   // Upgrade proxy to new implementation

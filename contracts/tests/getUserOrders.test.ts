@@ -1,66 +1,62 @@
-import { expect } from "chai";
-import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { network } from "hardhat";
 import { parseUnits } from "viem";
-import { deployPerpsWithCollateralFixture, deployPerpsWithOrdersFixture } from "./fixtures";
+import { deployPerpsWithCollateralFixture, deployPerpsWithOrdersFixture } from "./fixtures.ts";
+
+const { viem, networkHelpers } = await network.connect();
 
 describe("PerpsSimple - getUserOrders", function () {
   it("should return empty array when user has no orders", async function () {
-    const { contracts, accounts } = await loadFixture(deployPerpsWithCollateralFixture);
+    const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
     const { perps } = contracts;
     const { buyer } = accounts;
 
     const orders = await perps.read.getUserOrders([buyer.account.address]);
-    expect(orders.length).to.equal(0);
+    assert.equal(orders.length, 0);
   });
 
   it("should return all user orders", async function () {
-    const { contracts, accounts, config } = await loadFixture(deployPerpsWithOrdersFixture);
+    const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsWithOrdersFixture);
     const { perps } = contracts;
     const { buyer } = accounts;
 
-    // Buyer has 3 orders from the fixture
     const orders = await perps.read.getUserOrders([buyer.account.address]);
-    expect(orders.length).to.equal(3);
+    assert.equal(orders.length, 3);
   });
 
   it("should update after order is closed", async function () {
-    const { contracts, accounts } = await loadFixture(deployPerpsWithOrdersFixture);
+    const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsWithOrdersFixture);
     const { perps } = contracts;
     const { buyer } = accounts;
 
     const ordersBefore = await perps.read.getUserOrders([buyer.account.address]);
     const initialCount = ordersBefore.length;
 
-    // Close one order
     await perps.write.cancelOrder([ordersBefore[0]], { account: buyer.account });
 
     const ordersAfter = await perps.read.getUserOrders([buyer.account.address]);
-    expect(ordersAfter.length).to.equal(initialCount - 1);
+    assert.equal(ordersAfter.length, initialCount - 1);
   });
 
   it("should update after order is matched", async function () {
-    const { contracts, accounts, config } = await loadFixture(deployPerpsWithOrdersFixture);
+    const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithOrdersFixture);
     const { perps } = contracts;
     const { seller, buyer2 } = accounts;
     const { marketPrice, qty } = config;
     const tick = config.minimumPriceIncrement;
 
-    // Seller has 3 orders
     const sellerOrdersBefore = await perps.read.getUserOrders([seller.account.address]);
-    expect(sellerOrdersBefore.length).to.equal(3);
+    assert.equal(sellerOrdersBefore.length, 3);
 
-    // Buyer2 places a buy order that matches seller's best ask
-    await perps.write.createOrder([marketPrice + tick, BigInt(qty)], {
-      account: buyer2.account,
-    });
+    await perps.write.createOrder([marketPrice + tick, BigInt(qty)], { account: buyer2.account });
 
-    // Seller should have one less order
     const sellerOrdersAfter = await perps.read.getUserOrders([seller.account.address]);
-    expect(sellerOrdersAfter.length).to.equal(2);
+    assert.equal(sellerOrdersAfter.length, 2);
   });
 
   it("should contain valid order IDs", async function () {
-    const { contracts, accounts } = await loadFixture(deployPerpsWithOrdersFixture);
+    const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsWithOrdersFixture);
     const { perps } = contracts;
     const { buyer } = accounts;
 
@@ -68,8 +64,8 @@ describe("PerpsSimple - getUserOrders", function () {
 
     for (const orderId of orderIds) {
       const order = await perps.read.getOrder([orderId]);
-      expect(order.participant).to.not.equal("0x0000000000000000000000000000000000000000");
-      expect(order.price > 0n).to.be.true;
+      assert.notEqual(order.participant, "0x0000000000000000000000000000000000000000");
+      assert.ok(order.price > 0n);
     }
   });
 });

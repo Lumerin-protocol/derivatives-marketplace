@@ -1,5 +1,5 @@
-import type { PublicClient, WalletClient, Account } from "viem";
-import { perpsSimpleAbi, aggregatorV3Abi } from "./abi.ts";
+import { type PublicClient, type WalletClient, type Account, BaseError } from "viem";
+import { perpsSimpleAbi, aggregatorV3InterfaceAbi } from "./abi.ts";
 import type { Config } from "./config.ts";
 import type { PositionTracker, UserState } from "./positionTracker.ts";
 import type pino from "pino";
@@ -39,15 +39,20 @@ export class Liquidator {
 
   async start(): Promise<void> {
     // Read static contract params in a single multicall
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const results = (await this.publicClient.multicall({
       contracts: [
-        { address: this.config.perpsAddress, abi: perpsSimpleAbi, functionName: "liquidationFee" },
-        { address: this.config.perpsAddress, abi: perpsSimpleAbi, functionName: "decimals" },
+        {
+          address: this.config.perpsAddress,
+          abi: perpsSimpleAbi as any,
+          functionName: "liquidationFee",
+        },
+        { address: this.config.perpsAddress, abi: perpsSimpleAbi as any, functionName: "decimals" },
         ...(this.config.ethPriceFeedAddress
           ? [
               {
                 address: this.config.ethPriceFeedAddress,
-                abi: aggregatorV3Abi,
+                abi: aggregatorV3InterfaceAbi as any,
                 functionName: "decimals",
               },
             ]
@@ -58,7 +63,7 @@ export class Liquidator {
 
     this.liquidationFee = results[0] as bigint;
     this.collateralDecimals = Number(results[1]);
-    this.ethFeedDecimals = Number(results[2]);
+    this.ethFeedDecimals = results[2] != null ? Number(results[2]) : 0;
 
     // Run first check immediately, then at interval
     this.checkPrice();
@@ -100,7 +105,7 @@ export class Liquidator {
     }
     const [, answer] = (await this.publicClient.readContract({
       address: this.config.ethPriceFeedAddress,
-      abi: aggregatorV3Abi,
+      abi: aggregatorV3InterfaceAbi,
       functionName: "latestRoundData",
     })) as [bigint, bigint, bigint, bigint, bigint];
 
@@ -113,6 +118,7 @@ export class Liquidator {
    *   gasCostCollateral = gasCostWei * ethPrice / 10^(18 + ethFeedDecimals − collateralDecimals)
    */
   private gasCostToCollateral(gasCostWei: bigint, ethPrice: bigint): bigint {
+    if (ethPrice === 0n) return 0n;
     const exponent = 18 + this.ethFeedDecimals - this.collateralDecimals;
     return (gasCostWei * ethPrice) / 10n ** BigInt(exponent);
   }
@@ -274,13 +280,17 @@ export class Liquidator {
         },
         "Liquidation confirmed",
       );
+
+      if (receipt.status === "success") {
+        await this.tracker.syncUser(user.address);
+      }
     } catch (error) {
       const errorStr = String(error);
 
       if (errorStr.includes("NotLiquidatable")) {
         this.logger.warn(logCtx, "Simulation reverted: NotLiquidatable (state drift)");
       } else {
-        this.logger.error({ ...logCtx, err: error }, "Liquidation attempt failed");
+        this.logger.error({ logCtx }, "Liquidation attempt failed");
       }
     }
   }

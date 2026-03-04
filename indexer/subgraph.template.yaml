@@ -27,6 +27,9 @@ dataSources:
         - Liquidation
         - CollateralEvent
         - PriceLevel
+        - FundingUpdate
+        - FundingSettlement
+        - BadDebtEvent
       abis:
         - name: PerpsSimple
           file: ../contracts/abi/PerpsSimple.json
@@ -34,19 +37,12 @@ dataSources:
         # Order events
         - event: OrderCreated(indexed bytes32,indexed address,uint256,int256)
           handler: handleOrderCreated
-        - event: OrderFilled(indexed bytes32,indexed address)
-          handler: handleOrderFilled
         - event: OrderCancelled(indexed bytes32,indexed address)
           handler: handleOrderCancelled
         - event: OrderUpdated(indexed bytes32,indexed address,int256)
           handler: handleOrderUpdated
-        - event: OrderMatched(indexed bytes32,indexed address,indexed address,uint256,uint256)
+        - event: OrderMatched(indexed bytes32,indexed address,indexed address,uint256,int256,int256,int256,int256,int256,uint256,uint256)
           handler: handleOrderMatched
-        # Position events
-        - event: PositionTrade(indexed address,uint256,int256,int256,uint256)
-          handler: handlePositionTrade
-        - event: PositionClosed(indexed address,int256,int256)
-          handler: handlePositionClosed
         - event: PositionLiquidated(indexed address,indexed address,int256,int256,uint256)
           handler: handlePositionLiquidated
         # Collateral events
@@ -54,6 +50,13 @@ dataSources:
           handler: handleCollateralAdded
         - event: CollateralRemoved(indexed address,uint256)
           handler: handleCollateralRemoved
+        # Funding events
+        - event: FundingUpdated(int256,int256,uint256)
+          handler: handleFundingUpdated
+        - event: FundingSettled(indexed address,int256)
+          handler: handleFundingSettled
+        - event: BadDebt(indexed address,uint256)
+          handler: handleBadDebt
         # Config events
         - event: MatchFeeUpdated(int16,int16)
           handler: handleMatchFeeUpdated
@@ -63,6 +66,10 @@ dataSources:
           handler: handleMaintenanceMarginPercentUpdated
         - event: LiquidationFeeUpdated(uint256)
           handler: handleLiquidationFeeUpdated
+        - event: FundingParametersUpdated(uint256,uint256)
+          handler: handleFundingParametersUpdated
+        - event: MinimumMarginPerOrderUpdated(uint256)
+          handler: handleMinimumMarginPerOrderUpdated
         # Upgradeable events
         - event: Initialized(uint64)
           handler: handleInitialized

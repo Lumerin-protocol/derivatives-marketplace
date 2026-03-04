@@ -19,6 +19,13 @@ type Perps @entity(immutable: false) {
   takerFeeBps: Int!
   makerFeeBps: Int!
 
+  # Funding
+  fundingRateMaxBps: BigInt!
+  fundingPeriod: BigInt!
+  cumulativeFundingPerUnit: BigInt!
+  lastFundingUpdateTime: BigInt!
+  minimumMarginPerOrder: BigInt!
+
   # Pool balances
   reservePoolBalance: BigInt!
   collectedFeesBalance: BigInt!
@@ -30,6 +37,7 @@ type Perps @entity(immutable: false) {
   totalTrades: Int!
   totalVolume: BigInt!
   totalLiquidations: Int!
+  totalBadDebt: BigInt!
 
   # Timestamps
   initializedAt: BigInt!
@@ -49,6 +57,12 @@ type User @entity(immutable: false) {
   # Position state (current net position)
   netQuantity: BigInt!
   aggregatedEntryPrice: BigInt!
+  "ID of the current open position session (empty when flat). Deterministic: blockNumber + padded logIndex of the open event."
+  currentPositionSessionId: String!
+
+  # Funding
+  totalFundingPaid: BigInt!
+  totalFundingReceived: BigInt!
 
   # Stats
   orderCount: Int!
@@ -58,12 +72,14 @@ type User @entity(immutable: false) {
 
   # Relations
   orders: [Order!]! @derivedFrom(field: "user")
-  trades: [Trade!]!
-  positionHistory: [PositionSnapshot!]! @derivedFrom(field: "user")
-  positionCloses: [PositionClose!]! @derivedFrom(field: "user")
+  trades: [Trade!]! @derivedFrom(field: "user")
+  fills: [Fill!]! @derivedFrom(field: "user")
   collateralEvents: [CollateralEvent!]! @derivedFrom(field: "user")
+  fundingSettlements: [FundingSettlement!]! @derivedFrom(field: "user")
+  badDebts: [BadDebtEvent!]! @derivedFrom(field: "user")
   liquidationsAsUser: [Liquidation!]! @derivedFrom(field: "user")
   liquidationsAsLiquidator: [Liquidation!]! @derivedFrom(field: "liquidator")
+  positionSessions: [PositionSession!]! @derivedFrom(field: "user")
 
   # Timestamps
   createdAt: BigInt!
@@ -97,42 +113,39 @@ enum OrderStatus {
   PARTIAL
 }
 
-# Trade (matched order)
-type Trade @entity(immutable: true) {
-  id: Bytes! # tx hash + log index
+# Aggregate of all fills in a single transaction for one user. This is what the UI shows in trade history.
+type Trade @entity(immutable: false) {
+  id: Bytes! # tx hash + user address
+  user: User!
+  positionSession: PositionSession!
+  tradePrice: BigInt! # volume-weighted average fill price
+  tradeQuantity: BigInt! # signed sum of all fill quantities
+  tradingFee: BigInt! # sum of all trading fees
+  realizedPnl: BigInt! # sum of all fill PnLs
+  netQuantityAfter: BigInt! # position after the last fill
+  aggregatedEntryPriceAfter: BigInt! # entry price after the last fill
+  fillCount: Int!
+  fills: [Fill!]! @derivedFrom(field: "trade")
+  # Metadata
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  transactionHash: Bytes!
+}
+
+# One per user per OrderMatched event. Individual execution against a counterparty.
+type Fill @entity(immutable: true) {
+  id: Bytes! # tx hash + log index + side suffix
+  trade: Trade!
+  user: User!
+  counterparty: User!
   makerOrderId: Bytes!
-  buyer: User!
-  seller: User!
-  price: BigInt!
-  quantity: BigInt!
-  volume: BigInt! # price * quantity
-  # Metadata
-  timestamp: BigInt!
-  blockNumber: BigInt!
-  transactionHash: Bytes!
-}
-
-# Position snapshot after each trade (from PositionTrade event)
-type PositionSnapshot @entity(immutable: true) {
-  id: Bytes! # tx hash + log index
-  user: User!
-  tradePrice: BigInt!
-  tradeQuantity: BigInt! # signed: positive = bought, negative = sold
-  netQuantityAfter: BigInt! # signed: positive = long, negative = short
-  aggregatedEntryPriceAfter: BigInt!
-
-  # Metadata
-  timestamp: BigInt!
-  blockNumber: BigInt!
-  transactionHash: Bytes!
-}
-
-# Position close event (full or partial)
-type PositionClose @entity(immutable: true) {
-  id: Bytes! # tx hash + log index
-  user: User!
-  quantityClosed: BigInt! # signed
-  pnl: BigInt! # signed: positive = profit, negative = loss
+  positionSession: PositionSession!
+  fillPrice: BigInt!
+  fillQuantity: BigInt! # signed: positive = bought/long, negative = sold/short
+  netQuantityAfter: BigInt! # signed position after this fill (computed by indexer)
+  aggregatedEntryPriceAfter: BigInt! # computed by indexer
+  realizedPnl: BigInt! # computed by indexer; non-zero when this fill closed (full or partial) size
+  tradingFee: BigInt! # signed: positive = paid, negative = rebate
   # Metadata
   timestamp: BigInt!
   blockNumber: BigInt!
@@ -177,6 +190,40 @@ type PriceLevel @entity(immutable: false) {
   orderCount: Int!
 }
 
+# Funding rate update event (global)
+type FundingUpdate @entity(immutable: true) {
+  id: Bytes! # tx hash + log index
+  fundingRate: BigInt! # signed
+  cumulativeFundingPerUnit: BigInt! # signed
+  # Metadata
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  transactionHash: Bytes!
+}
+
+# Funding settlement for a user
+type FundingSettlement @entity(immutable: true) {
+  id: Bytes! # tx hash + log index
+  user: User!
+  positionSession: PositionSession
+  amount: BigInt! # signed: positive = received, negative = paid
+  # Metadata
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  transactionHash: Bytes!
+}
+
+# Bad debt event when a user can't cover losses
+type BadDebtEvent @entity(immutable: true) {
+  id: Bytes! # tx hash + log index
+  user: User!
+  amount: BigInt!
+  # Metadata
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  transactionHash: Bytes!
+}
+
 type ReservePoolEvent @entity(immutable: true) {
   id: Bytes! # tx hash + log index
   type: ReservePoolEventType!
@@ -190,4 +237,28 @@ type ReservePoolEvent @entity(immutable: true) {
 enum ReservePoolEventType {
   RESERVE
   FEE
+}
+
+# One per open→close cycle. ID = blockNumber (padded) + logIndex (padded) of the open event.
+type PositionSession @entity(immutable: false) {
+  id: String! # blockNumber (12 digits) + logIndex (6 digits), deterministic
+  status: PositionSessionStatus!
+  user: User!
+  entryPrice: BigInt! # average entry price of the position
+  closePrice: BigInt! # average exit price (updated as we close)
+  maxQuantity: BigInt! # maximum absolute quantity reached (non-cumulative)
+  closedQuantity: BigInt! # cumulative quantity closed
+  realizedPnl: BigInt!
+  fundingFees: BigInt! # signed: positive = received, negative = paid
+  tradingFees: BigInt! # signed: positive = paid, negative = rebate received
+  openedAt: BigInt!
+  lastTradeAt: BigInt!
+  fills: [Fill!]! @derivedFrom(field: "positionSession")
+  trades: [Trade!]! @derivedFrom(field: "positionSession")
+  fundingSettlements: [FundingSettlement!]! @derivedFrom(field: "positionSession")
+}
+
+enum PositionSessionStatus {
+  OPEN
+  CLOSE
 }

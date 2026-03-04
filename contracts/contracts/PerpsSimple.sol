@@ -12,6 +12,7 @@ import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils
 import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import { ERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
 import { AggregatorV3Interface } from "./AggregatorV3Interface.sol";
+import { console } from "hardhat/console.sol";
 
 /// @title PerpsSimple
 /// @notice Simple perpetual trading contract with on-chain order book
@@ -27,8 +28,10 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
 
     // Constants
     uint256 private constant MAX_ORACLE_STALENESS = 3600; // 1 hour
+    uint8 public constant FUNDING_DECIMALS = 18;
     uint8 public constant MAX_ORDERS_PER_PARTICIPANT = 100;
     uint8 public constant QUANTITY_DECIMALS = 6;
+    uint256 public constant MAX_PRICE_LEVELS_PER_SIDE = 200; // Max active price levels per side (bid/ask)
     uint256 public immutable minimumPriceIncrement; // Minimum price increment for orders
 
     // State variables
@@ -39,15 +42,13 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     uint256 public liquidationFee; // Liquidation fee in collateral token units
     uint8 private tokenDecimals;
     uint8 private oracleDecimals;
-    uint256 private __gap;
-    uint256 private nonce = 0; // Nonce for order IDs
+    uint256 private nonce; // Nonce for order IDs
 
     // Order book mappings
     mapping(bytes32 => Order) private orders;
     mapping(uint256 => StructuredLinkedList.List) private priceOrdersLongQueue; // FIFO queue of long orders by price
     mapping(uint256 => StructuredLinkedList.List) private priceOrdersShortQueue; // FIFO queue of short orders by price
     mapping(address => EnumerableSet.Bytes32Set) private participantOrderIdsIndex; // Orders by participant
-    mapping(address => mapping(uint256 => EnumerableSet.Bytes32Set)) private participantPriceOrderIdsIndex; // Orders by participant and price
     mapping(address => uint256) private userTotalOrderValue; // Cached total order value per user
 
     // Price level tracking for limit order matching
@@ -59,17 +60,24 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     EnumerableSet.AddressSet private usersWithPositions; // Users with active positions
 
     // Reserve and fees
-    uint256 private __gap2;
-    uint256 private __gap3;
     int16 public takerFeeBps; // Taker fee in basis points (e.g., 5 = 0.05%)
     int16 public makerFeeBps; // Maker fee in basis points (e.g., 0 = 0%)
+
+    // Funding state
+    int256 public cumulativeFundingPerUnit; // Global cumulative funding per unit (tokenDecimals * 10^FUNDING_DECIMALS)
+    uint256 public lastFundingUpdateTime; // Last timestamp funding was updated
+    uint256 public fundingRateMaxBps; // Max absolute funding rate per fundingPeriod in bps (e.g., 100 = 1%)
+    uint256 public fundingPeriod; // Period for max funding rate (e.g., 86400 = 24 hours)
+    mapping(address => int256) private userFundingSnapshot; // Per-user snapshot of cumulativeFundingPerUnit
+
+    // Order book limits
+    uint256 public minimumMarginPerOrder; // Minimum margin (collateral) locked per resting order (0 = no minimum)
 
     /// @notice Represents an order in the order book
     struct Order {
         address participant;
         uint256 price; // Order price
         int256 quantity; // Order quantity (positive = long/buy, negative = short/sell)
-        uint256 createdAt;
     }
 
     /// @notice Represents a user's net position
@@ -80,20 +88,21 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
 
     // Events
     event OrderCreated(bytes32 indexed orderId, address indexed participant, uint256 price, int256 quantity);
-    event OrderFilled(bytes32 indexed orderId, address indexed participant);
     event OrderCancelled(bytes32 indexed orderId, address indexed participant);
     event OrderUpdated(bytes32 indexed orderId, address indexed participant, int256 newQuantity);
     event OrderMatched(
-        bytes32 indexed makerOrderId, address indexed buyer, address indexed seller, uint256 price, uint256 quantity
-    );
-    event PositionTrade(
-        address indexed user,
+        bytes32 indexed makerOrderId,
+        address indexed maker,
+        address indexed taker,
         uint256 tradePrice,
-        int256 quantity,
-        int256 netQuantityAfter,
-        uint256 aggregatedEntryPriceAfter
+        int256 takerQuantity,
+        int256 makerFee,
+        int256 takerFee,
+        int256 makerNetQtyAfter,
+        int256 takerNetQtyAfter,
+        uint256 makerEntryPriceAfter,
+        uint256 takerEntryPriceAfter
     );
-    event PositionClosed(address indexed user, int256 quantityClosed, int256 pnl);
     event CollateralAdded(address indexed user, uint256 amount);
     event CollateralRemoved(address indexed user, uint256 amount);
     event MatchFeeUpdated(int16 newTakerFeeBps, int16 newMakerFeeBps);
@@ -104,6 +113,10 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         address indexed user, address indexed liquidator, int256 positionSize, int256 pnl, uint256 liquidatorFee
     );
     event BadDebt(address indexed user, uint256 amount); // The user does not have enough collateral to cover the loss
+    event FundingUpdated(int256 fundingRate, int256 cumulativeFundingPerUnit, uint256 timestamp);
+    event FundingSettled(address indexed user, int256 amount);
+    event FundingParametersUpdated(uint256 maxBps, uint256 period);
+    event MinimumMarginPerOrderUpdated(uint256 newMinimumMarginPerOrder);
 
     // Errors
     error InvalidPrice();
@@ -117,6 +130,9 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     error MaxOrdersPerParticipantReached();
     error NotLiquidatable();
     error InsufficientReservePool(); // The reserve pool does not have enough collateral to cover user profit
+    error InvalidFundingParameters();
+    error OrderMarginTooLow(); // Order margin is below minimumMarginPerOrder
+    error MaxPriceLevelsReached(); // Too many active price levels on one side of the book
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(uint256 _minimumPriceIncrement) {
@@ -189,58 +205,71 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         return price;
     }
 
-    /// @notice Create an order (buy or sell) with limit price matching
+    /// @notice Create an order (buy or sell) with limit price matching (direct walk, no simulate list).
     /// @param _price Limit price (must be multiple of minimumPriceIncrement)
     /// @param _quantity Order quantity (positive = long/buy, negative = short/sell)
     /// @dev Buy orders match with asks at or below the limit price
     /// @dev Sell orders match with bids at or above the limit price
     function createOrder(uint256 _price, int256 _quantity) external {
+        address sender = _msgSender();
+        _updateGlobalFunding();
         _validateQuantity(_quantity);
         _validatePrice(_price);
 
+        // Settle taker's funding once before matching so per-match _updateUserPosition
+        // calls can skip it (cumulativeFundingPerUnit is constant within this tx).
+        _settleFunding(sender);
+
         bool isBuy = _quantity > 0;
+        bytes32 orderId = bytes32(++nonce);
+        emit OrderCreated(orderId, sender, _price, _quantity);
 
-        // Track remaining quantity to be placed/matched
-        int256 remainingQuantity = _quantity;
+        int256 remainingQuantity = _matchWithOppositeOrders(sender, _price, _quantity);
 
-        // First, offset user's own opposite orders that would match
-        remainingQuantity = _offsetUserOppositeOrders(_msgSender(), _price, remainingQuantity, isBuy);
+        if (remainingQuantity != _quantity) {
+            emit OrderUpdated(orderId, sender, remainingQuantity);
+        }
 
-        // Match with opposite orders using limit price logic
-        remainingQuantity = _matchWithOppositeOrders(_msgSender(), _price, remainingQuantity, isBuy);
-
-        // If there's remaining quantity, add order to book
         if (remainingQuantity != 0) {
-            EnumerableSet.Bytes32Set storage participantOrders = participantOrderIdsIndex[_msgSender()];
+            // Validate minimum margin per resting order
+            if (minimumMarginPerOrder > 0) {
+                uint256 restingValue = _calculateValue(_price, _abs(remainingQuantity));
+                uint256 restingMargin = (restingValue * marginPercent) / 100;
+                if (restingMargin < minimumMarginPerOrder) {
+                    revert OrderMarginTooLow();
+                }
+            }
+
+            // Validate max orders per participant
+            EnumerableSet.Bytes32Set storage participantOrders = participantOrderIdsIndex[sender];
             if (participantOrders.length() >= MAX_ORDERS_PER_PARTICIPANT) {
                 revert MaxOrdersPerParticipantReached();
             }
 
-            StructuredLinkedList.List storage orderQueue = _priceOrderIds(_price, isBuy);
-            EnumerableSet.Bytes32Set storage userOrderIdsAtPrice = participantPriceOrderIdsIndex[_msgSender()][_price];
-
-            bytes32 orderId = _createOrder(_msgSender(), _price, remainingQuantity);
-            orderQueue.pushBack(uint256(orderId));
+            // Create order with quantity that was not matched
+            orders[orderId] = Order({ participant: sender, price: _price, quantity: remainingQuantity });
+            userTotalOrderValue[sender] += _calculateValue(_price, _abs(remainingQuantity));
             participantOrders.add(orderId);
-            userOrderIdsAtPrice.add(orderId);
+            StructuredLinkedList.List storage orderQueue = _priceOrderIds(_price, isBuy);
+            orderQueue.pushBack(uint256(orderId));
 
-            // Add price level to sorted list
             _addPriceLevel(_price, isBuy);
         }
 
         // Check margin requirement
-        _ensureSufficientMargin(_msgSender());
+        _ensureSufficientMargin(sender);
     }
 
-    /// @notice Offset user's own opposite orders that would match at limit price
-    /// @return remainingQuantity The remaining quantity after offsetting
-    function _offsetUserOppositeOrders(address _user, uint256 _limitPrice, int256 _quantity, bool _isBuy)
+    /// @notice Match incoming order with opposite orders using limit price logic (direct walk).
+    /// @param _taker Address of the taker (funding already settled before this call)
+    function _matchWithOppositeOrders(address _taker, uint256 _limitPrice, int256 _quantity)
         private
         returns (int256 remainingQuantity)
     {
         remainingQuantity = _quantity;
-
+        bool _isBuy = _quantity > 0;
         StructuredLinkedList.List storage oppositePrices = _isBuy ? activeAskPrices : activeBidPrices;
+
         if (oppositePrices.sizeOf() == 0) return remainingQuantity;
 
         (, uint256 currentPrice) = oppositePrices.getNextNode(0);
@@ -249,132 +278,74 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             if (_isBuy && currentPrice > _limitPrice) break;
             if (!_isBuy && currentPrice < _limitPrice) break;
 
-            remainingQuantity = _offsetOrdersAtPrice(_user, currentPrice, remainingQuantity);
-            (, currentPrice) = oppositePrices.getNextNode(currentPrice);
-        }
-
-        return remainingQuantity;
-    }
-
-    /// @notice Offset user's orders at a specific price level
-    function _offsetOrdersAtPrice(address _user, uint256 _price, int256 _remainingQty) private returns (int256) {
-        EnumerableSet.Bytes32Set storage userOrdersAtPrice = participantPriceOrderIdsIndex[_user][_price];
-
-        for (uint256 i = userOrdersAtPrice.length(); i > 0 && _remainingQty != 0; i--) {
-            bytes32 orderId = userOrdersAtPrice.at(i - 1);
-            Order storage order = orders[orderId];
-
-            if (_isOppositeSign(order.quantity, _remainingQty)) {
-                uint256 offsetAmt = _min(_abs(order.quantity), _abs(_remainingQty));
-
-                // Update cached order value
-                userTotalOrderValue[_user] -= _calculateValue(order.price, offsetAmt);
-
-                order.quantity = _reduceQuantity(order.quantity, offsetAmt);
-                _remainingQty = _reduceQuantity(_remainingQty, offsetAmt);
-
-                if (order.quantity == 0) {
-                    _removeOrder(orderId, order);
-                    emit OrderFilled(orderId, _user);
-                } else {
-                    emit OrderUpdated(orderId, _user, order.quantity);
-                }
-            }
-        }
-
-        return _remainingQty;
-    }
-
-    /// @notice Match incoming order with opposite orders using limit price logic
-    /// @return remainingQuantity The remaining quantity after matching
-    function _matchWithOppositeOrders(address _taker, uint256 _limitPrice, int256 _quantity, bool _isBuy)
-        private
-        returns (int256 remainingQuantity)
-    {
-        remainingQuantity = _quantity;
-
-        StructuredLinkedList.List storage oppositePrices = _isBuy ? activeAskPrices : activeBidPrices;
-        if (oppositePrices.sizeOf() == 0) return remainingQuantity;
-
-        (, uint256 currentPrice) = oppositePrices.getNextNode(0);
-
-        while (currentPrice != 0 && remainingQuantity != 0) {
-            if (_isBuy && currentPrice > _limitPrice) break;
-            if (!_isBuy && currentPrice < _limitPrice) break;
-
+            (, uint256 nextPrice) = oppositePrices.getNextNode(currentPrice);
             remainingQuantity = _matchOrdersAtPrice(_taker, currentPrice, remainingQuantity, _isBuy);
-            (, currentPrice) = oppositePrices.getNextNode(currentPrice);
+            currentPrice = nextPrice;
         }
 
         return remainingQuantity;
     }
 
-    /// @notice Match orders at a specific price level
+    /// @notice Match orders at a specific price level (direct walk).
     function _matchOrdersAtPrice(address _taker, uint256 _price, int256 _remainingQty, bool _isBuy)
         private
         returns (int256)
     {
-        StructuredLinkedList.List storage orderQueue =
-            _isBuy ? priceOrdersShortQueue[_price] : priceOrdersLongQueue[_price];
+        StructuredLinkedList.List storage makerOrderQueue = _priceOrderIds(_price, !_isBuy);
 
-        while (_remainingQty != 0 && orderQueue.sizeOf() > 0) {
-            (, uint256 orderIdUint) = orderQueue.getNextNode(0);
-            bytes32 orderId = bytes32(orderIdUint);
-            Order storage order = orders[orderId];
-
-            // Skip own orders (already handled in offset)
-            if (order.participant == _taker) {
-                (, uint256 nextId) = orderQueue.getNextNode(orderIdUint);
-                if (nextId == 0) break;
-                continue;
-            }
-
-            _remainingQty = _executeMatch(_taker, orderId, order, _remainingQty);
+        (, uint256 orderIdUint) = makerOrderQueue.getNextNode(0);
+        while (_remainingQty != 0 && orderIdUint != 0) {
+            bytes32 makerOrderId = bytes32(orderIdUint);
+            Order storage makerOrder = orders[makerOrderId];
+            _remainingQty = _executeMatch(_taker, makerOrderId, makerOrder, _remainingQty);
+            (, orderIdUint) = makerOrderQueue.getNextNode(0);
         }
+
+        // Remove price level once after finishing this level, instead of after every filled order.
+        _removePriceLevelIfEmpty(_price, !_isBuy);
 
         return _remainingQty;
     }
 
     /// @notice Execute a single order match
-    function _executeMatch(address _taker, bytes32 _orderId, Order storage _order, int256 _remainingQty)
+    function _executeMatch(address _taker, bytes32 _makerOrderId, Order storage _makerOrder, int256 _remainingQty)
         private
         returns (int256)
     {
-        uint256 matchAmt = _min(_abs(_order.quantity), _abs(_remainingQty));
-        int256 matchQty = _toSignedQuantity(matchAmt, _remainingQty);
-        uint256 notionalValue = _calculateValue(_order.price, matchAmt);
+        // Cache fields from storage once to avoid repeated SLOADs.
+        uint256 makerPrice = _makerOrder.price;
+        address makerParticipant = _makerOrder.participant;
+        int256 makerQty = _makerOrder.quantity;
+        uint256 matchAmt = _min(_abs(makerQty), _abs(_remainingQty));
+        int256 takerQty = _toSignedQuantity(matchAmt, _remainingQty);
+        uint256 notionalValue = _calculateValue(makerPrice, matchAmt);
 
-        // Execute at maker's price (price improvement for taker)
-        Order memory orderCopy = _order;
-        _createPosition(_orderId, orderCopy, _taker, _order.price, matchQty);
+        int256 takerFee = _calculateMatchFee(notionalValue, true);
+        int256 makerFee = _calculateMatchFee(notionalValue, false);
 
-        // Charge fees at match time
-        _chargeMatchFee(_taker, notionalValue, true); // taker fee
-        _chargeMatchFee(_order.participant, notionalValue, false); // maker fee
+        _createPosition(_makerOrderId, makerParticipant, _taker, makerPrice, takerQty, takerFee, makerFee);
+
+        _transferFee(_taker, takerFee);
+        _transferFee(makerParticipant, makerFee);
 
         // Update cached order value
-        userTotalOrderValue[_order.participant] -= notionalValue;
+        userTotalOrderValue[makerParticipant] -= notionalValue;
+        int256 newMakerQty = _reduceQuantity(makerQty, matchAmt);
+        _makerOrder.quantity = newMakerQty;
 
-        _order.quantity = _reduceQuantity(_order.quantity, matchAmt);
-
-        if (_order.quantity == 0) {
-            _removeOrder(_orderId, _order);
-            emit OrderFilled(_orderId, _order.participant);
-        } else {
-            emit OrderUpdated(_orderId, _order.participant, _order.quantity);
+        emit OrderUpdated(_makerOrderId, makerParticipant, newMakerQty);
+        if (newMakerQty == 0) {
+            _removeOrder(_makerOrderId, makerParticipant, makerPrice, _remainingQty < 0);
         }
 
-        return _remainingQty - matchQty;
+        unchecked {
+            return _remainingQty - takerQty;
+        }
     }
 
     /// @notice Get absolute value of int256
     function _abs(int256 _value) private pure returns (uint256) {
         return _value > 0 ? uint256(_value) : uint256(-_value);
-    }
-
-    /// @notice Check if two quantities have opposite signs
-    function _isOppositeSign(int256 _a, int256 _b) private pure returns (bool) {
-        return (_a > 0 && _b < 0) || (_a < 0 && _b > 0);
     }
 
     /// @notice Check if two quantities have the same sign
@@ -405,141 +376,138 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     /// @notice Cancel an order
     /// @param _orderId Order ID to cancel
     function cancelOrder(bytes32 _orderId) external {
+        _updateGlobalFunding();
         Order memory order = orders[_orderId];
         if (order.participant != _msgSender()) {
             revert OrderNotBelongToSender();
         }
 
-        _removeOrder(_orderId, order);
+        bool isBid = order.quantity > 0;
+        userTotalOrderValue[order.participant] -= _calculateValue(order.price, _abs(order.quantity));
+        _removeOrder(_orderId, order.participant, order.price, isBid);
+        _removePriceLevelIfEmpty(order.price, isBid);
         emit OrderCancelled(_orderId, order.participant);
     }
 
     /// @notice Remove an order from the book (internal)
-    function _removeOrder(bytes32 _orderId, Order memory order) private {
-        bool isBid = order.quantity > 0;
-        StructuredLinkedList.List storage orderQueue = _priceOrderIds(order.price, isBid);
-        orderQueue.remove(uint256(_orderId));
-
-        participantOrderIdsIndex[order.participant].remove(_orderId);
-        participantPriceOrderIdsIndex[order.participant][order.price].remove(_orderId);
-
-        // Calculate and subtract order value from cached total
-        uint256 orderValue = _calculateValue(order.price, _abs(order.quantity));
-        userTotalOrderValue[order.participant] -= orderValue;
-
+    /// @dev Callers are responsible for updating userTotalOrderValue before this call.
+    function _removeOrder(bytes32 _orderId, address _participant, uint256 _price, bool _isBid) private {
+        _priceOrderIds(_price, _isBid).remove(uint256(_orderId));
+        participantOrderIdsIndex[_participant].remove(_orderId);
         delete orders[_orderId];
-
-        // Remove price level if no more orders at this price
-        _removePriceLevelIfEmpty(order.price, isBid);
-    }
-
-    /// @notice Create a new order
-    function _createOrder(address _participant, uint256 _price, int256 _quantity) private returns (bytes32) {
-        bytes32 orderId = keccak256(abi.encode(_participant, _price, _quantity, block.timestamp, nonce++));
-        orders[orderId] =
-            Order({ participant: _participant, price: _price, quantity: _quantity, createdAt: block.timestamp });
-
-        // Update cached total order value for user
-        userTotalOrderValue[_participant] += _calculateValue(_price, _abs(_quantity));
-
-        emit OrderCreated(orderId, _participant, _price, _quantity);
-        return orderId;
     }
 
     /// @notice Update net positions when orders match
+    /// @param taker Address of the taker whose funding was already settled before the matching loop
     function _createPosition(
         bytes32 matchedOrderId,
-        Order memory matchedOrder,
-        address _otherParticipant,
+        address makerParticipant,
+        address taker,
         uint256 _price,
-        int256 _quantity
+        int256 _takerQty,
+        int256 _takerFee,
+        int256 _makerFee
     ) private {
-        // Determine buyer and seller based on quantity sign
-        // Positive quantity = taker is buying, negative = taker is selling
-        (address buyer, address seller) = _quantity > 0
-            ? (_otherParticipant, matchedOrder.participant)
-            : (matchedOrder.participant, _otherParticipant);
+        // Determine buyer and seller based on taker quantity sign
+        // Positive = taker is buying, negative = taker is selling
+        (address buyer, address seller) = _takerQty > 0 ? (taker, makerParticipant) : (makerParticipant, taker);
 
         // Use absolute quantity for position updates
         // Buyer always gets positive (long), seller always gets negative (short)
-        int256 absQty = int256(_abs(_quantity));
+        int256 absQty = int256(_abs(_takerQty));
 
-        // Update buyer's position (long: positive quantity)
+        // Skip funding settlement for the taker — already settled once before the loop.
+        if (buyer != taker) _settleFunding(buyer);
         _updateUserPosition(buyer, absQty, _price);
 
-        // Update seller's position (short: negative quantity)
+        if (seller != taker) _settleFunding(seller);
         _updateUserPosition(seller, -absQty, _price);
 
-        emit OrderMatched(matchedOrderId, buyer, seller, _price, uint256(absQty));
+        Position storage makerPos = positions[makerParticipant];
+        Position storage takerPos = positions[taker];
+        _emitOrderMatched(
+            matchedOrderId, makerParticipant, taker, _price, _takerQty, _makerFee, _takerFee,
+            makerPos.netQuantity, takerPos.netQuantity,
+            makerPos.aggregatedEntryPrice, takerPos.aggregatedEntryPrice
+        );
+    }
+
+    function _emitOrderMatched(
+        bytes32 matchedOrderId,
+        address maker,
+        address taker,
+        uint256 price,
+        int256 takerQty,
+        int256 makerFee,
+        int256 takerFee,
+        int256 makerNetQty,
+        int256 takerNetQty,
+        uint256 makerEntry,
+        uint256 takerEntry
+    ) private {
+        emit OrderMatched(
+            matchedOrderId, maker, taker, price, takerQty, makerFee, takerFee,
+            makerNetQty, takerNetQty, makerEntry, takerEntry
+        );
     }
 
     /// @notice Update a user's net position with aggregated entry price
     function _updateUserPosition(address _user, int256 _quantity, uint256 _tradePrice) private {
         Position storage position = positions[_user];
-        int256 newNetQuantity = position.netQuantity + _quantity;
-        uint256 absQuantity = _abs(_quantity);
 
         // If no existing position, initialize it
         if (position.netQuantity == 0) {
             position.netQuantity = _quantity;
             position.aggregatedEntryPrice = _tradePrice;
             usersWithPositions.add(_user);
-
-            emit PositionTrade(_user, _tradePrice, _quantity, newNetQuantity, _tradePrice);
+            userFundingSnapshot[_user] = cumulativeFundingPerUnit;
             return;
         }
 
-        uint256 oldAbsQuantity = _abs(position.netQuantity);
-        int256 priceDiff = int256(_tradePrice) - int256(position.aggregatedEntryPrice);
-
+        // Same direction - add to position with weighted average entry price
         if (_isSameSign(position.netQuantity, _quantity)) {
-            // Same direction - add to position with weighted average entry price
-            uint256 newAbsQuantity = _abs(newNetQuantity);
+            uint256 oldValue = _abs(position.netQuantity) * position.aggregatedEntryPrice;
+            uint256 newValue = _abs(_quantity) * _tradePrice;
+            int256 newNet = position.netQuantity + _quantity;
+            position.aggregatedEntryPrice = (oldValue + newValue) / _abs(newNet);
+            position.netQuantity = newNet;
+            return;
+        }
 
-            // Weighted average: (oldQty * oldPrice + newQty * newPrice) / totalQty
-            uint256 oldValue = oldAbsQuantity * position.aggregatedEntryPrice;
-            uint256 newValue = absQuantity * _tradePrice;
-            position.aggregatedEntryPrice = (oldValue + newValue) / newAbsQuantity;
-            position.netQuantity = newNetQuantity;
+        // Opposite direction: settle the reduced part, then open remainder (if any)
+        _settleOpposite(_user, _quantity, _tradePrice);
+    }
 
-            emit PositionTrade(_user, _tradePrice, _quantity, newNetQuantity, position.aggregatedEntryPrice);
+    /// @notice Handle opposite-direction trade (partial/full close or flip)
+    function _settleOpposite(address _user, int256 _quantity, uint256 _tradePrice) private {
+        Position storage position = positions[_user];
+        uint256 absQuantity = _abs(_quantity);
+        uint256 oldAbsQuantity = _abs(position.netQuantity);
+        uint256 settledAbs = absQuantity < oldAbsQuantity ? absQuantity : oldAbsQuantity;
+        _settleReducedPosition(
+            _user,
+            int256(_tradePrice) - int256(position.aggregatedEntryPrice),
+            _toSignedQuantity(settledAbs, position.netQuantity)
+        );
+
+        if (absQuantity > oldAbsQuantity) {
+            // Flip: close old position and open opposite
+            int256 openQty = _toSignedQuantity(absQuantity - oldAbsQuantity, _quantity);
+            position.netQuantity = openQty;
+            position.aggregatedEntryPrice = _tradePrice;
+            userFundingSnapshot[_user] = cumulativeFundingPerUnit;
+        } else if (position.netQuantity + _quantity == 0) {
+            delete positions[_user];
+            usersWithPositions.remove(_user);
         } else {
-            // Opposite direction - offset position and settle reduced amount
-            if (absQuantity >= oldAbsQuantity) {
-                // Fully offset or flip - settle the full original position
-                int256 settledQuantity = _toSignedQuantity(oldAbsQuantity, position.netQuantity);
-                int256 pnl = _settleReducedPosition(_user, priceDiff, settledQuantity);
-
-                uint256 remaining = absQuantity - oldAbsQuantity;
-                if (remaining > 0) {
-                    // Flip position - create new position in opposite direction
-                    position.netQuantity = _toSignedQuantity(remaining, _quantity);
-                    position.aggregatedEntryPrice = _tradePrice;
-
-                    emit PositionTrade(_user, _tradePrice, _quantity, position.netQuantity, _tradePrice);
-                } else {
-                    // Fully offset - close position
-                    delete positions[_user];
-                    usersWithPositions.remove(_user);
-
-                    emit PositionClosed(_user, settledQuantity, pnl);
-                }
-            } else {
-                // Partially offset - settle only the reduced amount
-                int256 reducedQuantity = _toSignedQuantity(absQuantity, position.netQuantity);
-                int256 pnl = _settleReducedPosition(_user, priceDiff, reducedQuantity);
-
-                position.netQuantity = newNetQuantity;
-
-                emit PositionTrade(_user, _tradePrice, _quantity, newNetQuantity, position.aggregatedEntryPrice);
-                emit PositionClosed(_user, reducedQuantity, pnl);
-            }
+            position.netQuantity += _quantity;
         }
     }
 
     /// @notice Add collateral to account
     /// @param _amount Amount of collateral to add
     function addCollateral(uint256 _amount) public {
+        _updateGlobalFunding();
         if (_amount == 0) {
             revert InvalidSize();
         }
@@ -564,6 +532,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     /// @notice Remove collateral from account
     /// @param _amount Amount of collateral to remove
     function removeCollateral(uint256 _amount) external {
+        _updateGlobalFunding();
         if (_amount == 0) {
             revert InvalidSize();
         }
@@ -605,6 +574,12 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
                 requiredMarginForPosition += uint256(-unrealizedPnl);
             }
 
+            // Add pending funding owed to margin requirement
+            int256 pendingFunding = getPendingFunding(_user);
+            if (pendingFunding > 0) {
+                requiredMarginForPosition += uint256(pendingFunding);
+            }
+
             totalMargin += requiredMarginForPosition;
         }
 
@@ -626,6 +601,10 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     /// @param _user Address of the user to liquidate
     /// @dev TODO: make partial liquidation
     function liquidate(address _user) external {
+        // Update global funding and settle user's pending funding before liquidation
+        _updateGlobalFunding();
+        _settleFunding(_user);
+
         if (!isLiquidatable(_user)) {
             revert NotLiquidatable();
         }
@@ -753,6 +732,12 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
                 requiredMarginForPosition += uint256(-unrealizedPnl);
             }
 
+            // Add pending funding owed to margin requirement
+            int256 pendingFunding = getPendingFunding(_user);
+            if (pendingFunding > 0) {
+                requiredMarginForPosition += uint256(pendingFunding);
+            }
+
             totalMargin += requiredMarginForPosition;
         }
 
@@ -803,9 +788,15 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             return;
         }
 
+        // Enforce max price levels per side
+        uint256 size = priceList.sizeOf();
+        if (size >= MAX_PRICE_LEVELS_PER_SIDE) {
+            revert MaxPriceLevelsReached();
+        }
+
         // Find insertion point for sorted order
         // Bids: highest first (descending), Asks: lowest first (ascending)
-        if (priceList.sizeOf() == 0) {
+        if (size == 0) {
             priceList.pushFront(_price);
             return;
         }
@@ -865,13 +856,60 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         return bestAsk;
     }
 
-    /// @notice Charge match fee to a participant (maker or taker)
-    /// @dev Fee is max(notional * feeBps / 10000, liquidationFee) — the liquidation fee
-    ///      acts as a floor to ensure every trade covers potential liquidation costs
-    /// @param _participant Address of the participant
+    /// @notice Simulate an order: how much would match and at what average price (view, no state change).
+    /// @param _price Limit price (same as createOrder)
+    /// @param _quantity Order quantity (positive = buy, negative = sell)
+    /// @return filledQuantity Signed quantity that would be matched (same sign as _quantity)
+    /// @return averageFillPrice Volume-weighted average fill price (0 if no fill). Uses same decimals as price.
+    /// @return remainingQuantity Signed quantity that would rest on the book or remain unfilled
+    function simulateOrder(uint256 _price, int256 _quantity)
+        external
+        view
+        returns (int256 filledQuantity, uint256 averageFillPrice, int256 remainingQuantity)
+    {
+        if (_quantity == 0) return (0, 0, 0);
+
+        bool isBuy = _quantity > 0;
+        int256 remaining = _quantity;
+        uint256 totalNotional = 0;
+        uint256 totalFilledAbs = 0;
+        StructuredLinkedList.List storage oppositePrices = isBuy ? activeAskPrices : activeBidPrices;
+        (, uint256 currentPrice) = oppositePrices.getNextNode(0);
+
+        while (currentPrice != 0 && remaining != 0) {
+            if (isBuy && currentPrice > _price) break;
+            if (!isBuy && currentPrice < _price) break;
+
+            StructuredLinkedList.List storage orderQueue =
+                isBuy ? priceOrdersShortQueue[currentPrice] : priceOrdersLongQueue[currentPrice];
+            (, uint256 orderIdUint) = orderQueue.getNextNode(0);
+
+            while (orderIdUint != 0 && remaining != 0) {
+                Order storage makerOrder = orders[bytes32(orderIdUint)];
+                uint256 matchAmt = _min(_abs(makerOrder.quantity), _abs(remaining));
+                if (matchAmt > 0) {
+                    totalNotional += _calculateValue(makerOrder.price, matchAmt);
+                    totalFilledAbs += matchAmt;
+                    remaining -= _toSignedQuantity(matchAmt, remaining);
+                }
+                (, orderIdUint) = orderQueue.getNextNode(orderIdUint);
+            }
+
+            (, currentPrice) = oppositePrices.getNextNode(currentPrice);
+        }
+
+        remainingQuantity = remaining;
+        filledQuantity = _quantity - remainingQuantity;
+        if (totalFilledAbs > 0) {
+            averageFillPrice = (totalNotional * (10 ** QUANTITY_DECIMALS)) / totalFilledAbs;
+        }
+    }
+
+    /// @notice Calculate match fee for a participant
+    /// @dev Fee is max(notional * feeBps / 10000, liquidationFee) for takers
     /// @param _notionalValue Notional value of the matched trade
     /// @param _isTaker Whether the participant is the taker
-    function _chargeMatchFee(address _participant, uint256 _notionalValue, bool _isTaker) private {
+    function _calculateMatchFee(uint256 _notionalValue, bool _isTaker) private view returns (int256) {
         int16 feeBps = _isTaker ? takerFeeBps : makerFeeBps;
         int256 fee = (int256(_notionalValue) * int256(feeBps)) / 10_000;
 
@@ -881,11 +919,149 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             fee = int256(liquidationFee);
         }
 
-        if (fee > 0) {
-            _transfer(_participant, address(this), uint256(fee));
-        } else if (fee < 0) {
-            _transfer(address(this), _participant, uint256(-fee));
+        return fee;
+    }
+
+    /// @notice Transfer a pre-calculated fee between participant and reserve pool
+    /// @param _participant Address of the participant
+    /// @param _fee Signed fee amount (positive = participant pays, negative = rebate)
+    function _transferFee(address _participant, int256 _fee) private {
+        if (_fee > 0) {
+            _transfer(_participant, address(this), uint256(_fee));
+        } else if (_fee < 0) {
+            _transfer(address(this), _participant, uint256(-_fee));
         }
+    }
+
+    // ──────────────────────────────────────────────
+    // Funding
+    // ──────────────────────────────────────────────
+
+    /// @notice Compute the current cumulative funding per unit without writing state
+    /// @dev Uses the order-book mid-price as mark price and the oracle as index price.
+    ///      If either side of the book is empty, no additional funding accrues.
+    /// @return currentCumFunding The theoretical cumulative funding as of block.timestamp
+    function _getCurrentCumulativeFunding() private view returns (int256 currentCumFunding) {
+        currentCumFunding = cumulativeFundingPerUnit;
+
+        if (lastFundingUpdateTime == 0 || fundingPeriod == 0) return currentCumFunding;
+
+        uint256 timeElapsed = block.timestamp - lastFundingUpdateTime;
+        if (timeElapsed == 0) return currentCumFunding;
+
+        // Mark price = order-book mid-price
+        uint256 bestBid = getBestBidPrice();
+        uint256 bestAsk = getBestAskPrice();
+        if (bestBid == 0 || bestAsk == 0) return currentCumFunding;
+
+        uint256 markPrice = (bestBid + bestAsk) / 2;
+        uint256 indexPrice = getMarketPrice();
+
+        // fundingRate (scaled by 10^FUNDING_DECIMALS) = (mark - index) * 10^FUNDING_DECIMALS / index
+        int256 priceDiff = int256(markPrice) - int256(indexPrice);
+        int256 fundingRateScaled = (priceDiff * int256(10 ** FUNDING_DECIMALS)) / int256(indexPrice);
+
+        // Clamp to [-maxRate, maxRate]
+        int256 maxRateScaled = (int256(fundingRateMaxBps) * int256(10 ** FUNDING_DECIMALS)) / 10_000;
+        if (fundingRateScaled > maxRateScaled) fundingRateScaled = maxRateScaled;
+        if (fundingRateScaled < -maxRateScaled) fundingRateScaled = -maxRateScaled;
+
+        // deltaCumFunding (tokenDecimals * 10^FUNDING_DECIMALS) =
+        //   fundingRateScaled * indexPrice * timeElapsed / fundingPeriod
+        int256 deltaCumFunding = (fundingRateScaled * int256(indexPrice) * int256(timeElapsed)) / int256(fundingPeriod);
+
+        currentCumFunding += deltaCumFunding;
+    }
+
+    /// @notice Update the global cumulative funding rate (writes state)
+    /// @dev Called before any position-affecting operation.
+    function _updateGlobalFunding() private {
+        if (lastFundingUpdateTime == 0 || fundingPeriod == 0) return;
+
+        int256 newCumFunding = _getCurrentCumulativeFunding();
+
+        if (newCumFunding != cumulativeFundingPerUnit) {
+            // Derive the effective rate for the event
+            int256 delta = newCumFunding - cumulativeFundingPerUnit;
+            cumulativeFundingPerUnit = newCumFunding;
+            emit FundingUpdated(delta, newCumFunding, block.timestamp);
+        }
+
+        lastFundingUpdateTime = block.timestamp;
+    }
+
+    /// @notice Settle pending funding for a user against the reserve pool
+    /// @dev Must be called before any position change so funding is settled at the old size.
+    /// @param _user The user whose funding is being settled
+    function _settleFunding(address _user) private {
+        // When funding isn't configured, skip storage reads and calculations.
+        if (lastFundingUpdateTime == 0 || fundingPeriod == 0) return;
+
+        Position storage position = positions[_user];
+        if (position.netQuantity == 0) {
+            // No position – just sync snapshot so a new position starts clean
+            userFundingSnapshot[_user] = cumulativeFundingPerUnit;
+            return;
+        }
+
+        int256 delta = cumulativeFundingPerUnit - userFundingSnapshot[_user];
+        if (delta == 0) return;
+
+        // pendingFunding (in tokenDecimals) =
+        //   netQuantity * delta / (10^QUANTITY_DECIMALS * 10^FUNDING_DECIMALS)
+        // Positive = user owes, Negative = user receives
+        int256 pendingFunding =
+            (position.netQuantity * delta) / (int256(10 ** QUANTITY_DECIMALS) * int256(10 ** FUNDING_DECIMALS));
+
+        userFundingSnapshot[_user] = cumulativeFundingPerUnit;
+
+        if (pendingFunding == 0) return;
+
+        if (pendingFunding > 0) {
+            // User owes funding – transfer from user to reserve pool
+            uint256 owed = uint256(pendingFunding);
+            uint256 userBalance = balanceOf(_user);
+            if (userBalance >= owed) {
+                _transfer(_user, address(this), owed);
+            } else {
+                // Pay what the user has; remainder becomes implicit bad debt
+                // (user will likely be liquidated soon)
+                if (userBalance > 0) {
+                    _transfer(_user, address(this), userBalance);
+                }
+                emit BadDebt(_user, owed - userBalance);
+            }
+        } else {
+            // User receives funding – transfer from reserve pool to user
+            uint256 owed = uint256(-pendingFunding);
+            uint256 reserveBalance = balanceOf(address(this));
+            uint256 payout = owed < reserveBalance ? owed : reserveBalance;
+            if (payout > 0) {
+                _transfer(address(this), _user, payout);
+            }
+        }
+
+        emit FundingSettled(_user, pendingFunding);
+    }
+
+    /// @notice Trigger a funding-rate update (callable by anyone / keepers)
+    /// @dev Useful during idle periods to keep the cumulative funding current.
+    function updateFunding() external {
+        _updateGlobalFunding();
+    }
+
+    /// @notice Get the pending (unsettled) funding for a user
+    /// @param _user Address of the user
+    /// @return pendingFunding Positive = user owes, negative = user receives (in collateral token units)
+    function getPendingFunding(address _user) public view returns (int256) {
+        Position memory position = positions[_user];
+        if (position.netQuantity == 0) return 0;
+
+        int256 currentCumFunding = _getCurrentCumulativeFunding();
+        int256 delta = currentCumFunding - userFundingSnapshot[_user];
+        if (delta == 0) return 0;
+
+        return (position.netQuantity * delta) / (int256(10 ** QUANTITY_DECIMALS) * int256(10 ** FUNDING_DECIMALS));
     }
 
     // View functions
@@ -910,11 +1086,14 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         return usersWithPositions.values();
     }
 
-    /// @notice Get total unrealized PnL for a user
+    /// @notice Get total unrealized PnL for a user (including pending funding)
     function getUnrealizedPnl(address _user) external view returns (int256) {
         Position memory position = positions[_user];
         if (position.netQuantity == 0) return 0;
-        return _calculatePositionPnl(position, getMarketPrice());
+        int256 pnl = _calculatePositionPnl(position, getMarketPrice());
+        // Subtract pending funding (positive funding = user owes = reduces PnL)
+        pnl -= getPendingFunding(_user);
+        return pnl;
     }
 
     /// @notice Get order book depth (active price levels)
@@ -1014,10 +1193,89 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         emit MatchFeeUpdated(_takerFeeBps, _makerFeeBps);
     }
 
+    /// @notice Set minimum margin per resting order (in collateral token units)
+    /// @param _minimumMarginPerOrder Minimum margin locked per resting order (0 = no minimum)
+    function setMinimumMarginPerOrder(uint256 _minimumMarginPerOrder) external onlyOwner {
+        minimumMarginPerOrder = _minimumMarginPerOrder;
+        emit MinimumMarginPerOrderUpdated(_minimumMarginPerOrder);
+    }
+
+    /// @notice Set funding rate parameters
+    /// @param _fundingRateMaxBps Max absolute funding rate per period in basis points (e.g., 100 = 1%)
+    /// @param _fundingPeriod Time period for max funding rate in seconds (e.g., 86400 = 24 hours)
+    function setFundingParameters(uint256 _fundingRateMaxBps, uint256 _fundingPeriod) external onlyOwner {
+        if (_fundingPeriod == 0) {
+            revert InvalidFundingParameters();
+        }
+
+        // Settle any accrued funding before changing parameters
+        _updateGlobalFunding();
+
+        fundingRateMaxBps = _fundingRateMaxBps;
+        fundingPeriod = _fundingPeriod;
+
+        // Initialize timestamp on first call to prevent retroactive accrual
+        if (lastFundingUpdateTime == 0) {
+            lastFundingUpdateTime = block.timestamp;
+        }
+
+        emit FundingParametersUpdated(_fundingRateMaxBps, _fundingPeriod);
+    }
+
     /// @notice Deposit to reserve pool
     function depositReservePool(uint256 _amount) external {
         _mint(address(this), _amount);
         collateralToken.safeTransferFrom(_msgSender(), address(this), _amount);
+    }
+
+    /// @notice Reset all trading state (orders, positions, funding, nonce)
+    /// @dev Intended for testnet use to wipe state without redeploying. ERC20 balances are not touched.
+    function resetState() external onlyOwner {
+        // Clear all bid orders and price levels
+        (, uint256 price) = activeBidPrices.getNextNode(0);
+        while (price != 0) {
+            (, uint256 nextPrice) = activeBidPrices.getNextNode(price);
+            _clearPriceLevelOrders(price, true);
+            activeBidPrices.remove(price);
+            price = nextPrice;
+        }
+
+        // Clear all ask orders and price levels
+        (, price) = activeAskPrices.getNextNode(0);
+        while (price != 0) {
+            (, uint256 nextPrice) = activeAskPrices.getNextNode(price);
+            _clearPriceLevelOrders(price, false);
+            activeAskPrices.remove(price);
+            price = nextPrice;
+        }
+
+        // Clear all positions and per-user funding snapshots
+        address[] memory users = usersWithPositions.values();
+        for (uint256 i = 0; i < users.length; i++) {
+            delete userFundingSnapshot[users[i]];
+            delete positions[users[i]];
+            usersWithPositions.remove(users[i]);
+        }
+
+        cumulativeFundingPerUnit = 0;
+        lastFundingUpdateTime = 0;
+        nonce = 0;
+    }
+
+    /// @notice Clear all orders at a single price level and remove them from participant indexes
+    function _clearPriceLevelOrders(uint256 _price, bool _isBid) private {
+        StructuredLinkedList.List storage queue = _isBid ? priceOrdersLongQueue[_price] : priceOrdersShortQueue[_price];
+        (, uint256 orderIdUint) = queue.getNextNode(0);
+        while (orderIdUint != 0) {
+            (, uint256 nextOrderIdUint) = queue.getNextNode(orderIdUint);
+            bytes32 orderId = bytes32(orderIdUint);
+            address participant = orders[orderId].participant;
+            participantOrderIdsIndex[participant].remove(orderId);
+            userTotalOrderValue[participant] = 0;
+            delete orders[orderId];
+            queue.remove(orderIdUint);
+            orderIdUint = nextOrderIdUint;
+        }
     }
 
     /// @notice Withdraw from reserve pool

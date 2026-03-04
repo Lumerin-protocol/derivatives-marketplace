@@ -19,11 +19,15 @@ services:
       postgres_db: graph-node
       ipfs: "ipfs:5001"
       ethereum: "${NETWORK}:${ETH_NODE_ADDRESS}"
+      GRAPH_ETHEREUM_MAX_BLOCK_RANGE_SIZE: 10000
       GRAPH_LOG: debug
   ipfs:
     image: ipfs/kubo:v0.17.0
     ports:
       - "5001:5001"
+    environment:
+      IPFS_SWARM_KEY_FILE: /dev/null
+    command: ["daemon", "--offline"]
     volumes:
       - ./data/ipfs:/data/ipfs
   postgres:

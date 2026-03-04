@@ -50,7 +50,7 @@ async function main(): Promise<void> {
 
   await tracker.start();
   await liquidator.start();
-  health.start();
+  await health.start();
 
   logger.info("Keeper is running");
 }
