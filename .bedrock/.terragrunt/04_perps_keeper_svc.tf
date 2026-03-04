@@ -201,7 +201,7 @@ resource "aws_route53_record" "perpskeeper_int_use1" {
 
 # Define Service
 resource "aws_ecs_service" "perpskeeper_use1" {
-  lifecycle {ignore_changes = [task_definition] }
+  # lifecycle {ignore_changes = [task_definition] }
   count                  = var.perpskeeper_service.create ? 1 : 0
   provider               = aws.use1
   name                   = "svc-${var.perpskeeper_service.svc_name}-${substr(var.account_shortname, 8, 3)}"
@@ -247,7 +247,7 @@ resource "aws_ecs_service" "perpskeeper_use1" {
 
 # Define Task  
 resource "aws_ecs_task_definition" "perpskeeper_use1" {
-  lifecycle { ignore_changes = [container_definitions] }
+  # lifecycle { ignore_changes = [container_definitions] }
   count                    = var.perpskeeper_service.create ? 1 : 0
   provider                 = aws.use1
   family                   = "tsk-${var.perpskeeper_service.svc_name}"
@@ -281,39 +281,19 @@ resource "aws_ecs_task_definition" "perpskeeper_use1" {
         },
         {
           name  = "KEEPER_LOG_LEVEL"
-          value = "info"
+          value = var.perpskeeper_service.keeper_log_level
         },
         {
           name  = "PERPS_ADDRESS"
           value = var.perps_address
         },
         {
-          name = "NETWORK"
+          name  = "NETWORK"
           value = var.perpskeeper_service.network
         },
         {
-          name  = "ETH_PRICE_FEED_ADDRESS"
-          value = var.perpskeeper_service.eth_price_feed_address
-        },
-        {
-          name  = "KEEPER_POLL_INTERVAL_MS"
-          value = var.perpskeeper_service.keeper_poll_interval_ms
-        },
-        {
-          name  = "KEEPER_RESYNC_INTERVAL_MS"
-          value = var.perpskeeper_service.keeper_resync_interval_ms
-        },
-        {
-          name  = "KEEPER_DRY_RUN"
-          value = var.perpskeeper_service.keeper_dry_run
-        },
-        {
-          name  = "KEEPER_MIN_PROFIT_MARGIN"
-          value = var.perpskeeper_service.keeper_min_profit_margin
-        },
-        {
           name  = "KEEPER_HEALTH_PORT"
-          value = var.perpskeeper_service.keeper_health_port
+          value = tostring(var.perpskeeper_service.cnt_port)
         }
       ]
       secrets = [

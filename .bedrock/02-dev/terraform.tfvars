@@ -18,12 +18,7 @@ perpskeeper_service = {
   task_cpu                  = 256
   task_ram                  = 512
   network                   = "arbitrum-sepolia"
-  eth_price_feed_address    = "0x6F736186d2c93913721e2570c283dff2a08575e9"
-  keeper_poll_interval_ms   = "5000"
-  keeper_resync_interval_ms = "300000"
-  keeper_dry_run            = "false"
-  keeper_min_profit_margin  = "0"
-  keeper_health_port        = "3000"
+  keeper_log_level          = "info"
 }
 
 # Configure MarketMaker Service
