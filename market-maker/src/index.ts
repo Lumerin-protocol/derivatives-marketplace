@@ -41,21 +41,48 @@ async function main(): Promise<void> {
   const risk = new RiskManager(config, inventory, gas, oracle, logger);
   const quoter = new Quoter(publicClient, config, oracle, gas, inventory, risk, logger);
   const executor = new OrderExecutor(
-    publicClient, walletClient, account, chain, config,
-    quoter, book, gas, risk, oracle, logger,
+    publicClient,
+    walletClient,
+    account,
+    chain,
+    config,
+    quoter,
+    book,
+    gas,
+    risk,
+    oracle,
+    logger,
   );
   const health = new HealthCheck(config, oracle, inventory, book, gas, risk, logger);
 
-  // Initialization
-  await quoter.initialize();
-  await gas.calibrate(mmAddress);
-  await book.start();
-  await oracle.update();
-  await gas.update();
-  await inventory.update();
+  // Initialization — retry on transient blockchain errors (low ETH, low collateral, RPC hiccups)
+  const INIT_BASE_DELAY_MS = 10_000;
+  const INIT_MAX_DELAY_MS = 120_000;
+
   risk.initialize();
   health.executorStats = executor.stats;
+  health.walletAddress = mmAddress;
   await health.start();
+
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await quoter.initialize();
+      await gas.calibrate(mmAddress);
+      await book.start();
+      await oracle.update();
+      await gas.update();
+      await inventory.update();
+      health.initStatus = "ready";
+      health.lastInitError = null;
+      break;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      health.lastInitError = msg;
+      const delay = Math.min(INIT_BASE_DELAY_MS * 2 ** (attempt - 1), INIT_MAX_DELAY_MS);
+      logger.warn({ err, attempt, retryInMs: delay }, "initialization failed, retrying");
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
 
   logger.info("initialization complete, entering main loop");
 
@@ -103,14 +130,17 @@ async function main(): Promise<void> {
       const desired = quoter.computeQuotes();
       await executor.reconcile(desired);
 
+      health.lastTickError = null;
+
       logger.info(
         {
           oracle: oracle.currentPrice.toString(),
           bid: book.bestBid.toString(),
           ask: book.bestAsk.toString(),
-          spread: book.bestBid > 0n && book.bestAsk > 0n
-            ? `${((book.bestAsk - book.bestBid) * 10000n / oracle.currentPrice).toString()}bps`
-            : "-",
+          spread:
+            book.bestBid > 0n && book.bestAsk > 0n
+              ? `${(((book.bestAsk - book.bestBid) * 10000n) / oracle.currentPrice).toString()}bps`
+              : "-",
           pos: inventory.netQuantity.toString(),
           orders: book.ownOrders.size,
           skew: inventory.inventorySkew.toFixed(3),
@@ -118,6 +148,7 @@ async function main(): Promise<void> {
         "tick",
       );
     } catch (err) {
+      health.lastTickError = err instanceof Error ? err.message : String(err);
       logger.error({ err }, "tick error");
     }
 

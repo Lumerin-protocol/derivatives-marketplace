@@ -84,7 +84,7 @@ export function loadConfig(): MakerConfig {
     resyncIntervalMs: Number(process.env.MAKER_RESYNC_INTERVAL_MS ?? "60000"),
 
     dryRun: process.env.MAKER_DRY_RUN === "true",
-    healthPort: Number(process.env.MAKER_HEALTH_PORT ?? "3001"),
+    healthPort: Number(process.env.MAKER_HEALTH_PORT ?? process.env.PORT ?? "3001"),
     logLevel: (process.env.MAKER_LOG_LEVEL as pino.Level) || "info",
   };
 }

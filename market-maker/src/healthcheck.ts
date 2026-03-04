@@ -21,6 +21,10 @@ export class HealthCheck {
   tickCount = 0;
   lastTickAt = 0;
   executorStats: ExecutorStats | null = null;
+  walletAddress = "";
+  initStatus: "initializing" | "ready" = "initializing";
+  lastInitError: string | null = null;
+  lastTickError: string | null = null;
 
   private readonly config: MakerConfig;
   private readonly oracle: OracleTracker;
@@ -54,8 +58,15 @@ export class HealthCheck {
 
       this.server = createServer((req, res) => {
         if (req.method === "GET" && req.url === "/health") {
+          const status = this.initStatus === "initializing"
+            ? "initializing"
+            : this.risk.halted ? "halted" : "running";
+
           const body = JSON.stringify({
-            status: this.risk.halted ? "halted" : "running",
+            status,
+            walletAddress: this.walletAddress,
+            lastInitError: this.lastInitError,
+            lastTickError: this.lastTickError,
             haltReason: this.risk.haltReason,
             throttled: this.risk.throttled,
             throttleReason: this.risk.throttleReason,
@@ -101,10 +112,17 @@ export class HealthCheck {
     });
   }
 
-  stop(): void {
-    if (this.server) {
-      this.server.close();
-      this.server = null;
-    }
+  stop(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (!this.server) {
+        resolve();
+        return;
+      }
+      this.server.close((err) => {
+        this.server = null;
+        if (err) reject(err);
+        else resolve();
+      });
+    });
   }
 }
