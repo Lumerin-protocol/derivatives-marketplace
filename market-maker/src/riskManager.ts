@@ -4,13 +4,12 @@ import type { GasTracker } from "./gasTracker.ts";
 import type { OracleTracker } from "./oracleTracker.ts";
 import type pino from "pino";
 import { RollingBudget, bigAbs } from "./math.ts";
-
-export type HaltReason = "drawdown" | "daily_loss" | "none";
+import type { ErrorInfo } from "./healthcheck.ts";
 export type ThrottleReason = "gas_hourly" | "gas_daily" | "none";
 
 export class RiskManager {
   halted = false;
-  haltReason: HaltReason = "none";
+  haltReason: ErrorInfo | null = null;
   throttled = false;
   throttleReason: ThrottleReason = "none";
 
@@ -67,11 +66,12 @@ export class RiskManager {
     // Drawdown circuit breaker
     if (this.inventory.collateralBalance < this.config.minCollateralBalance) {
       this.halted = true;
-      this.haltReason = "drawdown";
-      this.logger.error(
-        { balance: this.inventory.collateralBalance.toString(), min: this.config.minCollateralBalance.toString() },
-        "HALT: collateral below minimum",
-      );
+      this.haltReason = {
+        message: "collateral below minimum",
+        balance: this.inventory.collateralBalance.toString(),
+        min: this.config.minCollateralBalance.toString(),
+      };
+      this.logger.error(this.haltReason, "HALT: collateral below minimum");
       return false;
     }
 
@@ -79,16 +79,17 @@ export class RiskManager {
     const truePnl = this.truePnl();
     if (truePnl < 0n && bigAbs(truePnl) > this.config.maxDailyLossUsd) {
       this.halted = true;
-      this.haltReason = "daily_loss";
-      this.logger.error(
-        { pnl: truePnl.toString(), max: this.config.maxDailyLossUsd.toString() },
-        "HALT: daily loss limit breached",
-      );
+      this.haltReason = {
+        message: "daily loss limit breached",
+        pnl: truePnl.toString(),
+        max: this.config.maxDailyLossUsd.toString(),
+      };
+      this.logger.error(this.haltReason, "HALT: daily loss limit breached");
       return false;
     }
 
     this.halted = false;
-    this.haltReason = "none";
+    this.haltReason = null;
 
     // Gas budget throttling
     const hourlyGas = this.gasHourlyBudget.total();

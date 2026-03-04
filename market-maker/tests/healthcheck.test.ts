@@ -37,7 +37,7 @@ function makeDeps() {
   } as GasTracker;
   const risk = {
     halted: false,
-    haltReason: "none",
+    haltReason: null,
     throttled: false,
     throttleReason: "none",
     cumulativeGasCostUsd: 50_000n,
@@ -76,7 +76,6 @@ describe("HealthCheck", () => {
     assert.equal(body.gasSpiking, false);
     assert.equal(body.dryRun, false);
     assert.ok(typeof body.uptimeSeconds === "number");
-    assert.equal(body.haltReason, "none");
     assert.equal(body.throttled, false);
   });
 
@@ -95,40 +94,40 @@ describe("HealthCheck", () => {
     const { config, oracle, inventory, book, gas, risk, port } = makeDeps();
     health = new HealthCheck(config, oracle, inventory, book, gas, risk, makeLogger());
     health.status = "init-error";
-    health.lastError = "insufficient funds for gas";
+    health.lastError = { message: "insufficient funds for gas" };
     await health.start();
 
     const res = await fetch(`http://localhost:${port}/health`);
     const body = await res.json();
     assert.equal(body.status, "init-error");
-    assert.equal(body.lastError, "insufficient funds for gas");
+    assert.equal(body.lastError.message, "insufficient funds for gas");
   });
 
   it("reports error status when tick fails", async () => {
     const { config, oracle, inventory, book, gas, risk, port } = makeDeps();
     health = new HealthCheck(config, oracle, inventory, book, gas, risk, makeLogger());
     health.status = "error";
-    health.lastError = "execution reverted";
+    health.lastError = { message: "execution reverted" };
     await health.start();
 
     const res = await fetch(`http://localhost:${port}/health`);
     const body = await res.json();
     assert.equal(body.status, "error");
-    assert.equal(body.lastError, "execution reverted");
+    assert.equal(body.lastError.message, "execution reverted");
   });
 
-  it("reports halted status when risk is halted", async () => {
-    const deps = makeDeps();
-    (deps.risk as Record<string, unknown>).halted = true;
-    (deps.risk as Record<string, unknown>).haltReason = "drawdown";
-    health = new HealthCheck(deps.config, deps.oracle, deps.inventory, deps.book, deps.gas, deps.risk, makeLogger());
-    health.status = "halted";
+  it("reports error status when risk is halted", async () => {
+    const { config, oracle, inventory, book, gas, risk, port } = makeDeps();
+    health = new HealthCheck(config, oracle, inventory, book, gas, risk, makeLogger());
+    health.status = "error";
+    health.lastError = { message: "collateral below minimum", balance: "0", min: "100000000" };
     await health.start();
 
-    const res = await fetch(`http://localhost:${deps.port}/health`);
+    const res = await fetch(`http://localhost:${port}/health`);
     const body = await res.json();
-    assert.equal(body.status, "halted");
-    assert.equal(body.haltReason, "drawdown");
+    assert.equal(body.status, "error");
+    assert.equal(body.lastError.message, "collateral below minimum");
+    assert.equal(body.lastError.balance, "0");
   });
 
   it("returns 404 for non-health paths", async () => {
