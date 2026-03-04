@@ -22,7 +22,7 @@ export class InventoryManager {
   private readonly config: MakerConfig;
   private readonly mmAddress: `0x${string}`;
   private readonly logger: pino.Logger;
-  private tokenAddress: `0x${string}` | null = null;
+  collateralTokenAddress: `0x${string}` | null = null;
 
   constructor(
     publicClient: PublicClient,
@@ -37,8 +37,8 @@ export class InventoryManager {
   }
 
   async update(): Promise<void> {
-    if (!this.tokenAddress) {
-      this.tokenAddress = await this.publicClient.readContract({
+    if (!this.collateralTokenAddress) {
+      this.collateralTokenAddress = await this.publicClient.readContract({
         address: this.config.perpsAddress,
         abi: perpsSimpleAbi,
         functionName: "collateralToken",
@@ -60,7 +60,7 @@ export class InventoryManager {
           args: [this.mmAddress],
         },
         {
-          address: this.tokenAddress,
+          address: this.collateralTokenAddress,
           abi: erc20Abi,
           functionName: "balanceOf",
           args: [this.mmAddress],

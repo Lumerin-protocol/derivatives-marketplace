@@ -11,6 +11,7 @@ import { RiskManager } from "./riskManager.ts";
 import { HealthCheck } from "./healthcheck.ts";
 import type { ErrorInfo } from "./healthcheck.ts";
 import { trimmedErrSerializer } from "./errSerializer.ts";
+import { topUpCollateral } from "./collateral.ts";
 
 function toErrorInfo(err: unknown): ErrorInfo {
   if (!(err instanceof Error)) {
@@ -87,6 +88,7 @@ async function main(): Promise<void> {
       await oracle.update();
       await gas.update();
       await inventory.update();
+
       health.status = "running";
       health.lastError = null;
       break;
@@ -134,6 +136,22 @@ async function main(): Promise<void> {
       await gas.update();
       await book.refresh();
       await inventory.update();
+
+      if (inventory.tokenBalance > 0n && config.NODE_ENV === "production") {
+        try {
+          await topUpCollateral({
+            publicClient,
+            walletClient,
+            account,
+            chain,
+            perpsAddress: config.perpsAddress,
+            inventory,
+            logger,
+          });
+        } catch (err) {
+          logger.error({ err }, "failed to top up collateral");
+        }
+      }
 
       const spreadString =
         book.bestBid > 0n && book.bestAsk > 0n
