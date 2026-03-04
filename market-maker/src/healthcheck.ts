@@ -63,7 +63,6 @@ export class HealthCheck {
       this.server = createServer((req, res) => {
         try {
           if (req.method === "GET" && req.url === "/health") {
-            console.log("here");
             const body = JSON.stringify({
               status: this.status,
               walletAddress: this.walletAddress,

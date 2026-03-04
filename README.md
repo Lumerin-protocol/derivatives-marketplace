@@ -4,23 +4,50 @@ On-chain perpetual futures trading platform with an order book model, built on A
 
 ## Architecture
 
-```
-┌───────────┐     ┌──────────────────┐     ┌───────────────────┐
-│  Frontend │────▶│  PerpsSimple     │◀────│  Hashprice Oracle │
-│  (React)  │     │  (on-chain CLOB) │     │  (Chainlink iface)│
-└───────────┘     └──────────────────┘     └───────────────────┘
-                         │  events
-                         ▼
-                  ┌──────────────────┐
-                  │  Subgraph        │
-                  │  (The Graph)     │
-                  └──────────────────┘
-                         │  GraphQL
-                         ▼
-                  ┌──────────────────┐
-                  │  Frontend        │
-                  │  + Keepers       │
-                  └──────────────────┘
+```mermaid
+graph TD
+  subgraph Oracles
+    HP["Hashprice Oracle<br/>(Chainlink iface)"]
+    ETH["ETH / USD Feed<br/>(optional)"]
+  end
+
+  subgraph On-Chain
+    Contract["PerpsSimple<br/>(on-chain CLOB)"]
+    Collateral["USDC<br/>(ERC-20 collateral)"]
+  end
+
+  subgraph Off-Chain Bots
+    MM["Market Maker<br/>(Avellaneda–Stoikov)"]
+    Keeper["Keeper<br/>(liquidation bot)"]
+  end
+
+  subgraph Indexing
+    GraphNode["Graph Node"]
+    IPFS["IPFS"]
+    Postgres["Postgres"]
+  end
+
+  Frontend["Frontend<br/>(React / wagmi / viem)<br/><i>futures-marketplace repo</i>"]
+
+  HP -- "getMarketPrice()" --> Contract
+  ETH -. "gas cost calc" .-> MM
+  ETH -. "gas cost calc" .-> Keeper
+
+  MM -- "place / cancel orders" --> Contract
+  Contract -. "events<br/>(OrderMatched)" .-> MM
+  MM -- "getMarketPrice()" --> Contract
+
+  Keeper -- "liquidateBatch()" --> Contract
+  Contract -. "events<br/>(Transfer, OrderMatched,<br/>PositionLiquidated)" .-> Keeper
+
+  Collateral -. "ERC-20 transfers" .-> Contract
+
+  Contract -. "events" .-> GraphNode
+  GraphNode --- IPFS
+  GraphNode --- Postgres
+  GraphNode -- "GraphQL API" --> Frontend
+
+  Frontend -- "writes (wagmi / viem)" --> Contract
 ```
 
 ### Components
@@ -33,7 +60,11 @@ On-chain perpetual futures trading platform with an order book model, built on A
 
 **Keeper** (`keeper/`) — An off-chain liquidation bot that monitors user positions via a built-in mini-indexer (no subgraph dependency). It watches contract events in real-time to track positions and balances locally, pre-computes the liquidation price for each user, and polls the oracle price. When the market price crosses a user's liquidation threshold, the keeper verifies on-chain and executes the `liquidate(user)` call to earn the liquidation fee. Built with Node.js, TypeScript, and viem.
 
-**Frontend** (planned) — React-based trading UI for placing orders, managing collateral, and viewing positions and trade history. Will be added to this repo, reusing the existing futures UI codebase. Communicates with the contract via wagmi/viem for writes and the subgraph for reads.
+**Market Maker** (`market-maker/`) — Automated two-sided liquidity provider for the on-chain CLOB. Places layered limit orders around the oracle price using an Avellaneda-Stoikov inspired quoting strategy, with dynamic spread adjustment based on inventory skew, volatility, and gas conditions. Includes risk controls (position limits, utilization caps, drawdown halt, daily loss limits, gas budgets) and a health-check HTTP endpoint. See [`market-maker/README.md`](market-maker/README.md) for configuration and strategy details.
+
+**E2E Tests** (`e2e/`) — Full-stack integration tests that exercise the entire system: Hardhat node, contract deployment, subgraph indexing via Graph Node, and the keeper liquidation bot. Runs against a Dockerized infrastructure stack (Hardhat, Graph Node, IPFS, Postgres). See [`e2e/README.md`](e2e/README.md) for setup instructions.
+
+**Frontend** ([`futures-marketplace`](https://github.com/Lumerin-protocol/futures-marketplace)) — React-based trading UI shared between futures and perps. Handles order placement, collateral management, position tracking, and trade history. Communicates with the contract via wagmi/viem for writes and the subgraph for reads.
 
 ### Data Flow
 
@@ -43,6 +74,7 @@ On-chain perpetual futures trading platform with an order book model, built on A
 4. **Subgraph** indexes all emitted events into structured entities (orders, trades, positions, price levels, etc.) and serves them over GraphQL.
 5. **Frontend** queries the subgraph for order book depth, trade history, and portfolio data to render the UI.
 6. **Keeper** watches contract events to track positions and balances locally, pre-computes liquidation prices, and executes liquidations when the oracle price crosses a threshold.
+7. **Market Maker** reads the oracle price each tick, computes bid/ask levels with inventory-aware spreads, and reconciles desired quotes against resting orders on-chain.
 
 ## Repository Structure
 
@@ -50,16 +82,18 @@ On-chain perpetual futures trading platform with an order book model, built on A
 contracts/          Solidity smart contracts (Hardhat + Foundry)
 indexer/            Graph Protocol subgraph
 keeper/             Liquidation keeper bot (Node.js + viem)
+market-maker/       Automated market maker bot (Node.js + viem)
+e2e/                Full-stack integration tests (Docker + Graph Node)
 ```
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js 20.x (contracts/indexer) or 22.x (keeper)
+- Node.js 20.x (contracts/indexer) or 22.x (keeper/market-maker/e2e)
 - [pnpm](https://pnpm.io/)
 - [Foundry](https://book.getfoundry.sh/) (for Solidity formatting)
-- Docker (for local subgraph development)
+- Docker & Docker Compose (for subgraph development and e2e tests)
 - .env file in the root of the project with filled in environment variables
 
 ### Contracts
@@ -94,19 +128,46 @@ pnpm typecheck         # Type-check TypeScript
 
 Add `KEEPER_PRIVATE_KEY` to the root `.env` file. See [`keeper/.env.example`](keeper/.env.example) for all keeper-specific configuration.
 
+### Market Maker
+
+```bash
+cd market-maker
+pnpm install
+pnpm start             # Run market maker (reads ../.env)
+pnpm dev               # Development with pretty-printed logs
+pnpm dev:dry           # Dry run (logs what would happen, no txs)
+pnpm test              # Run tests (unit + e2e against local Hardhat)
+```
+
+Add `MAKER_PRIVATE_KEY` to the root `.env` file. See [`market-maker/README.md`](market-maker/README.md) for the full configuration reference.
+
+### E2E Tests
+
+```bash
+cd e2e
+pnpm install
+pnpm up                # Start Docker stack (Hardhat, Graph Node, IPFS, Postgres)
+pnpm test              # Run full-stack integration tests
+pnpm down              # Stop and remove volumes
+```
+
+See [`e2e/README.md`](e2e/README.md) for architecture and troubleshooting.
+
 See [`contracts/README.md`](contracts/README.md) and [`indexer/README.md`](indexer/README.md) for more details.
 
 ## Tech Stack
 
-| Layer     | Technology                                      |
-| --------- | ----------------------------------------------- |
-| Contracts | Solidity 0.8.20, OpenZeppelin, Hardhat, Foundry |
-| Oracle    | Hashprice Oracle (Chainlink AggregatorV3 iface) |
-| Indexer   | The Graph, AssemblyScript                       |
-| Frontend  | React, wagmi, viem (planned)                    |
-| Keeper    | Node.js 22, TypeScript, viem                    |
-| Tooling   | pnpm, TypeScript, Biome                         |
-| Network   | Arbitrum                                        |
+| Layer        | Technology                                      |
+| ------------ | ----------------------------------------------- |
+| Contracts    | Solidity 0.8.28, OpenZeppelin, Hardhat, Foundry |
+| Oracle       | Hashprice Oracle (Chainlink AggregatorV3 iface) |
+| Indexer      | The Graph, AssemblyScript                       |
+| Keeper       | Node.js 22, TypeScript, viem                    |
+| Market Maker | Node.js 22, TypeScript, viem, pino              |
+| E2E Tests    | Node.js 22, Docker Compose, Graph Node          |
+| Frontend     | React, wagmi, viem (planned)                    |
+| Tooling      | pnpm, TypeScript, Biome                         |
+| Network      | Arbitrum                                        |
 
 ## License
 

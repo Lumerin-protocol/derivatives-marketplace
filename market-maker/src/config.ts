@@ -1,47 +1,7 @@
 import type { Address, Hex } from "viem";
 import type pino from "pino";
 
-export interface MakerConfig {
-  // Connection
-  network: string;
-  ethNodeAddress: string;
-  perpsAddress: Address;
-  makerPrivateKey: Hex;
-
-  // Quoting
-  numLevelsPerSide: number;
-  baseQuantity: bigint;
-  minSpreadBps: number;
-  volatilityMultiplier: number;
-  inventorySkewGamma: number;
-  maxSkewTicks: number;
-
-  // Gas management
-  ethPriceFeedAddress?: Address;
-  gasSpikeThresholdPct: number;
-  gasCapMultiplier: number;
-  gasPenaltyBps: number;
-  maxGasBudgetPerHourUsd: bigint;
-  maxGasBudgetPerDayUsd: bigint;
-  urgentRequoteThresholdTicks: number;
-
-  // Risk
-  maxPositionSize: bigint;
-  maxUtilizationPct: number;
-  minCollateralBalance: bigint;
-  maxDailyLossUsd: bigint;
-
-  // Timing
-  pollIntervalMs: number;
-  requoteThresholdTicks: number;
-  requoteCooldownMs: number;
-  resyncIntervalMs: number;
-
-  // Operational
-  dryRun: boolean;
-  healthPort: number;
-  logLevel: pino.Level;
-}
+export type MakerConfig = ReturnType<typeof loadConfig>;
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -51,8 +11,9 @@ function requireEnv(name: string): string {
   return value;
 }
 
-export function loadConfig(): MakerConfig {
+export function loadConfig() {
   return {
+    nodeEnv: process.env.NODE_ENV ?? "development",
     network: requireEnv("NETWORK"),
     ethNodeAddress: requireEnv("ETH_NODE_ADDRESS"),
     perpsAddress: requireEnv("PERPS_ADDRESS") as Address,
