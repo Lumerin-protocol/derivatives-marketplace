@@ -23,6 +23,19 @@ variable "perpskeeper_private_key" {
   default     = ""
 }
 
+variable "marketmaker_service" {
+  description = "MarketMaker Service Variables"
+  type    = map(any)
+  default = {}
+}
+
+variable "marketmaker_private_key" {
+  description = "Private key for the MarketMaker"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 ################################################################################
 # SHARED INFRASTRUCTURE (used across multiple services)
 ################################################################################

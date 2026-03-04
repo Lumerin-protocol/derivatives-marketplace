@@ -21,6 +21,19 @@ perpskeeper_service = {
 
 }
 
+# Configure MarketMaker Service
+marketmaker_service = {
+  create                   = false
+  ghcr_repo                = "ghcr.io/lumerin-protocol/perps-market-maker"
+  ghcr_imagetag            = "stg-latest"
+  svc_name                 = "perps-mktmkr"
+  task_worker_qty          = 1
+  cnt_port                 = 3001
+  cnt_name                 = "perps-mktmkr"
+  task_cpu                 = 256
+  task_ram                 = 512
+}
+
 ########################################
 # Shared Contract Addresses
 ########################################

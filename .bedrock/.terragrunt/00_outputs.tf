@@ -11,3 +11,16 @@ output "github_actions_role_name" {
   value       = var.create_core ? aws_iam_role.github_actions_derivatives[0].name : null
 }
 
+################################################################################
+# SERVICE ENDPOINTS (internal ALB, reachable via VPN)
+################################################################################
+output "perps_keeper_endpoint" {
+  description = "Perps Keeper health endpoint (internal ALB via VPN)"
+  value       = var.perpskeeper_service.create ? "https://keeper.${data.aws_route53_zone.public_lumerin.name}/health" : null
+}
+
+output "perps_mktmkr_endpoint" {
+  description = "Perps MktMkr health endpoint (internal ALB via VPN)"
+  value       = var.marketmaker_service.create ? "https://perpsmm.${data.aws_route53_zone.public_lumerin.name}/health" : null
+}
+

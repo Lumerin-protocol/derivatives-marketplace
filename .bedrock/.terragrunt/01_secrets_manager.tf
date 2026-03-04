@@ -20,7 +20,8 @@ resource "aws_iam_policy" "derivatives_marketplace_secret_access" {
           "secretsmanager:DescribeSecret"
         ]
         Resource = compact([
-          var.create_core ? aws_secretsmanager_secret.perps_keeper.arn : ""
+          var.create_core ? aws_secretsmanager_secret.perps_keeper.arn : "",
+          var.create_core ? aws_secretsmanager_secret.market_maker.arn : ""
         ])
       }
     ]
@@ -68,5 +69,28 @@ resource "aws_secretsmanager_secret_version" "perps_keeper" {
     eth_node_address         = var.ethereum_rpc_url
     futures_subgraph_url = "https://gateway.thegraph.com/api/${var.graph_api_key}/subgraphs/id/${var.derivatives_subgraph_id}"
     oracles_subgraph_url = "https://gateway.thegraph.com/api/${var.graph_api_key}/subgraphs/id/${var.oracles_subgraph_id}"
+  })
+}
+
+################################################################################
+# Market Maker Secrets
+################################################################################
+# Separate secret for Market Maker
+# Contains private key and ETH node URL (sensitive trading credentials)
+
+resource "aws_secretsmanager_secret" "market_maker" {
+  name        = "perps-mktmkr-secrets-v1-${substr(var.account_shortname, 8, 3)}"
+  description = "Secrets for Perps MktMkr trading service (private key and ETH node URL)"
+  tags = merge(var.default_tags, var.foundation_tags, {
+    Name = "perps-mktmkr-secrets-v1-${substr(var.account_shortname, 8, 3)}"
+  })
+}
+
+resource "aws_secretsmanager_secret_version" "market_maker" {
+  count     = var.marketmaker_service.create ? 1 : 0
+  secret_id = aws_secretsmanager_secret.market_maker.id
+  secret_string = jsonencode({
+    maker_private_key = var.marketmaker_private_key
+    eth_node_address  = var.ethereum_rpc_url
   })
 }

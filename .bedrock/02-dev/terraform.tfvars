@@ -26,6 +26,30 @@ perpskeeper_service = {
   keeper_health_port        = "3000"
 }
 
+# Configure MarketMaker Service
+marketmaker_service = {
+  create                   = true
+  ghcr_repo                = "ghcr.io/lumerin-protocol/perps-market-maker"
+  ghcr_imagetag            = "dev-latest"
+  svc_name                 = "perps-mktmkr"
+  task_worker_qty          = 1
+  cnt_port                 = 3001
+  cnt_name                 = "perps-mktmkr"
+  task_cpu                 = 256
+  task_ram                 = 512
+  network                  = "arbitrum-sepolia"
+  eth_price_feed_address   = "0x6F736186d2c93913721e2570c283dff2a08575e9"
+  maker_poll_interval_ms   = "3000"
+  maker_resync_interval_ms = "60000"
+  maker_dry_run            = "true"
+  maker_health_port        = "3001"
+  maker_min_spread_bps     = "10"
+  maker_levels_per_side    = "5"
+  maker_base_quantity      = "1000000"
+  maker_max_position_size  = "100000000"
+  maker_max_daily_loss_usd = "1000000000"
+}
+
 ########################################
 # Shared Contract Addresses
 ########################################

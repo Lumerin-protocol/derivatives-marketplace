@@ -79,7 +79,8 @@ resource "aws_iam_role_policy" "github_secrets_read" {
           "secretsmanager:DescribeSecret"
         ]
         Resource = [
-          var.create_core ? aws_secretsmanager_secret.perps_keeper.arn : null, 
+          var.create_core ? aws_secretsmanager_secret.perps_keeper.arn : null,
+          var.create_core ? aws_secretsmanager_secret.market_maker.arn : null,
         ]
       }
     ]
@@ -88,7 +89,7 @@ resource "aws_iam_role_policy" "github_secrets_read" {
 
 
 ################################################################################
-# ECS UPDATE POLICY (for PerpsKeeper service only)
+# ECS UPDATE POLICY (for PerpsKeeper service)
 ################################################################################
 resource "aws_iam_role_policy" "github_ecs_update" {
   count = var.perpskeeper_service.create ? 1 : 0
@@ -116,6 +117,63 @@ resource "aws_iam_role_policy" "github_ecs_update" {
           "ecs:RegisterTaskDefinition"
         ]
         # These actions don't support resource-level permissions
+        Resource = "*"
+      },
+      {
+        Sid    = "PassRoleToECS"
+        Effect = "Allow"
+        Action = "iam:PassRole"
+        Resource = [
+          var.ecs_task_role_arn,
+          local.titanio_role_arn
+        ]
+        Condition = {
+          StringEquals = {
+            "iam:PassedToService" = "ecs-tasks.amazonaws.com"
+          }
+        }
+      },
+      {
+        Sid    = "ReadECSCluster"
+        Effect = "Allow"
+        Action = [
+          "ecs:ListServices",
+          "ecs:DescribeClusters"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+################################################################################
+# ECS UPDATE POLICY (for MarketMaker service)
+################################################################################
+resource "aws_iam_role_policy" "github_ecs_update_marketmaker" {
+  count = var.marketmaker_service.create ? 1 : 0
+  name  = "ecs-update-perps-mktmkr"
+  role  = aws_iam_role.github_actions_derivatives[count.index].id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "UpdateMarketMakerECSService"
+        Effect = "Allow"
+        Action = [
+          "ecs:UpdateService",
+          "ecs:DescribeServices"
+        ]
+        Resource = [
+          aws_ecs_service.marketmaker_use1[count.index].id
+        ]
+      },
+      {
+        Sid    = "TaskDefinitionOperations"
+        Effect = "Allow"
+        Action = [
+          "ecs:DescribeTaskDefinition",
+          "ecs:RegisterTaskDefinition"
+        ]
         Resource = "*"
       },
       {
