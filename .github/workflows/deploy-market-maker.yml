@@ -175,6 +175,7 @@ jobs:
           MAKER_MIN_COLLATERAL: ${{ vars.MAKER_MIN_COLLATERAL }}
           MAKER_REQUOTE_THRESHOLD_TICKS: ${{ vars.MAKER_REQUOTE_THRESHOLD_TICKS }}
           MAKER_REQUOTE_COOLDOWN_MS: ${{ vars.MAKER_REQUOTE_COOLDOWN_MS }}
+          PERPS_ADDRESS: ${{ vars.PERPS_ADDRESS }}
         run: |
           CLUSTER="${{ needs.build.outputs.ecs_cluster }}"
           SERVICE="${{ needs.build.outputs.ecs_service }}"
@@ -226,7 +227,8 @@ jobs:
             {"name":"MAKER_MAX_UTILIZATION_PCT","value":env.MAKER_MAX_UTILIZATION_PCT},
             {"name":"MAKER_MIN_COLLATERAL","value":env.MAKER_MIN_COLLATERAL},
             {"name":"MAKER_REQUOTE_THRESHOLD_TICKS","value":env.MAKER_REQUOTE_THRESHOLD_TICKS},
-            {"name":"MAKER_REQUOTE_COOLDOWN_MS","value":env.MAKER_REQUOTE_COOLDOWN_MS}
+            {"name":"MAKER_REQUOTE_COOLDOWN_MS","value":env.MAKER_REQUOTE_COOLDOWN_MS},
+            {"name":"PERPS_ADDRESS","value":env.PERPS_ADDRESS}
           ]' > env-overrides.json
           
           # Merge overrides into task definition: update existing vars, add new ones
