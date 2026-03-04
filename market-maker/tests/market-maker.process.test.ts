@@ -518,7 +518,7 @@ describe("MM process — post-fill on-chain state", () => {
   it("should still maintain resting orders after the fill", async () => {
     await waitFor(async () => {
       const h = await fetchHealth(port);
-      return (h.ownOrders as number) >= 3;
+      return (h.ownOrders as number) >= 5;
     }, 15_000);
 
     const orderIds = await publicClient.readContract({
@@ -528,7 +528,7 @@ describe("MM process — post-fill on-chain state", () => {
       args: [MM_ACCOUNT.address],
     }) as `0x${string}`[];
 
-    assert.ok(orderIds.length >= 3, `should still have orders, got ${orderIds.length}`);
+    assert.ok(orderIds.length >= 5, `should have at least 5 orders after fill, got ${orderIds.length}`);
   });
 
   it("should show negative unrealized PnL when price rises against short", async () => {

@@ -9,25 +9,7 @@ import { Quoter } from "./quoter.ts";
 import { OrderExecutor } from "./orderExecutor.ts";
 import { RiskManager } from "./riskManager.ts";
 import { HealthCheck } from "./healthcheck.ts";
-
-const MAX_ERR_LINES = 10;
-
-function trimmedErrSerializer(err: unknown): Record<string, unknown> {
-  const serialized = pino.stdSerializers.err(err as Error);
-  for (const key of ["message", "stack", "details"] as const) {
-    const val = serialized[key];
-    if (typeof val !== "string") continue;
-    const lines = val.split("\n");
-    if (lines.length > MAX_ERR_LINES) {
-      serialized[key] = lines.slice(0, MAX_ERR_LINES).join("\n")
-        + `\n... (${lines.length - MAX_ERR_LINES} lines trimmed)`;
-    }
-  }
-  if (serialized.cause) {
-    serialized.cause = trimmedErrSerializer(serialized.cause);
-  }
-  return serialized;
-}
+import { trimmedErrSerializer } from "./errSerializer.ts";
 
 async function main(): Promise<void> {
   const config = loadConfig();

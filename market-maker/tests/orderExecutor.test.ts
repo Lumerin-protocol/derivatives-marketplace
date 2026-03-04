@@ -441,6 +441,74 @@ describe("OrderExecutor", () => {
     assert.equal(deps.placedOrders.length, 0);
   });
 
+  it("replaces filled orders even when oracle price has not drifted", async () => {
+    const deps = makeDeps();
+    const executor = makeExecutor(deps);
+
+    const desired: DesiredQuotes = {
+      bids: [{ price: 99_000_000n, quantity: 1_000_000n }],
+      asks: [{ price: 101_000_000n, quantity: -1_000_000n }],
+    };
+
+    await executor.reconcile(desired);
+    assert.equal(deps.placedOrders.length, 2, "initial placement");
+
+    // Simulate both orders resting on-chain
+    const bidId = makeOrderId(500);
+    const askId = makeOrderId(501);
+    deps.book.ownOrders.set(bidId, { orderId: bidId, price: 99_000_000n, quantity: 1_000_000n });
+    deps.book.ownOrders.set(askId, { orderId: askId, price: 101_000_000n, quantity: -1_000_000n });
+
+    // Simulate the ask getting fully filled: BookTracker removes it from ownOrders
+    deps.book.ownOrders.delete(askId);
+    assert.equal(deps.book.ownOrders.size, 1);
+
+    // Oracle price unchanged — without the fix this reconcile would be skipped
+    deps.placedOrders.length = 0;
+    deps.cancelledOrders.length = 0;
+    await executor.reconcile(desired);
+
+    assert.equal(deps.placedOrders.length, 1, "should place the missing ask");
+    assert.equal(deps.cancelledOrders.length, 0, "surviving bid is still at desired price");
+  });
+
+  it("replaces multiple filled orders in a single reconcile", async () => {
+    const deps = makeDeps();
+    const executor = makeExecutor(deps);
+
+    const desired: DesiredQuotes = {
+      bids: [
+        { price: 99_000_000n, quantity: 1_000_000n },
+        { price: 98_000_000n, quantity: 2_000_000n },
+      ],
+      asks: [
+        { price: 101_000_000n, quantity: -1_000_000n },
+      ],
+    };
+
+    await executor.reconcile(desired);
+    assert.equal(deps.placedOrders.length, 3, "initial placement");
+
+    // Simulate all three orders resting
+    const id1 = makeOrderId(600);
+    const id2 = makeOrderId(601);
+    const id3 = makeOrderId(602);
+    deps.book.ownOrders.set(id1, { orderId: id1, price: 99_000_000n, quantity: 1_000_000n });
+    deps.book.ownOrders.set(id2, { orderId: id2, price: 98_000_000n, quantity: 2_000_000n });
+    deps.book.ownOrders.set(id3, { orderId: id3, price: 101_000_000n, quantity: -1_000_000n });
+
+    // Both bids filled
+    deps.book.ownOrders.delete(id1);
+    deps.book.ownOrders.delete(id2);
+
+    deps.placedOrders.length = 0;
+    deps.cancelledOrders.length = 0;
+    await executor.reconcile(desired);
+
+    assert.equal(deps.placedOrders.length, 2, "should place both missing bids");
+    assert.equal(deps.cancelledOrders.length, 0, "surviving ask is still correct");
+  });
+
   it("records gas costs after successful transactions", async () => {
     const gasCosts: bigint[] = [];
     const deps = makeDeps({

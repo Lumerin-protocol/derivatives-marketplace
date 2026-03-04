@@ -118,8 +118,9 @@ export class OrderExecutor {
       return false;
     }
 
-    // If no orders exist and we have desired quotes, requote
-    if (this.book.ownOrders.size === 0 && (desired.bids.length > 0 || desired.asks.length > 0)) {
+    // If fewer orders resting than desired (e.g. after a fill), requote to refill
+    const expectedCount = desired.bids.length + desired.asks.length;
+    if (this.book.ownOrders.size < expectedCount) {
       return true;
     }
 
