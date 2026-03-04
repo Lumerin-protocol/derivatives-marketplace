@@ -14,6 +14,11 @@ export interface ExecutorStats {
   reconcileCount: number;
 }
 
+export interface ErrorInfo {
+  message: string;
+  [key: string]: unknown;
+}
+
 export class HealthCheck {
   private server: Server | null = null;
   private startedAt = Date.now();
@@ -22,8 +27,8 @@ export class HealthCheck {
   lastTickAt = 0;
   executorStats: ExecutorStats | null = null;
   walletAddress = "";
-  status: "initializing" | "init-error" | "running" | "error" | "halted" = "initializing";
-  lastError: string | null = null;
+  status: "initializing" | "init-error" | "running" | "error" = "initializing";
+  lastError: ErrorInfo | null = null;
 
   private readonly config: MakerConfig;
   private readonly oracle: OracleTracker;
@@ -58,10 +63,9 @@ export class HealthCheck {
       this.server = createServer((req, res) => {
         if (req.method === "GET" && req.url === "/health") {
           const body = JSON.stringify({
-            status: this.status === "running" && this.risk.halted ? "halted" : this.status,
+            status: this.status,
             walletAddress: this.walletAddress,
             lastError: this.lastError,
-            haltReason: this.risk.haltReason,
             throttled: this.risk.throttled,
             throttleReason: this.risk.throttleReason,
             oraclePrice: this.oracle.currentPrice.toString(),

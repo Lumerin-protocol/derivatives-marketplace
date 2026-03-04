@@ -9,7 +9,21 @@ import { Quoter } from "./quoter.ts";
 import { OrderExecutor } from "./orderExecutor.ts";
 import { RiskManager } from "./riskManager.ts";
 import { HealthCheck } from "./healthcheck.ts";
+import type { ErrorInfo } from "./healthcheck.ts";
 import { trimmedErrSerializer } from "./errSerializer.ts";
+
+function toErrorInfo(err: unknown): ErrorInfo {
+  if (!(err instanceof Error)) {
+    return { message: String(err) };
+  }
+  const info: ErrorInfo = { message: err.message };
+  for (const key of Object.keys(err)) {
+    if (key !== "message" && key !== "stack" && key !== "abi") {
+      info[key] = (err as unknown as Record<string, unknown>)[key];
+    }
+  }
+  return info;
+}
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -76,9 +90,8 @@ async function main(): Promise<void> {
       health.lastError = null;
       break;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
       health.status = "init-error";
-      health.lastError = msg;
+      health.lastError = toErrorInfo(err);
       const delay = Math.min(INIT_BASE_DELAY_MS * 2 ** (attempt - 1), INIT_MAX_DELAY_MS);
       logger.warn({ err, attempt, retryInMs: delay }, "initialization failed, retrying");
       await new Promise((r) => setTimeout(r, delay));
@@ -124,6 +137,8 @@ async function main(): Promise<void> {
 
       const ok = risk.check();
       if (!ok) {
+        health.status = "error";
+        health.lastError = risk.haltReason;
         await executor.cancelAll();
         return;
       }
@@ -151,7 +166,7 @@ async function main(): Promise<void> {
       );
     } catch (err) {
       health.status = "error";
-      health.lastError = err instanceof Error ? err.message : String(err);
+      health.lastError = toErrorInfo(err);
       logger.error({ err }, "tick error");
     }
 

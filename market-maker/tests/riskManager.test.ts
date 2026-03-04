@@ -83,7 +83,7 @@ describe("RiskManager", () => {
     const ok = risk.check();
     assert.equal(ok, false);
     assert.equal(risk.halted, true);
-    assert.equal(risk.haltReason, "drawdown");
+    assert.equal(risk.haltReason?.message, "collateral below minimum");
   });
 
   it("halts on daily loss exceeding limit", () => {
@@ -99,7 +99,7 @@ describe("RiskManager", () => {
 
     const ok = risk.check();
     assert.equal(ok, false);
-    assert.equal(risk.haltReason, "daily_loss");
+    assert.equal(risk.haltReason?.message, "daily loss limit breached");
   });
 
   it("records gas costs in budget", () => {
@@ -209,6 +209,6 @@ describe("RiskManager", () => {
     const ok = risk.check();
 
     assert.equal(ok, false);
-    assert.equal(risk.haltReason, "daily_loss");
+    assert.equal(risk.haltReason?.message, "daily loss limit breached");
   });
 });

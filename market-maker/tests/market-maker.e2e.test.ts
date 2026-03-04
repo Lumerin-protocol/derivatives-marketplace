@@ -338,7 +338,7 @@ describe("MM risk controls", () => {
     const ok = stack.risk.check();
     assert.equal(ok, false, "risk check should fail");
     assert.equal(stack.risk.halted, true);
-    assert.equal(stack.risk.haltReason, "drawdown");
+    assert.equal(stack.risk.haltReason?.message, "collateral below minimum");
   });
 
   it("should block bid side when at max long position", async () => {
@@ -424,14 +424,17 @@ describe("MM health endpoint", () => {
     assert.ok(typeof body.uptimeSeconds === "number");
   });
 
-  it("should show halted status after risk halt", async () => {
+  it("should show error status after risk halt", async () => {
     stack.inventory.collateralBalance = 0n;
     stack.risk.check();
+    stack.health.status = "error";
+    stack.health.lastError = stack.risk.haltReason;
 
     const res = await fetch(`http://localhost:${healthPort}/health`);
     const body = await res.json();
-    assert.equal(body.status, "halted");
-    assert.equal(body.haltReason, "drawdown");
+    assert.equal(body.status, "error");
+    assert.equal(body.lastError.message, "collateral below minimum");
+    assert.equal(body.lastError.balance, "0");
   });
 });
 
