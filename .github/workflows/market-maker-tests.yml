@@ -1,0 +1,68 @@
+name: Market Maker Tests
+
+on:
+  push:
+    branches: [main, dev, stg]
+    paths:
+      - 'market-maker/**'
+      - 'contracts/contracts/**'
+      - 'contracts/abi/**'
+      - '.github/workflows/market-maker-tests.yml'
+
+  pull_request:
+    paths:
+      - 'market-maker/**'
+      - 'contracts/contracts/**'
+      - 'contracts/abi/**'
+      - '.github/workflows/market-maker-tests.yml'
+
+  workflow_dispatch:
+
+concurrency:
+  group: market-maker-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    name: Market Maker Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.1
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: |
+            contracts/pnpm-lock.yaml
+            market-maker/pnpm-lock.yaml
+
+      - name: Install contract dependencies
+        working-directory: ./contracts
+        run: pnpm install --frozen-lockfile
+
+      - name: Install market-maker dependencies
+        working-directory: ./market-maker
+        run: pnpm install --frozen-lockfile
+
+      - name: Compile contracts & copy ABIs
+        working-directory: ./market-maker
+        run: pnpm pretest
+
+      - name: Run tests
+        working-directory: ./market-maker
+        run: pnpm test
