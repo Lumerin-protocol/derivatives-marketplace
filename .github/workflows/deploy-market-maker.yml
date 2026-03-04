@@ -141,6 +141,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     if: needs.build.outputs.is_cicd_branch != 'true'
+    environment: ${{ needs.build.outputs.environment }}
     
     steps:
       - name: Configure AWS credentials
@@ -151,6 +152,29 @@ jobs:
           role-session-name: GitHubActions-PerpsMktMkr-${{ github.run_id }}
 
       - name: Update task definition and deploy
+        env:
+          MAKER_ETH_PRICE_FEED_ADDRESS: ${{ vars.MAKER_ETH_PRICE_FEED_ADDRESS }}
+          MAKER_POLL_INTERVAL_MS: ${{ vars.MAKER_POLL_INTERVAL_MS }}
+          MAKER_RESYNC_INTERVAL_MS: ${{ vars.MAKER_RESYNC_INTERVAL_MS }}
+          MAKER_DRY_RUN: ${{ vars.MAKER_DRY_RUN }}
+          MAKER_MIN_SPREAD_BPS: ${{ vars.MAKER_MIN_SPREAD_BPS }}
+          MAKER_LEVELS_PER_SIDE: ${{ vars.MAKER_LEVELS_PER_SIDE }}
+          MAKER_BASE_QUANTITY: ${{ vars.MAKER_BASE_QUANTITY }}
+          MAKER_MAX_POSITION_SIZE: ${{ vars.MAKER_MAX_POSITION_SIZE }}
+          MAKER_MAX_DAILY_LOSS_USD: ${{ vars.MAKER_MAX_DAILY_LOSS_USD }}
+          MAKER_VOLATILITY_MULTIPLIER: ${{ vars.MAKER_VOLATILITY_MULTIPLIER }}
+          MAKER_INVENTORY_SKEW_GAMMA: ${{ vars.MAKER_INVENTORY_SKEW_GAMMA }}
+          MAKER_MAX_SKEW_TICKS: ${{ vars.MAKER_MAX_SKEW_TICKS }}
+          MAKER_GAS_SPIKE_THRESHOLD_PCT: ${{ vars.MAKER_GAS_SPIKE_THRESHOLD_PCT }}
+          MAKER_GAS_CAP_MULTIPLIER: ${{ vars.MAKER_GAS_CAP_MULTIPLIER }}
+          MAKER_GAS_PENALTY_BPS: ${{ vars.MAKER_GAS_PENALTY_BPS }}
+          MAKER_MAX_GAS_BUDGET_HOUR_USD: ${{ vars.MAKER_MAX_GAS_BUDGET_HOUR_USD }}
+          MAKER_MAX_GAS_BUDGET_DAY_USD: ${{ vars.MAKER_MAX_GAS_BUDGET_DAY_USD }}
+          MAKER_URGENT_REQUOTE_TICKS: ${{ vars.MAKER_URGENT_REQUOTE_TICKS }}
+          MAKER_MAX_UTILIZATION_PCT: ${{ vars.MAKER_MAX_UTILIZATION_PCT }}
+          MAKER_MIN_COLLATERAL: ${{ vars.MAKER_MIN_COLLATERAL }}
+          MAKER_REQUOTE_THRESHOLD_TICKS: ${{ vars.MAKER_REQUOTE_THRESHOLD_TICKS }}
+          MAKER_REQUOTE_COOLDOWN_MS: ${{ vars.MAKER_REQUOTE_COOLDOWN_MS }}
         run: |
           CLUSTER="${{ needs.build.outputs.ecs_cluster }}"
           SERVICE="${{ needs.build.outputs.ecs_service }}"
@@ -171,12 +195,51 @@ jobs:
             --region ${REGION} \
             --query 'taskDefinition' > task-def.json
           
-          # Update task definition with new image
+          # Update image and strip metadata
           echo "🔧 Updating container image in task definition..."
           jq --arg IMAGE "${IMAGE}" \
               '.containerDefinitions[0].image = $IMAGE |
               del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
             task-def.json > new-task-def.json
+          
+          # Build env var overrides from GitHub environment variables
+          echo "🔧 Injecting environment variables from GitHub config..."
+          jq -n '[
+            {"name":"ETH_PRICE_FEED_ADDRESS","value":env.MAKER_ETH_PRICE_FEED_ADDRESS},
+            {"name":"MAKER_POLL_INTERVAL_MS","value":env.MAKER_POLL_INTERVAL_MS},
+            {"name":"MAKER_RESYNC_INTERVAL_MS","value":env.MAKER_RESYNC_INTERVAL_MS},
+            {"name":"MAKER_DRY_RUN","value":env.MAKER_DRY_RUN},
+            {"name":"MAKER_MIN_SPREAD_BPS","value":env.MAKER_MIN_SPREAD_BPS},
+            {"name":"MAKER_LEVELS_PER_SIDE","value":env.MAKER_LEVELS_PER_SIDE},
+            {"name":"MAKER_BASE_QUANTITY","value":env.MAKER_BASE_QUANTITY},
+            {"name":"MAKER_MAX_POSITION_SIZE","value":env.MAKER_MAX_POSITION_SIZE},
+            {"name":"MAKER_MAX_DAILY_LOSS_USD","value":env.MAKER_MAX_DAILY_LOSS_USD},
+            {"name":"MAKER_VOLATILITY_MULTIPLIER","value":env.MAKER_VOLATILITY_MULTIPLIER},
+            {"name":"MAKER_INVENTORY_SKEW_GAMMA","value":env.MAKER_INVENTORY_SKEW_GAMMA},
+            {"name":"MAKER_MAX_SKEW_TICKS","value":env.MAKER_MAX_SKEW_TICKS},
+            {"name":"MAKER_GAS_SPIKE_THRESHOLD_PCT","value":env.MAKER_GAS_SPIKE_THRESHOLD_PCT},
+            {"name":"MAKER_GAS_CAP_MULTIPLIER","value":env.MAKER_GAS_CAP_MULTIPLIER},
+            {"name":"MAKER_GAS_PENALTY_BPS","value":env.MAKER_GAS_PENALTY_BPS},
+            {"name":"MAKER_MAX_GAS_BUDGET_HOUR_USD","value":env.MAKER_MAX_GAS_BUDGET_HOUR_USD},
+            {"name":"MAKER_MAX_GAS_BUDGET_DAY_USD","value":env.MAKER_MAX_GAS_BUDGET_DAY_USD},
+            {"name":"MAKER_URGENT_REQUOTE_TICKS","value":env.MAKER_URGENT_REQUOTE_TICKS},
+            {"name":"MAKER_MAX_UTILIZATION_PCT","value":env.MAKER_MAX_UTILIZATION_PCT},
+            {"name":"MAKER_MIN_COLLATERAL","value":env.MAKER_MIN_COLLATERAL},
+            {"name":"MAKER_REQUOTE_THRESHOLD_TICKS","value":env.MAKER_REQUOTE_THRESHOLD_TICKS},
+            {"name":"MAKER_REQUOTE_COOLDOWN_MS","value":env.MAKER_REQUOTE_COOLDOWN_MS}
+          ]' > env-overrides.json
+          
+          # Merge overrides into task definition: update existing vars, add new ones
+          jq --slurpfile overrides env-overrides.json '
+            .containerDefinitions[0].environment as $existing |
+            ($overrides[0] | map({(.name): .}) | add) as $override_map |
+            .containerDefinitions[0].environment = (
+              [$existing[] | if $override_map[.name] then .value = $override_map[.name].value else . end] +
+              [$overrides[0][] | select(.name as $n | [$existing[].name] | index($n) | not)]
+            )
+          ' new-task-def.json > final-task-def.json
+          
+          mv final-task-def.json new-task-def.json
           
           # Register new task definition
           echo "📝 Registering new task definition revision..."
