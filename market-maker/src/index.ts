@@ -137,7 +137,7 @@ async function main(): Promise<void> {
       await book.refresh();
       await inventory.update();
 
-      if (inventory.tokenBalance > 0n && config.NODE_ENV === "production") {
+      if (inventory.tokenBalance > 0n && config.nodeEnv === "production") {
         try {
           await topUpCollateral({
             publicClient,

@@ -118,6 +118,8 @@ jobs:
           push: ${{ steps.gen_tag.outputs.is_cicd_branch != 'true' }}
           load: ${{ steps.gen_tag.outputs.is_cicd_branch == 'true' }}
           tags: ${{ steps.docker_tags.outputs.tags }}
+          build-args: |
+            COMMIT_HASH=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           labels: |

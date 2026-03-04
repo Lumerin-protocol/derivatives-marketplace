@@ -91,6 +91,7 @@ export class HealthCheck {
               reconcileCount: this.executorStats?.reconcileCount ?? 0,
               uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
               dryRun: this.config.dryRun,
+              commitHash: this.config.commitHash,
             });
 
             res.writeHead(200, { "Content-Type": "application/json" });
