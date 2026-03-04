@@ -26,9 +26,10 @@ locals {
   # DEV uses a list to allow both dev and cicd/* branches; STG/PRD use single-item lists
   github_branch_filter = var.account_lifecycle == "dev" ? [
     "ref:refs/heads/dev",
-    "ref:refs/heads/cicd/*"
+    "ref:refs/heads/cicd/*",
+    "environment:dev"
     ] : (
-    var.account_lifecycle == "stg" ? ["ref:refs/heads/stg"] : ["ref:refs/heads/main"]
+    var.account_lifecycle == "stg" ? ["ref:refs/heads/stg", "environment:stg"] : ["ref:refs/heads/main", "environment:main"]
   )
 
   ################################
