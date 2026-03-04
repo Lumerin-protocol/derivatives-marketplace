@@ -201,7 +201,7 @@ resource "aws_route53_record" "marketmaker_int_use1" {
 
 # Define Service
 resource "aws_ecs_service" "marketmaker_use1" {
-  lifecycle {ignore_changes = [task_definition] }
+  # lifecycle {ignore_changes = [task_definition] }
   count                  = var.marketmaker_service.create ? 1 : 0
   provider               = aws.use1
   name                   = "svc-${var.marketmaker_service.svc_name}-${substr(var.account_shortname, 8, 3)}"
@@ -247,7 +247,7 @@ resource "aws_ecs_service" "marketmaker_use1" {
 
 # Define Task  
 resource "aws_ecs_task_definition" "marketmaker_use1" {
-  lifecycle { ignore_changes = [container_definitions] }
+  # lifecycle { ignore_changes = [container_definitions] }
   count                    = var.marketmaker_service.create ? 1 : 0
   provider                 = aws.use1
   family                   = "tsk-${var.marketmaker_service.svc_name}"
@@ -281,7 +281,7 @@ resource "aws_ecs_task_definition" "marketmaker_use1" {
         },
         {
           name  = "MAKER_LOG_LEVEL"
-          value = "info"
+          value = var.marketmaker_service.maker_log_level
         },
         {
           name  = "PERPS_ADDRESS"
@@ -292,44 +292,8 @@ resource "aws_ecs_task_definition" "marketmaker_use1" {
           value = var.marketmaker_service.network
         },
         {
-          name  = "ETH_PRICE_FEED_ADDRESS"
-          value = var.marketmaker_service.eth_price_feed_address
-        },
-        {
-          name  = "MAKER_POLL_INTERVAL_MS"
-          value = var.marketmaker_service.maker_poll_interval_ms
-        },
-        {
-          name  = "MAKER_RESYNC_INTERVAL_MS"
-          value = var.marketmaker_service.maker_resync_interval_ms
-        },
-        {
-          name  = "MAKER_DRY_RUN"
-          value = var.marketmaker_service.maker_dry_run
-        },
-        {
           name  = "MAKER_HEALTH_PORT"
-          value = var.marketmaker_service.maker_health_port
-        },
-        {
-          name  = "MAKER_MIN_SPREAD_BPS"
-          value = var.marketmaker_service.maker_min_spread_bps
-        },
-        {
-          name  = "MAKER_LEVELS_PER_SIDE"
-          value = var.marketmaker_service.maker_levels_per_side
-        },
-        {
-          name  = "MAKER_BASE_QUANTITY"
-          value = var.marketmaker_service.maker_base_quantity
-        },
-        {
-          name  = "MAKER_MAX_POSITION_SIZE"
-          value = var.marketmaker_service.maker_max_position_size
-        },
-        {
-          name  = "MAKER_MAX_DAILY_LOSS_USD"
-          value = var.marketmaker_service.maker_max_daily_loss_usd
+          value = tostring(var.marketmaker_service.cnt_port)
         }
       ]
       secrets = [

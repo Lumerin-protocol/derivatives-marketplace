@@ -32,6 +32,8 @@ marketmaker_service = {
   cnt_name                 = "perps-mktmkr"
   task_cpu                 = 256
   task_ram                 = 512
+  network                  = "arbitrum"
+  maker_log_level          = "info"
 }
 
 ########################################
