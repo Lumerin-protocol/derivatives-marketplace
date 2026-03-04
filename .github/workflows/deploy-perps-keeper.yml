@@ -142,6 +142,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     if: needs.build.outputs.is_cicd_branch != 'true'
+    environment: ${{ needs.build.outputs.environment }}
     
     steps:
       - name: Configure AWS credentials
@@ -152,6 +153,13 @@ jobs:
           role-session-name: GitHubActions-PerpsKeeper-${{ github.run_id }}
 
       - name: Update task definition and deploy
+        env:
+          KEEPER_ETH_PRICE_FEED_ADDRESS: ${{ vars.KEEPER_ETH_PRICE_FEED_ADDRESS }}
+          KEEPER_POLL_INTERVAL_MS: ${{ vars.KEEPER_POLL_INTERVAL_MS }}
+          KEEPER_RESYNC_INTERVAL_MS: ${{ vars.KEEPER_RESYNC_INTERVAL_MS }}
+          KEEPER_DRY_RUN: ${{ vars.KEEPER_DRY_RUN }}
+          KEEPER_MIN_PROFIT_MARGIN: ${{ vars.KEEPER_MIN_PROFIT_MARGIN }}
+          PERPS_ADDRESS: ${{ vars.PERPS_ADDRESS }}
         run: |
           CLUSTER="${{ needs.build.outputs.ecs_cluster }}"
           SERVICE="${{ needs.build.outputs.ecs_service }}"
@@ -172,12 +180,35 @@ jobs:
             --region ${REGION} \
             --query 'taskDefinition' > task-def.json
           
-          # Update task definition with new image
+          # Update image and strip metadata
           echo "🔧 Updating container image in task definition..."
           jq --arg IMAGE "${IMAGE}" \
               '.containerDefinitions[0].image = $IMAGE |
               del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
             task-def.json > new-task-def.json
+          
+          # Build env var overrides from GitHub environment variables
+          echo "🔧 Injecting environment variables from GitHub config..."
+          jq -n '[
+            {"name":"ETH_PRICE_FEED_ADDRESS","value":env.KEEPER_ETH_PRICE_FEED_ADDRESS},
+            {"name":"KEEPER_POLL_INTERVAL_MS","value":env.KEEPER_POLL_INTERVAL_MS},
+            {"name":"KEEPER_RESYNC_INTERVAL_MS","value":env.KEEPER_RESYNC_INTERVAL_MS},
+            {"name":"KEEPER_DRY_RUN","value":env.KEEPER_DRY_RUN},
+            {"name":"KEEPER_MIN_PROFIT_MARGIN","value":env.KEEPER_MIN_PROFIT_MARGIN},
+            {"name":"PERPS_ADDRESS","value":env.PERPS_ADDRESS}
+          ]' > env-overrides.json
+          
+          # Merge overrides into task definition: update existing vars, add new ones
+          jq --slurpfile overrides env-overrides.json '
+            .containerDefinitions[0].environment as $existing |
+            ($overrides[0] | map({(.name): .}) | add) as $override_map |
+            .containerDefinitions[0].environment = (
+              [$existing[] | if $override_map[.name] then .value = $override_map[.name].value else . end] +
+              [$overrides[0][] | select(.name as $n | [$existing[].name] | index($n) | not)]
+            )
+          ' new-task-def.json > final-task-def.json
+          
+          mv final-task-def.json new-task-def.json
           
           # Register new task definition
           echo "📝 Registering new task definition revision..."

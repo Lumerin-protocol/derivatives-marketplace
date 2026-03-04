@@ -17,8 +17,8 @@ perpskeeper_service = {
   cnt_name                    = "perps-keeper"
   task_cpu                    = 256
   task_ram                    = 512
-
-
+  network                     = "arbitrum"
+  keeper_log_level            = "info"
 }
 
 # Configure MarketMaker Service
