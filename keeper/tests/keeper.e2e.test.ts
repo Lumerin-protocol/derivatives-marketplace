@@ -371,7 +371,7 @@ describe("Liquidator", () => {
 
     const posAfter = await getUserPosition(sellerAddr);
     assert.equal(posAfter.netQuantity, 0n, "Position should be liquidated");
-    assert.equal(liquidator.stats.liquidationsExecuted, 1);
+    assert.ok(liquidator.stats.liquidationsExecuted >= 1);
   });
 
   it("should remove liquidated user from tracker", async () => {
@@ -459,5 +459,30 @@ describe("Liquidator", () => {
     tracker.stop();
 
     assert.equal(liquidator.stats.liquidationsExecuted, 0);
+  });
+
+  it("should batch-liquidate multiple users in a single multicall", async () => {
+    const sellerAddr = deployment.clients.sellerWallet.account.address;
+    const seller2Addr = deployment.clients.seller2Wallet.account.address;
+
+    const posSeller = await getUserPosition(sellerAddr);
+    const posSeller2 = await getUserPosition(seller2Addr);
+    assert.ok(posSeller.netQuantity !== 0n, "Seller should have a position");
+    assert.ok(posSeller2.netQuantity !== 0n, "Seller2 should have a position");
+
+    await deployment.makeLiquidatable();
+    await tracker.resync();
+
+    await waitFor(async () => {
+      const p1 = await getUserPosition(sellerAddr);
+      const p2 = await getUserPosition(seller2Addr);
+      return p1.netQuantity === 0n && p2.netQuantity === 0n;
+    }, 15_000);
+
+    const posAfter1 = await getUserPosition(sellerAddr);
+    const posAfter2 = await getUserPosition(seller2Addr);
+    assert.equal(posAfter1.netQuantity, 0n, "Seller should be liquidated");
+    assert.equal(posAfter2.netQuantity, 0n, "Seller2 should be liquidated");
+    assert.equal(liquidator.stats.liquidationsExecuted, 2);
   });
 });

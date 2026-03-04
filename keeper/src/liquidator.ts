@@ -1,4 +1,4 @@
-import { type PublicClient, type WalletClient, type Account, BaseError } from "viem";
+import type { PublicClient, WalletClient, Account } from "viem";
 import { perpsSimpleAbi, aggregatorV3InterfaceAbi } from "./abi.ts";
 import type { Config } from "./config.ts";
 import type { PositionTracker, UserState } from "./positionTracker.ts";
@@ -140,23 +140,24 @@ export class Liquidator {
 
       const candidates = this.findCandidates(currentPrice);
 
-      if (candidates.length > 0) {
-        this.logger.info(
-          {
-            count: candidates.length,
-            price: currentPrice,
-            users: candidates.map((u) => u.address),
-          },
-          "Liquidation candidates found",
-        );
-
-        // Process sequentially to avoid nonce issues
-        for (const candidate of candidates) {
-          await this.attemptLiquidation(candidate, currentPrice);
-        }
-      } else {
+      if (candidates.length === 0) {
         this.logger.debug("No liquidation candidates found");
+        return;
       }
+
+      this.logger.info(
+        {
+          count: candidates.length,
+          price: currentPrice,
+          users: candidates.map((u) => u.address),
+        },
+        "Liquidation candidates found",
+      );
+
+      const validated = await this.validateCandidates(candidates, currentPrice);
+      if (validated.length === 0) return;
+
+      await this.executeBatchLiquidation(validated, currentPrice);
     } catch (err) {
       this.logger.error({ err }, "Price check failed");
     }
@@ -182,102 +183,138 @@ export class Liquidator {
     return candidates;
   }
 
+  // ── Validation ──────────────────────────────────────────────────────────
+
+  /**
+   * Simulate each candidate on-chain, check profitability, return only
+   * the ones that are safe to execute.
+   */
+  private async validateCandidates(
+    candidates: UserState[],
+    currentPrice: bigint,
+  ): Promise<UserState[]> {
+    const [gasPrice, ethPrice] = await Promise.all([
+      this.publicClient.getGasPrice(),
+      this.getEthPrice(),
+    ]);
+
+    const validated: UserState[] = [];
+
+    for (const user of candidates) {
+      const logCtx = this.logContext(user, currentPrice);
+
+      try {
+        await this.publicClient.simulateContract({
+          address: this.config.perpsAddress,
+          abi: perpsSimpleAbi,
+          functionName: "liquidateBatch",
+          args: [[user.address]],
+          account: this.account,
+        });
+
+        const gasEstimate = await this.publicClient.estimateContractGas({
+          address: this.config.perpsAddress,
+          abi: perpsSimpleAbi,
+          functionName: "liquidateBatch",
+          args: [[user.address]],
+          account: this.account,
+        });
+
+        const gasCostWei = gasEstimate * gasPrice;
+        const gasCostCollateral = this.gasCostToCollateral(gasCostWei, ethPrice);
+        const netProfit = this.liquidationFee - gasCostCollateral;
+
+        if (netProfit < this.config.minProfitMargin) {
+          this.logger.info(
+            { ...logCtx, liquidationFee: this.liquidationFee, gasCostCollateral, netProfit, minProfitMargin: this.config.minProfitMargin },
+            "Skipping — below minimum profit margin",
+          );
+          continue;
+        }
+
+        if (this.config.dryRun) {
+          this.logger.info(
+            { ...logCtx, gasEstimate, gasCostWei, gasCostCollateral, ethPrice, liquidationFee: this.liquidationFee, netProfit },
+            "DRY RUN — would liquidate",
+          );
+          continue;
+        }
+
+        validated.push(user);
+      } catch (error) {
+        const errorStr = String(error);
+        if (errorStr.includes("NotLiquidatable")) {
+          this.logger.warn(logCtx, "Simulation reverted: NotLiquidatable (state drift)");
+        } else {
+          this.logger.error({ logCtx }, "Liquidation validation failed");
+        }
+      }
+    }
+
+    return validated;
+  }
+
   // ── Liquidation execution ───────────────────────────────────────────────
 
-  private async attemptLiquidation(user: UserState, currentPrice: bigint): Promise<void> {
-    const logCtx = {
-      user: user.address,
-      currentPrice,
-      liquidationPrice: user.liquidationPrice,
-      netQuantity: user.netQuantity,
-      collateral: user.collateral,
-      isLong: user.isLong,
-    };
+  private async executeBatchLiquidation(users: UserState[], currentPrice: bigint): Promise<void> {
+    const addresses = users.map((u) => u.address);
 
     try {
-      // On-chain safety check — simulate the liquidate() call
-      const { request } = await this.publicClient.simulateContract({
+      const txHash = await this.walletClient.writeContract({
         address: this.config.perpsAddress,
         abi: perpsSimpleAbi,
-        functionName: "liquidate",
-        args: [user.address],
+        functionName: "liquidateBatch",
+        args: [addresses],
         account: this.account,
       });
 
-      // Estimate gas and fetch ETH price for profitability check
-      const [gasEstimate, gasPrice, ethPrice] = await Promise.all([
-        this.publicClient.estimateContractGas({
-          address: this.config.perpsAddress,
-          abi: perpsSimpleAbi,
-          functionName: "liquidate",
-          args: [user.address],
-          account: this.account,
-        }),
-        this.publicClient.getGasPrice(),
-        this.getEthPrice(),
-      ]);
-
-      const gasCostWei = gasEstimate * gasPrice;
-      const gasCostCollateral = this.gasCostToCollateral(gasCostWei, ethPrice);
-      const netProfit = this.liquidationFee - gasCostCollateral;
-
-      if (netProfit < this.config.minProfitMargin) {
-        this.logger.info(
-          {
-            ...logCtx,
-            liquidationFee: this.liquidationFee,
-            gasCostCollateral,
-            netProfit,
-            minProfitMargin: this.config.minProfitMargin,
-          },
-          "Skipping — below minimum profit margin",
-        );
-        return;
-      }
-
-      if (this.config.dryRun) {
-        this.logger.info(
-          {
-            ...logCtx,
-            gasEstimate,
-            gasCostWei,
-            gasCostCollateral,
-            ethPrice,
-            liquidationFee: this.liquidationFee,
-            netProfit,
-          },
-          "DRY RUN — would liquidate",
-        );
-        return;
-      }
-
-      // Execute
-      const txHash = await this.walletClient.writeContract(request);
-
       this.logger.info(
-        {
-          ...logCtx,
-          txHash,
-          liquidationFee: this.liquidationFee,
-          gasCostCollateral,
-          netProfit,
-        },
-        "Liquidation tx submitted",
+        { count: users.length, users: addresses, txHash },
+        "Batch liquidation tx submitted",
+      );
+      this._liquidationsExecuted += users.length;
+
+      const receipt = await this.publicClient.waitForTransactionReceipt({ hash: txHash });
+      this.logger.info(
+        { txHash, status: receipt.status, gasUsed: receipt.gasUsed, blockNumber: receipt.blockNumber, count: users.length },
+        "Batch liquidation confirmed",
       );
 
+      if (receipt.status === "success") {
+        for (const user of users) {
+          await this.tracker.syncUser(user.address);
+        }
+      }
+    } catch (error) {
+      this.logger.warn(
+        { count: users.length, users: addresses, error },
+        "Batch liquidation failed, falling back to individual calls",
+      );
+
+      for (const user of users) {
+        await this.executeSingleLiquidation(user, currentPrice);
+      }
+    }
+  }
+
+  private async executeSingleLiquidation(user: UserState, currentPrice: bigint): Promise<void> {
+    const logCtx = this.logContext(user, currentPrice);
+
+    try {
+      const txHash = await this.walletClient.writeContract({
+        address: this.config.perpsAddress,
+        abi: perpsSimpleAbi,
+        functionName: "liquidateBatch",
+        args: [[user.address]],
+        account: this.account,
+      });
+
+      this.logger.info({ ...logCtx, txHash }, "Liquidation tx submitted");
       this._liquidationsExecuted++;
 
-      // Wait for confirmation
       const receipt = await this.publicClient.waitForTransactionReceipt({ hash: txHash });
-
       this.logger.info(
-        {
-          user: user.address,
-          txHash,
-          status: receipt.status,
-          gasUsed: receipt.gasUsed,
-          blockNumber: receipt.blockNumber,
-        },
+        { user: user.address, txHash, status: receipt.status, gasUsed: receipt.gasUsed, blockNumber: receipt.blockNumber },
         "Liquidation confirmed",
       );
 
@@ -285,13 +322,18 @@ export class Liquidator {
         await this.tracker.syncUser(user.address);
       }
     } catch (error) {
-      const errorStr = String(error);
-
-      if (errorStr.includes("NotLiquidatable")) {
-        this.logger.warn(logCtx, "Simulation reverted: NotLiquidatable (state drift)");
-      } else {
-        this.logger.error({ logCtx }, "Liquidation attempt failed");
-      }
+      this.logger.error({ ...logCtx, error }, "Liquidation attempt failed");
     }
+  }
+
+  private logContext(user: UserState, currentPrice: bigint) {
+    return {
+      user: user.address,
+      currentPrice,
+      liquidationPrice: user.liquidationPrice,
+      netQuantity: user.netQuantity,
+      collateral: user.collateral,
+      isLong: user.isLong,
+    };
   }
 }

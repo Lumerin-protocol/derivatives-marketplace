@@ -46,6 +46,7 @@ export async function deployPerpsFixture() {
   const buyerWallet = createTestWalletClient(HARDHAT_ACCOUNTS[2].privateKey);
   const buyer2Wallet = createTestWalletClient(HARDHAT_ACCOUNTS[3].privateKey);
   const keeperWallet = createTestWalletClient(HARDHAT_ACCOUNTS[3].privateKey);
+  const seller2Wallet = createTestWalletClient(HARDHAT_ACCOUNTS[4].privateKey);
 
   // Deploy Multicall3 at the well-known address so viem's multicall works
   const multicall3Artifact = loadArtifact("contracts/Multicall3.sol/Multicall3.json");
@@ -81,6 +82,7 @@ export async function deployPerpsFixture() {
   await usdc.write.transfer([HARDHAT_ACCOUNTS[1].address, topUpBalanceUSDC]);
   await usdc.write.transfer([HARDHAT_ACCOUNTS[2].address, topUpBalanceUSDC]);
   await usdc.write.transfer([HARDHAT_ACCOUNTS[3].address, topUpBalanceUSDC]);
+  await usdc.write.transfer([HARDHAT_ACCOUNTS[4].address, topUpBalanceUSDC]);
 
   const marginPercent = 10;
   const maintenanceMarginPercent = 5;
@@ -116,7 +118,7 @@ export async function deployPerpsFixture() {
   await perps.write.setMatchFee([takerFeeBps, makerFeeBps]);
   await perps.write.setLiquidationFee([liquidationFee]);
 
-  for (const wallet of [sellerWallet, buyerWallet, buyer2Wallet, ownerWallet]) {
+  for (const wallet of [sellerWallet, buyerWallet, buyer2Wallet, ownerWallet, seller2Wallet]) {
     const usdcForWallet = getContract({
       address: usdcAddress,
       abi: usdcMockAbi,
@@ -145,6 +147,7 @@ export async function deployPerpsFixture() {
       buyerWallet,
       buyer2Wallet,
       keeperWallet,
+      seller2Wallet,
     },
     contracts: { perpsAddress: perpsProxyAddress, usdcAddress, oracleAddress, perps },
     config: {
@@ -172,7 +175,7 @@ export async function deployWithCollateralFixture() {
 
   const collateralPerUser = parseUnits("1000", config.tokenDecimals);
 
-  for (const wallet of [clients.sellerWallet, clients.buyerWallet, clients.buyer2Wallet]) {
+  for (const wallet of [clients.sellerWallet, clients.buyerWallet, clients.buyer2Wallet, clients.seller2Wallet]) {
     const perps = getContract({
       address: contracts.perpsAddress,
       abi: perpsSimpleAbi,
@@ -193,31 +196,29 @@ export async function deployWithLiquidatablePositionFixture() {
   const data = await deployPerpsFixture();
   const { clients, contracts, config, getMinimumCollateral } = data;
 
-  const perpsOwner = getContract({
-    address: contracts.perpsAddress,
-    abi: perpsSimpleAbi,
-    client: { public: clients.publicClient, wallet: clients.ownerWallet },
-  });
-  const perpsSeller = getContract({
-    address: contracts.perpsAddress,
-    abi: perpsSimpleAbi,
-    client: { public: clients.publicClient, wallet: clients.sellerWallet },
-  });
-  const perpsBuyer = getContract({
-    address: contracts.perpsAddress,
-    abi: perpsSimpleAbi,
-    client: { public: clients.publicClient, wallet: clients.buyerWallet },
-  });
+  const makePerps = (wallet: typeof clients.ownerWallet) =>
+    getContract({
+      address: contracts.perpsAddress,
+      abi: perpsSimpleAbi,
+      client: { public: clients.publicClient, wallet },
+    });
+
+  const perpsOwner = makePerps(clients.ownerWallet);
+  const perpsSeller = makePerps(clients.sellerWallet);
+  const perpsSeller2 = makePerps(clients.seller2Wallet);
+  const perpsBuyer = makePerps(clients.buyerWallet);
 
   const initialPrice = (await perpsOwner.read.getMarketPrice()) as bigint;
   const qty = parseUnits("1", config.quantityDecimals);
 
   const minCollateral = getMinimumCollateral(initialPrice, qty);
   await perpsSeller.write.addCollateral([minCollateral]);
-  await perpsBuyer.write.addCollateral([minCollateral * 2n]);
+  await perpsSeller2.write.addCollateral([minCollateral]);
+  await perpsBuyer.write.addCollateral([minCollateral * 3n]);
 
   await perpsSeller.write.createOrder([initialPrice, -qty]);
-  await perpsBuyer.write.createOrder([initialPrice, qty]);
+  await perpsSeller2.write.createOrder([initialPrice, -qty]);
+  await perpsBuyer.write.createOrder([initialPrice, qty * 2n]);
 
   const makeLiquidatable = async (): Promise<bigint> => {
     const newPrice = initialPrice * 2n;

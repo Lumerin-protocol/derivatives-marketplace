@@ -1136,8 +1136,8 @@ export const perpsSimpleAbi = [
   },
   {
     type: 'function',
-    inputs: [{ name: '_user', internalType: 'address', type: 'address' }],
-    name: 'liquidate',
+    inputs: [{ name: '_users', internalType: 'address[]', type: 'address[]' }],
+    name: 'liquidateBatch',
     outputs: [],
     stateMutability: 'nonpayable',
   },
@@ -1182,6 +1182,13 @@ export const perpsSimpleAbi = [
     name: 'minimumPriceIncrement',
     outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
     stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: 'data', internalType: 'bytes[]', type: 'bytes[]' }],
+    name: 'multicall',
+    outputs: [{ name: 'results', internalType: 'bytes[]', type: 'bytes[]' }],
+    stateMutability: 'nonpayable',
   },
   {
     type: 'function',

@@ -1,15 +1,16 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
-import { parseUnits, getAddress } from "viem";
+import { parseUnits, getAddress, parseEventLogs } from "viem";
 import {
   deployPerpsWithPositionsFixture,
   deployPerpsWithLiquidatablePositionFixture,
+  deployPerpsWithBatchLiquidatableFixture,
 } from "./fixtures.ts";
 
 const { viem, networkHelpers } = await network.connect();
 
-describe("PerpsSimple - liquidate", function () {
+describe("PerpsSimple - liquidateBatch", function () {
   it("should revert when position is healthy", async function () {
     const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsWithPositionsFixture);
     const { perps } = contracts;
@@ -19,7 +20,7 @@ describe("PerpsSimple - liquidate", function () {
     assert.ok(!isLiquidatable);
 
     await viem.assertions.revertWithCustomError(
-      perps.write.liquidate([seller.account.address], { account: buyer2.account }),
+      perps.write.liquidateBatch([[seller.account.address]], { account: buyer2.account }),
       perps,
       "NotLiquidatable",
     );
@@ -39,7 +40,7 @@ describe("PerpsSimple - liquidate", function () {
     const isLiquidatable = await perps.read.isLiquidatable([seller.account.address]);
     assert.ok(isLiquidatable);
 
-    await perps.write.liquidate([seller.account.address], { account: buyer2.account });
+    await perps.write.liquidateBatch([[seller.account.address]], { account: buyer2.account });
 
     const positionAfter = await perps.read.getUserPosition([seller.account.address]);
     assert.equal(positionAfter.netQuantity, 0n);
@@ -55,7 +56,7 @@ describe("PerpsSimple - liquidate", function () {
 
     const liquidatorBalanceBefore = await perps.read.balanceOf([buyer2.account.address]);
 
-    await perps.write.liquidate([seller.account.address], { account: buyer2.account });
+    await perps.write.liquidateBatch([[seller.account.address]], { account: buyer2.account });
 
     const liquidatorBalanceAfter = await perps.read.balanceOf([buyer2.account.address]);
 
@@ -73,7 +74,7 @@ describe("PerpsSimple - liquidate", function () {
     const usersBefore = await perps.read.getUsersWithPositions();
     assert.ok(usersBefore.map((u: string) => getAddress(u)).includes(getAddress(seller.account.address)));
 
-    await perps.write.liquidate([seller.account.address], { account: buyer2.account });
+    await perps.write.liquidateBatch([[seller.account.address]], { account: buyer2.account });
 
     const usersAfter = await perps.read.getUsersWithPositions();
     assert.ok(!usersAfter.map((u: string) => getAddress(u)).includes(getAddress(seller.account.address)));
@@ -87,7 +88,7 @@ describe("PerpsSimple - liquidate", function () {
 
     await data.makeLiquidatable();
 
-    const hash = await perps.write.liquidate([seller.account.address], { account: buyer2.account });
+    const hash = await perps.write.liquidateBatch([[seller.account.address]], { account: buyer2.account });
     const receipt = await pc.waitForTransactionReceipt({ hash });
 
     const events = receipt.logs.filter(
@@ -105,9 +106,117 @@ describe("PerpsSimple - liquidate", function () {
     assert.equal(position.netQuantity, 0n);
 
     await viem.assertions.revertWithCustomError(
-      perps.write.liquidate([buyer2.account.address], { account: buyer2.account }),
+      perps.write.liquidateBatch([[buyer2.account.address]], { account: buyer2.account }),
       perps,
       "NotLiquidatable",
     );
+  });
+
+  describe("multiple users", function () {
+    it("should liquidate multiple underwater positions in a single tx", async function () {
+      const data = await networkHelpers.loadFixture(deployPerpsWithBatchLiquidatableFixture);
+      const { contracts, accounts, config } = data;
+      const { perps } = contracts;
+      const { seller, seller2, buyer2, pc } = accounts;
+
+      await data.makeLiquidatable();
+
+      assert.ok(await perps.read.isLiquidatable([seller.account.address]));
+      assert.ok(await perps.read.isLiquidatable([seller2.account.address]));
+
+      const hash = await perps.write.liquidateBatch(
+        [[seller.account.address, seller2.account.address]],
+        { account: buyer2.account },
+      );
+      const receipt = await pc.waitForTransactionReceipt({ hash });
+
+      const events = parseEventLogs({ logs: receipt.logs, abi: perps.abi, eventName: "PositionLiquidated" });
+      assert.equal(events.length, 2);
+
+      const pos1 = await perps.read.getUserPosition([seller.account.address]);
+      const pos2 = await perps.read.getUserPosition([seller2.account.address]);
+      assert.equal(pos1.netQuantity, 0n);
+      assert.equal(pos2.netQuantity, 0n);
+    });
+
+    it("should skip non-liquidatable users and still liquidate the rest", async function () {
+      const data = await networkHelpers.loadFixture(deployPerpsWithBatchLiquidatableFixture);
+      const { contracts, accounts } = data;
+      const { perps } = contracts;
+      const { seller, seller2, buyer, buyer2, pc } = accounts;
+
+      await data.makeLiquidatable();
+
+      // buyer is long and profiting from the price increase — not liquidatable
+      assert.ok(!(await perps.read.isLiquidatable([buyer.account.address])));
+      assert.ok(await perps.read.isLiquidatable([seller.account.address]));
+
+      const hash = await perps.write.liquidateBatch(
+        [[seller.account.address, buyer.account.address, seller2.account.address]],
+        { account: buyer2.account },
+      );
+      const receipt = await pc.waitForTransactionReceipt({ hash });
+
+      const events = parseEventLogs({ logs: receipt.logs, abi: perps.abi, eventName: "PositionLiquidated" });
+      assert.equal(events.length, 2, "only the two liquidatable users should be liquidated");
+
+      const posSeller = await perps.read.getUserPosition([seller.account.address]);
+      const posBuyer = await perps.read.getUserPosition([buyer.account.address]);
+      assert.equal(posSeller.netQuantity, 0n);
+      assert.ok(posBuyer.netQuantity !== 0n, "healthy position should be untouched");
+    });
+
+    it("should revert if no users are liquidatable", async function () {
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsWithPositionsFixture);
+      const { perps } = contracts;
+      const { seller, buyer, buyer2 } = accounts;
+
+      await viem.assertions.revertWithCustomError(
+        perps.write.liquidateBatch(
+          [[seller.account.address, buyer.account.address]],
+          { account: buyer2.account },
+        ),
+        perps,
+        "NotLiquidatable",
+      );
+    });
+
+    it("should emit PositionLiquidated with fee for each user", async function () {
+      const data = await networkHelpers.loadFixture(deployPerpsWithBatchLiquidatableFixture);
+      const { contracts, accounts } = data;
+      const { perps } = contracts;
+      const { seller, seller2, buyer2, pc } = accounts;
+
+      await data.makeLiquidatable();
+
+      const hash = await perps.write.liquidateBatch(
+        [[seller.account.address, seller2.account.address]],
+        { account: buyer2.account },
+      );
+      const receipt = await pc.waitForTransactionReceipt({ hash });
+
+      const events = parseEventLogs({ logs: receipt.logs, abi: perps.abi, eventName: "PositionLiquidated" });
+      assert.equal(events.length, 2);
+
+      const liquidators = events.map((e) => getAddress(e.args.liquidator));
+      assert.ok(liquidators.every((l) => l === getAddress(buyer2.account.address)));
+    });
+
+    it("should handle single user array (same as liquidate)", async function () {
+      const data = await networkHelpers.loadFixture(deployPerpsWithBatchLiquidatableFixture);
+      const { contracts, accounts } = data;
+      const { perps } = contracts;
+      const { seller, buyer2 } = accounts;
+
+      await data.makeLiquidatable();
+
+      await perps.write.liquidateBatch(
+        [[seller.account.address]],
+        { account: buyer2.account },
+      );
+
+      const pos = await perps.read.getUserPosition([seller.account.address]);
+      assert.equal(pos.netQuantity, 0n);
+    });
   });
 });
