@@ -72,12 +72,13 @@ async function main(): Promise<void> {
       await oracle.update();
       await gas.update();
       await inventory.update();
-      health.initStatus = "ready";
-      health.lastInitError = null;
+      health.status = "running";
+      health.lastError = null;
       break;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      health.lastInitError = msg;
+      health.status = "init-error";
+      health.lastError = msg;
       const delay = Math.min(INIT_BASE_DELAY_MS * 2 ** (attempt - 1), INIT_MAX_DELAY_MS);
       logger.warn({ err, attempt, retryInMs: delay }, "initialization failed, retrying");
       await new Promise((r) => setTimeout(r, delay));
@@ -130,7 +131,8 @@ async function main(): Promise<void> {
       const desired = quoter.computeQuotes();
       await executor.reconcile(desired);
 
-      health.lastTickError = null;
+      health.status = "running";
+      health.lastError = null;
 
       logger.info(
         {
@@ -148,7 +150,8 @@ async function main(): Promise<void> {
         "tick",
       );
     } catch (err) {
-      health.lastTickError = err instanceof Error ? err.message : String(err);
+      health.status = "error";
+      health.lastError = err instanceof Error ? err.message : String(err);
       logger.error({ err }, "tick error");
     }
 

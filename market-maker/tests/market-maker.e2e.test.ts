@@ -83,6 +83,7 @@ async function initStack(stack: MakerStack): Promise<void> {
   await stack.gas.update();
   await stack.inventory.update();
   stack.risk.initialize();
+  stack.health.status = "running";
 }
 
 function stopStack(stack: MakerStack): void {

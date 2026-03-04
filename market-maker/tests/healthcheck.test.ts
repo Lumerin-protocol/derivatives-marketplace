@@ -49,14 +49,15 @@ function makeDeps() {
 describe("HealthCheck", () => {
   let health: HealthCheck | null = null;
 
-  afterEach(() => {
-    health?.stop();
+  afterEach(async () => {
+    await health?.stop();
     health = null;
   });
 
   it("starts and responds to /health with JSON", async () => {
     const { config, oracle, inventory, book, gas, risk, port } = makeDeps();
     health = new HealthCheck(config, oracle, inventory, book, gas, risk, makeLogger());
+    health.status = "running";
     await health.start();
 
     const res = await fetch(`http://localhost:${port}/health`);
@@ -79,11 +80,49 @@ describe("HealthCheck", () => {
     assert.equal(body.throttled, false);
   });
 
+  it("reports initializing status before init completes", async () => {
+    const { config, oracle, inventory, book, gas, risk, port } = makeDeps();
+    health = new HealthCheck(config, oracle, inventory, book, gas, risk, makeLogger());
+    await health.start();
+
+    const res = await fetch(`http://localhost:${port}/health`);
+    const body = await res.json();
+    assert.equal(body.status, "initializing");
+    assert.equal(body.lastError, null);
+  });
+
+  it("reports init-error status with lastError on init failure", async () => {
+    const { config, oracle, inventory, book, gas, risk, port } = makeDeps();
+    health = new HealthCheck(config, oracle, inventory, book, gas, risk, makeLogger());
+    health.status = "init-error";
+    health.lastError = "insufficient funds for gas";
+    await health.start();
+
+    const res = await fetch(`http://localhost:${port}/health`);
+    const body = await res.json();
+    assert.equal(body.status, "init-error");
+    assert.equal(body.lastError, "insufficient funds for gas");
+  });
+
+  it("reports error status when tick fails", async () => {
+    const { config, oracle, inventory, book, gas, risk, port } = makeDeps();
+    health = new HealthCheck(config, oracle, inventory, book, gas, risk, makeLogger());
+    health.status = "error";
+    health.lastError = "execution reverted";
+    await health.start();
+
+    const res = await fetch(`http://localhost:${port}/health`);
+    const body = await res.json();
+    assert.equal(body.status, "error");
+    assert.equal(body.lastError, "execution reverted");
+  });
+
   it("reports halted status when risk is halted", async () => {
     const deps = makeDeps();
     (deps.risk as Record<string, unknown>).halted = true;
     (deps.risk as Record<string, unknown>).haltReason = "drawdown";
     health = new HealthCheck(deps.config, deps.oracle, deps.inventory, deps.book, deps.gas, deps.risk, makeLogger());
+    health.status = "halted";
     await health.start();
 
     const res = await fetch(`http://localhost:${deps.port}/health`);
@@ -114,15 +153,15 @@ describe("HealthCheck", () => {
     const { config, oracle, inventory, book, gas, risk } = makeDeps();
     health = new HealthCheck(config, oracle, inventory, book, gas, risk, makeLogger());
     await health.start();
-    health.stop();
-    health.stop();
+    await health.stop();
+    await health.stop();
     health = null;
   });
 
-  it("stop without start does not throw", () => {
+  it("stop without start does not throw", async () => {
     const { config, oracle, inventory, book, gas, risk } = makeDeps();
     health = new HealthCheck(config, oracle, inventory, book, gas, risk, makeLogger());
-    health.stop();
+    await health.stop();
     health = null;
   });
 });

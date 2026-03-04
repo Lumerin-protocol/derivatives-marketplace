@@ -22,9 +22,8 @@ export class HealthCheck {
   lastTickAt = 0;
   executorStats: ExecutorStats | null = null;
   walletAddress = "";
-  initStatus: "initializing" | "ready" = "initializing";
-  lastInitError: string | null = null;
-  lastTickError: string | null = null;
+  status: "initializing" | "init-error" | "running" | "error" | "halted" = "initializing";
+  lastError: string | null = null;
 
   private readonly config: MakerConfig;
   private readonly oracle: OracleTracker;
@@ -58,15 +57,10 @@ export class HealthCheck {
 
       this.server = createServer((req, res) => {
         if (req.method === "GET" && req.url === "/health") {
-          const status = this.initStatus === "initializing"
-            ? "initializing"
-            : this.risk.halted ? "halted" : "running";
-
           const body = JSON.stringify({
-            status,
+            status: this.status === "running" && this.risk.halted ? "halted" : this.status,
             walletAddress: this.walletAddress,
-            lastInitError: this.lastInitError,
-            lastTickError: this.lastTickError,
+            lastError: this.lastError,
             haltReason: this.risk.haltReason,
             throttled: this.risk.throttled,
             throttleReason: this.risk.throttleReason,
