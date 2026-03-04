@@ -1,6 +1,8 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { decodeFunctionData } from "viem";
 import { OrderExecutor } from "../src/orderExecutor.ts";
+import { perpsSimpleAbi } from "../src/abi.ts";
 import type { MakerConfig } from "../src/config.ts";
 import type { Quoter, DesiredQuotes } from "../src/quoter.ts";
 import type { BookTracker, OwnOrder } from "../src/bookTracker.ts";
@@ -86,8 +88,14 @@ function makeExecutor(deps: TestDeps): OrderExecutor {
 
   const mockWalletClient = {
     writeContract: async (args: { functionName: string; args: unknown[] }) => {
-      if (args.functionName === "cancelOrder") deps.cancelledOrders.push(args.args[0]);
-      if (args.functionName === "createOrder") deps.placedOrders.push(args.args);
+      if (args.functionName === "multicall") {
+        const calls = args.args[0] as `0x${string}`[];
+        for (const callData of calls) {
+          const decoded = decodeFunctionData({ abi: perpsSimpleAbi, data: callData });
+          if (decoded.functionName === "cancelOrder") deps.cancelledOrders.push(decoded.args[0]);
+          if (decoded.functionName === "createOrder") deps.placedOrders.push(decoded.args);
+        }
+      }
       deps.txHashes.push("0xabc");
       return "0xabc" as `0x${string}`;
     },

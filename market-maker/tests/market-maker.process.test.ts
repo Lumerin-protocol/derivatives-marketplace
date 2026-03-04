@@ -170,7 +170,7 @@ describe("MM process — quoting and fills", () => {
 
   it("should show positive collateral via API", async () => {
     const h = await fetchHealth(mm.port);
-    assert.ok(BigInt(h.collateral as string) > 0n);
+    assert.ok(BigInt(h.collateralBalance as string) > 0n);
   });
 
   it("should update inventory when a taker fills the ask", async () => {
@@ -209,7 +209,10 @@ describe("MM process — quoting and fills", () => {
       abi: priceOracleMockAbi,
       client: { wallet: ownerWallet },
     });
-    await oracle.write.setPrice([deployment.config.oracle.price * 2n, deployment.config.oracle.decimals]);
+    await oracle.write.setPrice([
+      deployment.config.oracle.price * 2n,
+      deployment.config.oracle.decimals,
+    ]);
 
     // Wait for the book to reflect the higher bid
     let hAfter!: Record<string, unknown>;
@@ -257,12 +260,12 @@ describe("MM process — on-chain book structure", () => {
       abi: perpsSimpleAbi,
       functionName: "minimumPriceIncrement",
     });
-    const orderIds = await publicClient.readContract({
+    const orderIds = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
       abi: perpsSimpleAbi,
       functionName: "getUserOrders",
       args: [MM_ACCOUNT.address],
-    }) as `0x${string}`[];
+    })) as `0x${string}`[];
 
     const orderCalls = orderIds.map((id) => ({
       address: deployment.contracts.perpsAddress,
@@ -280,12 +283,12 @@ describe("MM process — on-chain book structure", () => {
   });
 
   it("should separate into positive-qty bids and negative-qty asks", async () => {
-    const orderIds = await publicClient.readContract({
+    const orderIds = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
       abi: perpsSimpleAbi,
       functionName: "getUserOrders",
       args: [MM_ACCOUNT.address],
-    }) as `0x${string}`[];
+    })) as `0x${string}`[];
 
     const orderCalls = orderIds.map((id) => ({
       address: deployment.contracts.perpsAddress,
@@ -307,12 +310,12 @@ describe("MM process — on-chain book structure", () => {
   });
 
   it("should have increasing order size at deeper levels", async () => {
-    const orderIds = await publicClient.readContract({
+    const orderIds = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
       abi: perpsSimpleAbi,
       functionName: "getUserOrders",
       args: [MM_ACCOUNT.address],
-    }) as `0x${string}`[];
+    })) as `0x${string}`[];
 
     const orderCalls = orderIds.map((id) => ({
       address: deployment.contracts.perpsAddress,
@@ -388,12 +391,12 @@ describe("MM process — on-chain book structure", () => {
   });
 
   it("should show MM depth in getQuantityAtPrice for each book level", async () => {
-    const [bidPrices, askPrices] = await publicClient.readContract({
+    const [bidPrices, askPrices] = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
       abi: perpsSimpleAbi,
       functionName: "getOrderBookPrices",
       args: [200n],
-    }) as [bigint[], bigint[]];
+    })) as [bigint[], bigint[]];
 
     assert.ok(bidPrices.length >= 3, "should have at least 3 bid price levels");
     assert.ok(askPrices.length >= 3, "should have at least 3 ask price levels");
@@ -421,15 +424,15 @@ describe("MM process — on-chain book structure", () => {
   });
 
   it("should match on-chain collateral balance with health API", async () => {
-    const balance = await publicClient.readContract({
+    const balance = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
       abi: perpsSimpleAbi,
       functionName: "balanceOf",
       args: [MM_ACCOUNT.address],
-    }) as bigint;
+    })) as bigint;
 
     const h = await fetchHealth(port);
-    assert.equal(BigInt(h.collateral as string), balance);
+    assert.equal(BigInt(h.collateralBalance as string), balance);
   });
 
   it("should allow taker to simulate matching against MM orders", async () => {
@@ -437,12 +440,12 @@ describe("MM process — on-chain book structure", () => {
     const bestAsk = BigInt(h.bestAsk as string);
     const qty = parseUnits("1", deployment.config.quantityDecimals);
 
-    const result = await publicClient.readContract({
+    const result = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
       abi: perpsSimpleAbi,
       functionName: "simulateOrder",
       args: [bestAsk, qty],
-    }) as [bigint, bigint, bigint];
+    })) as [bigint, bigint, bigint];
 
     const [filledQty, avgPrice, remainingQty] = result;
     assert.ok(filledQty > 0n, "should fill some quantity");
@@ -451,12 +454,12 @@ describe("MM process — on-chain book structure", () => {
   });
 
   it("should have zero position before any fills", async () => {
-    const pos = await publicClient.readContract({
+    const pos = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
       abi: perpsSimpleAbi,
       functionName: "getUserPosition",
       args: [MM_ACCOUNT.address],
-    }) as { netQuantity: bigint; aggregatedEntryPrice: bigint };
+    })) as { netQuantity: bigint; aggregatedEntryPrice: bigint };
 
     assert.equal(pos.netQuantity, 0n, "no position before fills");
   });
@@ -493,24 +496,24 @@ describe("MM process — post-fill on-chain state", () => {
     });
     await perps.write.createOrder([bestAsk, qty]);
 
-    const pos = await publicClient.readContract({
+    const pos = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
       abi: perpsSimpleAbi,
       functionName: "getUserPosition",
       args: [MM_ACCOUNT.address],
-    }) as { netQuantity: bigint; aggregatedEntryPrice: bigint };
+    })) as { netQuantity: bigint; aggregatedEntryPrice: bigint };
 
     assert.ok(pos.netQuantity < 0n, `MM should be short, got ${pos.netQuantity}`);
     assert.ok(pos.aggregatedEntryPrice > 0n, "entry price should be set");
   });
 
   it("should have non-zero required margin after position opens", async () => {
-    const reqMargin = await publicClient.readContract({
+    const reqMargin = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
       abi: perpsSimpleAbi,
       functionName: "getRequiredMargin",
       args: [MM_ACCOUNT.address],
-    }) as bigint;
+    })) as bigint;
 
     assert.ok(reqMargin > 0n, "required margin should be positive with open position");
   });
@@ -521,14 +524,17 @@ describe("MM process — post-fill on-chain state", () => {
       return (h.ownOrders as number) >= 5;
     }, 15_000);
 
-    const orderIds = await publicClient.readContract({
+    const orderIds = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
       abi: perpsSimpleAbi,
       functionName: "getUserOrders",
       args: [MM_ACCOUNT.address],
-    }) as `0x${string}`[];
+    })) as `0x${string}`[];
 
-    assert.ok(orderIds.length >= 5, `should have at least 5 orders after fill, got ${orderIds.length}`);
+    assert.ok(
+      orderIds.length >= 5,
+      `should have at least 5 orders after fill, got ${orderIds.length}`,
+    );
   });
 
   it("should show negative unrealized PnL when price rises against short", async () => {
@@ -543,12 +549,12 @@ describe("MM process — post-fill on-chain state", () => {
       deployment.config.oracle.decimals,
     ]);
 
-    const pnl = await publicClient.readContract({
+    const pnl = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
       abi: perpsSimpleAbi,
       functionName: "getUnrealizedPnl",
       args: [MM_ACCOUNT.address],
-    }) as bigint;
+    })) as bigint;
 
     assert.ok(pnl < 0n, `short + rising price should produce negative PnL, got ${pnl}`);
   });
@@ -560,12 +566,12 @@ describe("MM process — post-fill on-chain state", () => {
       return BigInt(h.bestBid as string) > 0n && (h.reconcileCount as number) > 1;
     }, 15_000);
 
-    const posBefore = await publicClient.readContract({
+    const posBefore = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
       abi: perpsSimpleAbi,
       functionName: "getUserPosition",
       args: [MM_ACCOUNT.address],
-    }) as { netQuantity: bigint };
+    })) as { netQuantity: bigint };
     const netBefore = posBefore.netQuantity;
 
     const h = await fetchHealth(port);
@@ -581,12 +587,12 @@ describe("MM process — post-fill on-chain state", () => {
     // Taker sells into MM's bid
     await perps.write.createOrder([bestBid, -qty]);
 
-    const posAfter = await publicClient.readContract({
+    const posAfter = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
       abi: perpsSimpleAbi,
       functionName: "getUserPosition",
       args: [MM_ACCOUNT.address],
-    }) as { netQuantity: bigint };
+    })) as { netQuantity: bigint };
 
     assert.ok(
       posAfter.netQuantity > netBefore,
@@ -595,12 +601,12 @@ describe("MM process — post-fill on-chain state", () => {
   });
 
   it("should not be liquidatable with sufficient collateral", async () => {
-    const isLiquidatable = await publicClient.readContract({
+    const isLiquidatable = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
       abi: perpsSimpleAbi,
       functionName: "isLiquidatable",
       args: [MM_ACCOUNT.address],
-    }) as boolean;
+    })) as boolean;
 
     assert.equal(isLiquidatable, false, "well-collateralized MM should not be liquidatable");
   });

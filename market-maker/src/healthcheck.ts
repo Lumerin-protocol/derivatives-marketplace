@@ -61,39 +61,48 @@ export class HealthCheck {
       this.startedAt = Date.now();
 
       this.server = createServer((req, res) => {
-        if (req.method === "GET" && req.url === "/health") {
-          const body = JSON.stringify({
-            status: this.status,
-            walletAddress: this.walletAddress,
-            lastError: this.lastError,
-            throttled: this.risk.throttled,
-            throttleReason: this.risk.throttleReason,
-            oraclePrice: this.oracle.currentPrice.toString(),
-            volatility: this.oracle.volatility,
-            netPosition: this.inventory.netQuantity.toString(),
-            collateral: this.inventory.collateralBalance.toString(),
-            inventorySkew: this.inventory.inventorySkew,
-            utilizationPct: this.inventory.utilizationPct,
-            ownOrders: this.book.ownOrders.size,
-            bestBid: this.book.bestBid.toString(),
-            bestAsk: this.book.bestAsk.toString(),
-            gasGwei: (Number(this.gas.currentGasPrice) / 1e9).toFixed(2),
-            gasSpiking: this.gas.isGasSpiking,
-            gasSpikePct: this.gas.gasSpikePct.toFixed(0),
-            cumulativeGasCostUsd: this.risk.cumulativeGasCostUsd.toString(),
-            tickCount: this.tickCount,
-            lastTickAt: this.lastTickAt,
-            ordersPlaced: this.executorStats?.ordersPlaced ?? 0,
-            ordersCancelled: this.executorStats?.ordersCancelled ?? 0,
-            reconcileCount: this.executorStats?.reconcileCount ?? 0,
-            uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
-            dryRun: this.config.dryRun,
-          });
+        try {
+          if (req.method === "GET" && req.url === "/health") {
+            console.log("here");
+            const body = JSON.stringify({
+              status: this.status,
+              walletAddress: this.walletAddress,
+              lastError: this.lastError,
+              throttled: this.risk.throttled,
+              throttleReason: this.risk.throttleReason,
+              oraclePrice: this.oracle.currentPrice.toString(),
+              volatility: this.oracle.volatility,
+              netPosition: this.inventory.netQuantity.toString(),
+              collateralBalance: this.inventory.collateralBalance.toString(),
+              ethBalance: this.inventory.ethBalance.toString(),
+              tokenBalance: this.inventory.tokenBalance.toString(),
+              inventorySkew: this.inventory.inventorySkew,
+              utilizationPct: this.inventory.utilizationPct,
+              ownOrders: this.book.ownOrders.size,
+              bestBid: this.book.bestBid.toString(),
+              bestAsk: this.book.bestAsk.toString(),
+              gasGwei: (Number(this.gas.currentGasPrice) / 1e9).toFixed(2),
+              gasSpiking: this.gas.isGasSpiking,
+              gasSpikePct: this.gas.gasSpikePct.toFixed(0),
+              cumulativeGasCostUsd: this.risk.cumulativeGasCostUsd.toString(),
+              tickCount: this.tickCount,
+              lastTickAt: this.lastTickAt,
+              ordersPlaced: this.executorStats?.ordersPlaced ?? 0,
+              ordersCancelled: this.executorStats?.ordersCancelled ?? 0,
+              reconcileCount: this.executorStats?.reconcileCount ?? 0,
+              uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
+              dryRun: this.config.dryRun,
+            });
 
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(body);
-        } else {
-          res.writeHead(404);
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(body);
+          } else {
+            res.writeHead(404);
+            res.end();
+          }
+        } catch (err) {
+          this.logger.error({ err }, "server error");
+          res.writeHead(500);
           res.end();
         }
       });

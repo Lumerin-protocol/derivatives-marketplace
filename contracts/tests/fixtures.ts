@@ -7,7 +7,7 @@ type Conn = NetworkConnection;
 export async function deployPerpsFixture(conn: Conn) {
   const { viem } = conn;
 
-  const [owner, seller, buyer, buyer2] = await viem.getWalletClients();
+  const [owner, seller, buyer, buyer2, seller2] = await viem.getWalletClients();
   const pc = await viem.getPublicClient();
   const tc = await viem.getTestClient();
 
@@ -26,6 +26,7 @@ export async function deployPerpsFixture(conn: Conn) {
   await usdcMock.write.transfer([buyer.account.address, topUpBalanceUSDC]);
   await usdcMock.write.transfer([buyer2.account.address, topUpBalanceUSDC]);
   await usdcMock.write.transfer([seller.account.address, topUpBalanceUSDC]);
+  await usdcMock.write.transfer([seller2.account.address, topUpBalanceUSDC]);
 
   const marginPercent = 10;
   const maintenanceMarginPercent = 5;
@@ -63,6 +64,7 @@ export async function deployPerpsFixture(conn: Conn) {
   await usdcMock.write.approve([perps.address, maxUint256], { account: seller.account });
   await usdcMock.write.approve([perps.address, maxUint256], { account: buyer.account });
   await usdcMock.write.approve([perps.address, maxUint256], { account: buyer2.account });
+  await usdcMock.write.approve([perps.address, maxUint256], { account: seller2.account });
   await usdcMock.write.approve([perps.address, maxUint256], { account: owner.account });
 
   await perps.write.depositReservePool([collateralAmount], { account: owner.account });
@@ -82,7 +84,7 @@ export async function deployPerpsFixture(conn: Conn) {
       tokenDecimals,
     },
     contracts: { usdcMock, priceOracle, perps },
-    accounts: { owner, seller, buyer, buyer2, pc, tc },
+    accounts: { owner, seller, seller2, buyer, buyer2, pc, tc },
     utils: {
       getMinimumCollateral: (price: bigint, absQuantity: bigint) => {
         const orderValue = (price * absQuantity) / 10n ** BigInt(quantityDecimals);
@@ -158,6 +160,35 @@ export async function deployPerpsWithLiquidatablePositionFixture(conn: Conn) {
   await perps.write.addCollateral([minCollateral * 2n], { account: buyer.account });
   await perps.write.createOrder([initialPrice, -qty], { account: seller.account });
   await perps.write.createOrder([initialPrice, qty], { account: buyer.account });
+
+  return {
+    ...data,
+    config: { ...config, initialPrice, qty, minCollateral },
+    async makeLiquidatable() {
+      const newPrice = initialPrice * 2n;
+      await priceOracle.write.setPrice([newPrice, config.oracle.decimals]);
+      return newPrice;
+    },
+  };
+}
+
+export async function deployPerpsWithBatchLiquidatableFixture(conn: Conn) {
+  const data = await deployPerpsFixture(conn);
+  const { contracts, accounts, config, utils } = data;
+  const { perps, priceOracle } = contracts;
+  const { seller, seller2, buyer } = accounts;
+
+  const initialPrice = await perps.read.getMarketPrice();
+  const qty = parseUnits("1", config.quantityDecimals);
+  const minCollateral = utils.getMinimumCollateral(initialPrice, qty);
+
+  await perps.write.addCollateral([minCollateral], { account: seller.account });
+  await perps.write.addCollateral([minCollateral], { account: seller2.account });
+  await perps.write.addCollateral([minCollateral * 3n], { account: buyer.account });
+
+  await perps.write.createOrder([initialPrice, -qty], { account: seller.account });
+  await perps.write.createOrder([initialPrice, -qty], { account: seller2.account });
+  await perps.write.createOrder([initialPrice, qty * 2n], { account: buyer.account });
 
   return {
     ...data,

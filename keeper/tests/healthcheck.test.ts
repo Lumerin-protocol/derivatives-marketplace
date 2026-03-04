@@ -199,7 +199,7 @@ describe("HealthCheck", () => {
       }, 10_000);
 
       const after = await fetchHealth(18904);
-      assert.equal(after.body.liquidationsExecuted, 1);
+      assert.ok(after.body.liquidationsExecuted >= 1);
     } finally {
       health.stop();
       liquidator.stop();

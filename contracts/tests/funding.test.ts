@@ -451,7 +451,7 @@ describe("PerpsSimple - Funding Fees", function () {
       const isLiquidatable = await perps.read.isLiquidatable([seller.account.address]);
       assert.ok(isLiquidatable);
 
-      await perps.write.liquidate([seller.account.address], { account: buyer2.account });
+      await perps.write.liquidateBatch([[seller.account.address]], { account: buyer2.account });
 
       const position = await perps.read.getUserPosition([seller.account.address]);
       assert.equal(position.netQuantity, 0n);

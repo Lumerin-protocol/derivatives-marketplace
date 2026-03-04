@@ -17,6 +17,7 @@ const CONTRACTS = [
   "contracts/BTCPriceOracleMock.sol/BTCPriceOracleMock.json",
   "contracts/Multicall3.sol/Multicall3.json",
   "contracts/AggregatorV3Interface.sol/AggregatorV3Interface.json",
+  "@openzeppelin/contracts/token/ERC20/IERC20.sol/IERC20.json",
 ];
 
 mkdirSync(OUT_DIR, { recursive: true });

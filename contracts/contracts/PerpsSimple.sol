@@ -11,6 +11,7 @@ import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/I
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import { ERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
+import { MulticallUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/MulticallUpgradeable.sol";
 import { AggregatorV3Interface } from "./AggregatorV3Interface.sol";
 import { console } from "hardhat/console.sol";
 
@@ -20,7 +21,7 @@ import { console } from "hardhat/console.sol";
 /// @dev TODO: Add support for partial liquidation
 /// @dev TODO: when not enough reserve pool, the user should be able to get revenue
 /// @dev on their collateral balance and withdraw later when collateral is added
-contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC20Upgradeable {
+contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC20Upgradeable, MulticallUpgradeable {
     using SafeERC20 for IERC20;
     using EnumerableSet for EnumerableSet.Bytes32Set;
     using EnumerableSet for EnumerableSet.AddressSet;
@@ -169,6 +170,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         );
         __Ownable_init(_msgSender());
         __UUPSUpgradeable_init();
+        __Multicall_init();
 
         collateralToken = _collateralToken;
         priceOracle = _priceOracle;
@@ -597,30 +599,40 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         return balanceOf(_user) < maintenanceMargin;
     }
 
-    /// @notice Liquidate an underwater position
-    /// @param _user Address of the user to liquidate
-    /// @dev TODO: make partial liquidation
-    function liquidate(address _user) external {
-        // Update global funding and settle user's pending funding before liquidation
+    /// @notice Liquidate one or more underwater positions in a single transaction
+    /// @param _users Array of addresses to liquidate
+    /// @dev Skips users that are not liquidatable; reverts if none were liquidated
+    function liquidateBatch(address[] calldata _users) external {
         _updateGlobalFunding();
-        _settleFunding(_user);
 
-        if (!isLiquidatable(_user)) {
+        uint256 liquidated = 0;
+        for (uint256 i = 0; i < _users.length; i++) {
+            _settleFunding(_users[i]);
+            if (_liquidate(_users[i])) {
+                liquidated++;
+            }
+        }
+
+        if (liquidated == 0) {
             revert NotLiquidatable();
+        }
+    }
+
+    /// @dev Core liquidation logic. Returns true if the user was liquidated, false if not liquidatable.
+    function _liquidate(address _user) internal returns (bool) {
+        if (!isLiquidatable(_user)) {
+            return false;
         }
 
         Position memory position = positions[_user];
         uint256 currentPrice = getMarketPrice();
 
-        // Calculate PnL at current market price
         int256 pnl = _calculatePositionPnl(position, currentPrice);
 
-        // Liquidator fee in collateral token units
         uint256 liquidatorFee = liquidationFee;
 
         // Settle PnL
         if (pnl < 0) {
-            // User has losses - transfer from user to reserve pool
             uint256 loss = uint256(-pnl);
             uint256 userBalance = balanceOf(_user);
             uint256 transferAmount = loss < userBalance ? loss : userBalance;
@@ -631,20 +643,18 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
                 emit BadDebt(_user, loss - transferAmount);
             }
         } else if (pnl > 0) {
-            // User has profits despite being underwater (shouldn't happen often)
             uint256 profit = uint256(pnl);
             if (balanceOf(address(this)) >= profit) {
                 _transfer(address(this), _user, profit);
             }
         }
 
-        // Pay liquidator fee from user's remaining balance or reserve pool
+        // Pay liquidator fee from user's remaining balance
         if (liquidatorFee > 0) {
             uint256 userBalance = balanceOf(_user);
             if (userBalance >= liquidatorFee) {
                 _transfer(_user, _msgSender(), liquidatorFee);
             } else {
-                // Pay what user has, rest from reserve if available
                 if (userBalance > 0) {
                     _transfer(_user, _msgSender(), userBalance);
                     liquidatorFee = userBalance;
@@ -654,12 +664,12 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             }
         }
 
-        // Clear the position
         int256 closedQuantity = position.netQuantity;
         delete positions[_user];
         usersWithPositions.remove(_user);
 
         emit PositionLiquidated(_user, _msgSender(), closedQuantity, pnl, liquidatorFee);
+        return true;
     }
 
     /// @notice Settle a reduced portion of a position (when offsetting)

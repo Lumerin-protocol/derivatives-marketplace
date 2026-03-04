@@ -1340,12 +1340,12 @@
   {
     "inputs": [
       {
-        "internalType": "address",
-        "name": "_user",
-        "type": "address"
+        "internalType": "address[]",
+        "name": "_users",
+        "type": "address[]"
       }
     ],
-    "name": "liquidate",
+    "name": "liquidateBatch",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -1426,6 +1426,25 @@
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes[]",
+        "name": "data",
+        "type": "bytes[]"
+      }
+    ],
+    "name": "multicall",
+    "outputs": [
+      {
+        "internalType": "bytes[]",
+        "name": "results",
+        "type": "bytes[]"
+      }
+    ],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {

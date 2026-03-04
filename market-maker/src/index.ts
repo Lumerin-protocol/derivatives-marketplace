@@ -25,6 +25,8 @@ function toErrorInfo(err: unknown): ErrorInfo {
   return info;
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 async function main(): Promise<void> {
   const config = loadConfig();
   const logger = pino({
@@ -69,9 +71,8 @@ async function main(): Promise<void> {
   );
   const health = new HealthCheck(config, oracle, inventory, book, gas, risk, logger);
 
-  // Initialization — retry on transient blockchain errors (low ETH, low collateral, RPC hiccups)
-  const INIT_BASE_DELAY_MS = 10_000;
-  const INIT_MAX_DELAY_MS = 120_000;
+  const BASE_ERROR_DELAY_MS = 5 * 1000;
+  const MAX_ERROR_DELAY_MS = 3 * 60 * 1000;
 
   risk.initialize();
   health.executorStats = executor.stats;
@@ -92,9 +93,9 @@ async function main(): Promise<void> {
     } catch (err) {
       health.status = "init-error";
       health.lastError = toErrorInfo(err);
-      const delay = Math.min(INIT_BASE_DELAY_MS * 2 ** (attempt - 1), INIT_MAX_DELAY_MS);
+      const delay = Math.min(BASE_ERROR_DELAY_MS * 2 ** (attempt - 1), MAX_ERROR_DELAY_MS);
       logger.warn({ err, attempt, retryInMs: delay }, "initialization failed, retrying");
-      await new Promise((r) => setTimeout(r, delay));
+      await sleep(delay);
     }
   }
 
@@ -102,14 +103,11 @@ async function main(): Promise<void> {
 
   // Graceful shutdown
   let shuttingDown = false;
-  let loopTimer: ReturnType<typeof setTimeout> | null = null;
 
   const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
     logger.info("shutting down…");
-
-    if (loopTimer) clearTimeout(loopTimer);
 
     try {
       await executor.cancelAll();
@@ -126,45 +124,54 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => void shutdown());
 
   // Main loop
-  const tick = async () => {
-    if (shuttingDown) return;
+  logger.info("market maker is running");
 
+  let consecutiveErrors = 0;
+
+  while (!shuttingDown) {
     try {
       await oracle.update();
       await gas.update();
       await book.refresh();
       await inventory.update();
 
-      const ok = risk.check();
-      if (!ok) {
-        health.status = "error";
-        health.lastError = risk.haltReason;
-        await executor.cancelAll();
-        return;
-      }
-
-      const desired = quoter.computeQuotes();
-      await executor.reconcile(desired);
-
-      health.status = "running";
-      health.lastError = null;
+      const spreadString =
+        book.bestBid > 0n && book.bestAsk > 0n
+          ? `${(((book.bestAsk - book.bestBid) * 10000n) / oracle.currentPrice).toString()}bps`
+          : "-";
 
       logger.info(
         {
           oracle: oracle.currentPrice.toString(),
           bid: book.bestBid.toString(),
           ask: book.bestAsk.toString(),
-          spread:
-            book.bestBid > 0n && book.bestAsk > 0n
-              ? `${(((book.bestAsk - book.bestBid) * 10000n) / oracle.currentPrice).toString()}bps`
-              : "-",
+          spread: spreadString,
           pos: inventory.netQuantity.toString(),
+          collateralBalance: inventory.collateralBalance.toString(),
+          ethBalance: inventory.ethBalance.toString(),
+          tokenBalance: inventory.tokenBalance.toString(),
           orders: book.ownOrders.size,
           skew: inventory.inventorySkew.toFixed(3),
         },
         "tick",
       );
+
+      const ok = risk.check();
+      if (!ok) {
+        health.status = "error";
+        health.lastError = risk.haltReason;
+        consecutiveErrors++;
+        await executor.cancelAll();
+      } else {
+        const desired = quoter.computeQuotes();
+        await executor.reconcile(desired);
+
+        health.status = "running";
+        health.lastError = null;
+        consecutiveErrors = 0;
+      }
     } catch (err) {
+      consecutiveErrors++;
       health.status = "error";
       health.lastError = toErrorInfo(err);
       logger.error({ err }, "tick error");
@@ -173,14 +180,12 @@ async function main(): Promise<void> {
     health.tickCount++;
     health.lastTickAt = Date.now();
 
-    if (!shuttingDown) {
-      loopTimer = setTimeout(() => void tick(), config.pollIntervalMs);
-    }
-  };
-
-  await tick();
-
-  logger.info("market maker is running");
+    const delay =
+      consecutiveErrors > 0
+        ? Math.min(BASE_ERROR_DELAY_MS * 2 ** consecutiveErrors, MAX_ERROR_DELAY_MS)
+        : config.pollIntervalMs;
+    await sleep(delay);
+  }
 }
 
 main();

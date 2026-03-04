@@ -1,14 +1,17 @@
 import type { PublicClient } from "viem";
 import type { MakerConfig } from "./config.ts";
 import type pino from "pino";
-import { perpsSimpleAbi } from "./abi.ts";
+import { perpsSimpleAbi, multicall3Abi } from "./abi.ts";
 import { bigAbs } from "./math.ts";
+import { erc20Abi } from "viem";
 
 export class InventoryManager {
   netQuantity = 0n;
   entryPrice = 0n;
   collateralBalance = 0n;
   requiredMargin = 0n;
+  ethBalance = 0n;
+  tokenBalance = 0n;
 
   /** Ratio in [-1, 1]: netQuantity / maxPositionSize. */
   inventorySkew = 0;
@@ -19,6 +22,7 @@ export class InventoryManager {
   private readonly config: MakerConfig;
   private readonly mmAddress: `0x${string}`;
   private readonly logger: pino.Logger;
+  private tokenAddress: `0x${string}` | null = null;
 
   constructor(
     publicClient: PublicClient,
@@ -33,7 +37,15 @@ export class InventoryManager {
   }
 
   async update(): Promise<void> {
+    if (!this.tokenAddress) {
+      this.tokenAddress = await this.publicClient.readContract({
+        address: this.config.perpsAddress,
+        abi: perpsSimpleAbi,
+        functionName: "collateralToken",
+      });
+    }
     const results = await this.publicClient.multicall({
+      allowFailure: false,
       contracts: [
         {
           address: this.config.perpsAddress,
@@ -48,25 +60,31 @@ export class InventoryManager {
           args: [this.mmAddress],
         },
         {
+          address: this.tokenAddress,
+          abi: erc20Abi,
+          functionName: "balanceOf",
+          args: [this.mmAddress],
+        },
+        {
           address: this.config.perpsAddress,
           abi: perpsSimpleAbi,
           functionName: "getRequiredMargin",
           args: [this.mmAddress],
         },
+        {
+          address: this.publicClient.chain?.contracts?.multicall3?.address as `0x${string}`,
+          abi: multicall3Abi,
+          functionName: "getEthBalance",
+          args: [this.mmAddress],
+        },
       ],
     });
-
-    if (results[0].status === "success") {
-      const pos = results[0].result as { netQuantity: bigint; aggregatedEntryPrice: bigint };
-      this.netQuantity = pos.netQuantity;
-      this.entryPrice = pos.aggregatedEntryPrice;
-    }
-    if (results[1].status === "success") {
-      this.collateralBalance = results[1].result as bigint;
-    }
-    if (results[2].status === "success") {
-      this.requiredMargin = results[2].result as bigint;
-    }
+    this.netQuantity = results[0].netQuantity;
+    this.entryPrice = results[0].aggregatedEntryPrice;
+    this.collateralBalance = results[1];
+    this.tokenBalance = results[2];
+    this.requiredMargin = results[3];
+    this.ethBalance = results[4];
 
     this.availableMargin =
       this.collateralBalance > this.requiredMargin
@@ -79,8 +97,7 @@ export class InventoryManager {
         : 0;
 
     const maxPos = this.config.maxPositionSize;
-    this.inventorySkew =
-      maxPos > 0n ? Number(this.netQuantity) / Number(maxPos) : 0;
+    this.inventorySkew = maxPos > 0n ? Number(this.netQuantity) / Number(maxPos) : 0;
     // Clamp to [-1, 1]
     this.inventorySkew = Math.max(-1, Math.min(1, this.inventorySkew));
 

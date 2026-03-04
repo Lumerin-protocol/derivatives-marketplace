@@ -1,4 +1,4 @@
-import type { PublicClient, WalletClient, Account, Chain } from "viem";
+import { type PublicClient, type WalletClient, type Account, type Chain, encodeFunctionData } from "viem";
 import type { MakerConfig } from "./config.ts";
 import type { Quoter, DesiredQuotes, QuoteLevel } from "./quoter.ts";
 import type { BookTracker, OwnOrder } from "./bookTracker.ts";
@@ -72,8 +72,6 @@ export class OrderExecutor {
       this.logger.warn({ drift }, "proceeding with requote despite gas spike (urgent drift)");
     }
 
-    // Cancel all existing orders, then place new ones.
-    // Selective requoting: only cancel orders that differ from desired.
     const ordersToCancel = this.findStaleOrders(desired);
     const ordersToPlace = this.findNewOrders(desired);
 
@@ -84,14 +82,50 @@ export class OrderExecutor {
 
     const maxFeePerGas = this.gas.cappedGasPrice();
 
-    // Cancel stale orders
+    const calls: `0x${string}`[] = [];
+
     for (const order of ordersToCancel) {
-      await this.cancelOrder(order.orderId, maxFeePerGas);
+      calls.push(encodeFunctionData({ abi: perpsSimpleAbi, functionName: "cancelOrder", args: [order.orderId] }));
+    }
+    for (const level of ordersToPlace) {
+      calls.push(encodeFunctionData({ abi: perpsSimpleAbi, functionName: "createOrder", args: [level.price, level.quantity] }));
     }
 
-    // Place new orders (quantity is already signed)
-    for (const level of ordersToPlace) {
-      await this.placeOrder(level.price, level.quantity, maxFeePerGas);
+    if (this.config.dryRun) {
+      this.logger.info(
+        { cancels: ordersToCancel.length, places: ordersToPlace.length },
+        "DRY RUN: would send multicall batch",
+      );
+      return;
+    }
+
+    try {
+      const hash = await this.walletClient.writeContract({
+        address: this.config.perpsAddress,
+        abi: perpsSimpleAbi,
+        functionName: "multicall",
+        args: [calls],
+        account: this.account,
+        chain: this.chain,
+        maxFeePerGas,
+      });
+
+      const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+      const gasCost = this.computeTxGasCost(receipt);
+      this.risk.recordGasCost(gasCost);
+
+      this.stats.ordersCancelled += ordersToCancel.length;
+      this.stats.ordersPlaced += ordersToPlace.length;
+
+      this.logger.info(
+        { cancels: ordersToCancel.length, places: ordersToPlace.length, gas: receipt.gasUsed.toString() },
+        "multicall batch executed",
+      );
+    } catch (err) {
+      this.logger.error(
+        { cancels: ordersToCancel.length, places: ordersToPlace.length, err },
+        "multicall batch failed",
+      );
     }
 
     this.lastRequoteAt = Date.now();
@@ -107,8 +141,34 @@ export class OrderExecutor {
     this.logger.warn({ count: orders.length }, "cancelling all orders");
     const maxFeePerGas = this.gas.cappedGasPrice();
 
-    for (const order of orders) {
-      await this.cancelOrder(order.orderId, maxFeePerGas);
+    const calls = orders.map((order) =>
+      encodeFunctionData({ abi: perpsSimpleAbi, functionName: "cancelOrder", args: [order.orderId] }),
+    );
+
+    if (this.config.dryRun) {
+      this.logger.info({ count: orders.length }, "DRY RUN: would cancel all orders via multicall");
+      return;
+    }
+
+    try {
+      const hash = await this.walletClient.writeContract({
+        address: this.config.perpsAddress,
+        abi: perpsSimpleAbi,
+        functionName: "multicall",
+        args: [calls],
+        account: this.account,
+        chain: this.chain,
+        maxFeePerGas,
+      });
+
+      const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+      const gasCost = this.computeTxGasCost(receipt);
+      this.risk.recordGasCost(gasCost);
+
+      this.stats.ordersCancelled += orders.length;
+      this.logger.info({ count: orders.length, gas: receipt.gasUsed.toString() }, "all orders cancelled via multicall");
+    } catch (err) {
+      this.logger.error({ count: orders.length, err }, "cancel-all multicall failed");
     }
   }
 
@@ -195,74 +255,6 @@ export class OrderExecutor {
       }
     }
     return toPlace;
-  }
-
-  private async cancelOrder(orderId: `0x${string}`, maxFeePerGas: bigint): Promise<void> {
-    if (this.config.dryRun) {
-      this.logger.info({ orderId }, "DRY RUN: would cancel order");
-      return;
-    }
-
-    try {
-      const hash = await this.walletClient.writeContract({
-        address: this.config.perpsAddress,
-        abi: perpsSimpleAbi,
-        functionName: "cancelOrder",
-        args: [orderId],
-        account: this.account,
-        chain: this.chain,
-        maxFeePerGas,
-      });
-
-      const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
-      const gasCost = this.computeTxGasCost(receipt);
-      this.risk.recordGasCost(gasCost);
-
-      this.stats.ordersCancelled++;
-      this.logger.info({ orderId, gas: receipt.gasUsed.toString() }, "order cancelled");
-    } catch (err) {
-      this.logger.error({ orderId, err }, "cancel failed");
-    }
-  }
-
-  private async placeOrder(
-    price: bigint,
-    quantity: bigint,
-    maxFeePerGas: bigint,
-  ): Promise<void> {
-    const signedQty = quantity;
-
-    if (this.config.dryRun) {
-      this.logger.info(
-        { price: price.toString(), qty: signedQty.toString() },
-        "DRY RUN: would place order",
-      );
-      return;
-    }
-
-    try {
-      const hash = await this.walletClient.writeContract({
-        address: this.config.perpsAddress,
-        abi: perpsSimpleAbi,
-        functionName: "createOrder",
-        args: [price, signedQty],
-        account: this.account,
-        chain: this.chain,
-        maxFeePerGas,
-      });
-
-      const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
-      const gasCost = this.computeTxGasCost(receipt);
-      this.risk.recordGasCost(gasCost);
-
-      this.stats.ordersPlaced++;
-      this.logger.info(
-        { price: price.toString(), qty: signedQty.toString(), gas: receipt.gasUsed.toString() },
-        "order placed",
-      );
-    } catch (err) {
-      this.logger.error({ price: price.toString(), qty: signedQty.toString(), err }, "place failed");
-    }
   }
 
   /** Compute gas cost in USD from a tx receipt. */
