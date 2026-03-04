@@ -11,7 +11,9 @@ RUN pnpm install --frozen-lockfile --prod
 # ── Runtime ───────────────────────────────────────────────────────────────────
 FROM node:22-alpine
 
+ARG COMMIT_HASH=""
 ENV NODE_ENV=production
+ENV COMMIT_HASH=$COMMIT_HASH
 
 WORKDIR /app
 

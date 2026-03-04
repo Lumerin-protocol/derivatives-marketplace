@@ -47,5 +47,6 @@ export function loadConfig() {
     dryRun: process.env.MAKER_DRY_RUN === "true",
     healthPort: Number(process.env.MAKER_HEALTH_PORT ?? process.env.PORT ?? "3001"),
     logLevel: (process.env.MAKER_LOG_LEVEL as pino.Level) || "info",
+    commitHash: process.env.COMMIT_HASH ?? "unknown",
   };
 }
