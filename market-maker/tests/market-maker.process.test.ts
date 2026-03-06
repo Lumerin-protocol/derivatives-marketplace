@@ -101,7 +101,7 @@ async function waitForReady(mm: MakerProcess): Promise<void> {
     waitFor(async () => {
       try {
         const h = await fetchHealth(mm.port);
-        return (h.ownOrders as number) > 0 && h.bestAsk !== "0";
+        return (h.market?.ownOrders as number) > 0 && h.market?.bestAsk !== "0";
       } catch {
         return false;
       }
@@ -135,10 +135,11 @@ describe("MM process — quoting and fills", () => {
   it("should report healthy status via API", async () => {
     const h = await fetchHealth(mm.port);
     assert.equal(h.status, "running");
-    assert.ok((h.tickCount as number) >= 1);
-    assert.ok((h.lastTickAt as number) > 0);
-    assert.equal(h.dryRun, false);
-    assert.equal(h.gasSpiking, false);
+    const stats = h.stats as Record<string, unknown>;
+    assert.ok((stats.tickCount as number) >= 1);
+    assert.ok((stats.lastTickAt as number) > 0);
+    assert.equal((h.config as Record<string, unknown>).dryRun, false);
+    assert.equal((h.gas as Record<string, unknown>).gasSpiking, false);
   });
 
   it("should have resting orders on-chain", async () => {
@@ -154,15 +155,17 @@ describe("MM process — quoting and fills", () => {
 
   it("should report order placement stats via API", async () => {
     const h = await fetchHealth(mm.port);
-    assert.ok((h.ordersPlaced as number) > 0);
-    assert.ok((h.reconcileCount as number) > 0);
+    const stats = h.stats as Record<string, unknown>;
+    assert.ok((stats.ordersPlaced as number) > 0);
+    assert.ok((stats.reconcileCount as number) > 0);
   });
 
   it("should place bids below and asks above oracle", async () => {
     const h = await fetchHealth(mm.port);
-    const oracle = BigInt(h.oraclePrice as string);
-    const bid = BigInt(h.bestBid as string);
-    const ask = BigInt(h.bestAsk as string);
+    const market = h.market as Record<string, unknown>;
+    const oracle = BigInt(market.oraclePrice as string);
+    const bid = BigInt(market.bestBid as string);
+    const ask = BigInt(market.bestAsk as string);
 
     assert.ok(bid > 0n && bid < oracle, "bid should be below oracle");
     assert.ok(ask > 0n && ask > oracle, "ask should be above oracle");
@@ -170,14 +173,14 @@ describe("MM process — quoting and fills", () => {
 
   it("should show positive collateral via API", async () => {
     const h = await fetchHealth(mm.port);
-    assert.ok(BigInt(h.collateralBalance as string) > 0n);
+    assert.ok(BigInt((h.inventory as Record<string, unknown>).collateralBalance as string) > 0n);
   });
 
   it("should update inventory when a taker fills the ask", async () => {
     const hBefore = await fetchHealth(mm.port);
-    assert.equal(hBefore.netPosition, "0");
+    assert.equal((hBefore.inventory as Record<string, unknown>).netPosition, "0");
 
-    const bestAsk = BigInt(hBefore.bestAsk as string);
+    const bestAsk = BigInt((hBefore.market as Record<string, unknown>).bestAsk as string);
     const publicClient = createTestPublicClient();
     const takerWallet = createTestWalletClient(TAKER_ACCOUNT.privateKey);
     const perps = getContract({
@@ -192,16 +195,17 @@ describe("MM process — quoting and fills", () => {
     let hAfter!: Record<string, unknown>;
     await waitFor(async () => {
       hAfter = await fetchHealth(mm.port);
-      return hAfter.netPosition !== "0";
+      return (hAfter.inventory as Record<string, unknown>).netPosition !== "0";
     }, 15_000);
 
-    assert.ok(BigInt(hAfter.netPosition as string) < 0n, "MM should be short");
-    assert.ok((hAfter.inventorySkew as number) < 0, "skew should be negative");
+    const inv = hAfter.inventory as Record<string, unknown>;
+    assert.ok(BigInt(inv.netPosition as string) < 0n, "MM should be short");
+    assert.ok((inv.inventorySkew as number) < 0, "skew should be negative");
   });
 
   it("should requote when oracle price changes", async () => {
     const hBefore = await fetchHealth(mm.port);
-    const bestBidBefore = BigInt(hBefore.bestBid as string);
+    const bestBidBefore = BigInt((hBefore.market as Record<string, unknown>).bestBid as string);
 
     const ownerWallet = createTestWalletClient(OWNER_ACCOUNT.privateKey);
     const oracle = getContract({
@@ -218,10 +222,10 @@ describe("MM process — quoting and fills", () => {
     let hAfter!: Record<string, unknown>;
     await waitFor(async () => {
       hAfter = await fetchHealth(mm.port);
-      return BigInt(hAfter.bestBid as string) > bestBidBefore;
+      return BigInt((hAfter.market as Record<string, unknown>).bestBid as string) > bestBidBefore;
     }, 15_000);
 
-    assert.ok(BigInt(hAfter.bestBid as string) > bestBidBefore, "bid should move up");
+    assert.ok(BigInt((hAfter.market as Record<string, unknown>).bestBid as string) > bestBidBefore, "bid should move up");
   });
 });
 
@@ -386,8 +390,9 @@ describe("MM process — on-chain book structure", () => {
     ]);
 
     const h = await fetchHealth(port);
-    assert.equal(BigInt(h.bestBid as string), onChainBid, "bestBid should match");
-    assert.equal(BigInt(h.bestAsk as string), onChainAsk, "bestAsk should match");
+    const market = h.market as Record<string, unknown>;
+    assert.equal(BigInt(market.bestBid as string), onChainBid, "bestBid should match");
+    assert.equal(BigInt(market.bestAsk as string), onChainAsk, "bestAsk should match");
   });
 
   it("should show MM depth in getQuantityAtPrice for each book level", async () => {
@@ -432,12 +437,12 @@ describe("MM process — on-chain book structure", () => {
     })) as bigint;
 
     const h = await fetchHealth(port);
-    assert.equal(BigInt(h.collateralBalance as string), balance);
+    assert.equal(BigInt((h.inventory as Record<string, unknown>).collateralBalance as string), balance);
   });
 
   it("should allow taker to simulate matching against MM orders", async () => {
     const h = await fetchHealth(port);
-    const bestAsk = BigInt(h.bestAsk as string);
+    const bestAsk = BigInt((h.market as Record<string, unknown>).bestAsk as string);
     const qty = parseUnits("1", deployment.config.quantityDecimals);
 
     const result = (await publicClient.readContract({
@@ -485,7 +490,7 @@ describe("MM process — post-fill on-chain state", () => {
 
   it("should create short position on-chain when taker fills the ask", async () => {
     const h = await fetchHealth(port);
-    const bestAsk = BigInt(h.bestAsk as string);
+    const bestAsk = BigInt((h.market as Record<string, unknown>).bestAsk as string);
     const qty = parseUnits("1", deployment.config.quantityDecimals);
 
     const takerWallet = createTestWalletClient(TAKER_ACCOUNT.privateKey);
@@ -521,7 +526,7 @@ describe("MM process — post-fill on-chain state", () => {
   it("should still maintain resting orders after the fill", async () => {
     await waitFor(async () => {
       const h = await fetchHealth(port);
-      return (h.ownOrders as number) >= 5;
+      return ((h.market as Record<string, unknown>).ownOrders as number) >= 5;
     }, 15_000);
 
     const orderIds = (await publicClient.readContract({
@@ -563,7 +568,9 @@ describe("MM process — post-fill on-chain state", () => {
     // Wait for MM to requote with the new oracle price
     await waitFor(async () => {
       const h = await fetchHealth(port);
-      return BigInt(h.bestBid as string) > 0n && (h.reconcileCount as number) > 1;
+      const m = h.market as Record<string, unknown>;
+      const s = h.stats as Record<string, unknown>;
+      return BigInt(m.bestBid as string) > 0n && (s.reconcileCount as number) > 1;
     }, 15_000);
 
     const posBefore = (await publicClient.readContract({
@@ -575,7 +582,7 @@ describe("MM process — post-fill on-chain state", () => {
     const netBefore = posBefore.netQuantity;
 
     const h = await fetchHealth(port);
-    const bestBid = BigInt(h.bestBid as string);
+    const bestBid = BigInt((h.market as Record<string, unknown>).bestBid as string);
     const qty = parseUnits("1", deployment.config.quantityDecimals);
 
     const takerWallet = createTestWalletClient(TAKER_ACCOUNT.privateKey);
@@ -629,7 +636,7 @@ describe("MM process — graceful shutdown", () => {
 
   it("should cancel all orders on SIGTERM", async () => {
     const hBefore = await fetchHealth(mm.port);
-    assert.ok((hBefore.ownOrders as number) > 0, "should have orders before shutdown");
+    assert.ok(((hBefore.market as Record<string, unknown>).ownOrders as number) > 0, "should have orders before shutdown");
 
     mm.child.kill("SIGTERM");
     const exitCode = await Promise.race([mm.exited, sleep(10_000).then(() => null)]);
