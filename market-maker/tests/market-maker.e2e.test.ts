@@ -438,10 +438,10 @@ describe("MM health endpoint", () => {
 
     const body = await res.json();
     assert.equal(body.status, "running");
-    assert.ok(BigInt(body.oraclePrice) > 0n, "oraclePrice should be positive");
-    assert.ok(BigInt(body.collateralBalance) > 0n, "collateral should be positive");
-    assert.equal(body.gasSpiking, false);
-    assert.equal(body.dryRun, false);
+    assert.ok(BigInt(body.market.oraclePrice) > 0n, "oraclePrice should be positive");
+    assert.ok(BigInt(body.inventory.collateralBalance) > 0n, "collateral should be positive");
+    assert.equal(body.gas.gasSpiking, false);
+    assert.equal(body.config.dryRun, false);
     assert.ok(typeof body.uptimeSeconds === "number");
   });
 

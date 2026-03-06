@@ -18,7 +18,36 @@ let nextPort = 19000;
 
 function makeDeps() {
   const port = nextPort++;
-  const config = { healthPort: port, dryRun: false } as MakerConfig;
+  const config = {
+    healthPort: port,
+    network: "hardhat",
+    nodeEnv: "development",
+    perpsAddress: "0x1234",
+    dryRun: false,
+    logLevel: "info",
+    commitHash: "abc123",
+    numLevelsPerSide: 5,
+    baseQuantity: 1_000_000n,
+    minSpreadBps: 10,
+    volatilityMultiplier: 2.0,
+    inventorySkewGamma: 0.5,
+    maxSkewTicks: 20,
+    ethPriceFeedAddress: undefined,
+    gasSpikeThresholdPct: 200,
+    gasCapMultiplier: 2.0,
+    gasPenaltyBps: 5,
+    maxGasBudgetPerHourUsd: 50_000_000n,
+    maxGasBudgetPerDayUsd: 500_000_000n,
+    urgentRequoteThresholdTicks: 10,
+    maxPositionSize: 100_000_000n,
+    maxUtilizationPct: 80,
+    minCollateralBalance: 100_000_000n,
+    maxDailyLossUsd: 1_000_000_000n,
+    pollIntervalMs: 3000,
+    requoteThresholdTicks: 2,
+    requoteCooldownMs: 1000,
+    resyncIntervalMs: 60_000,
+  } as MakerConfig;
   const oracle = { currentPrice: 100_000_000n, volatility: 0.005 } as OracleTracker;
   const inventory = {
     netQuantity: 5_000_000n,
@@ -72,19 +101,31 @@ describe("HealthCheck", () => {
 
     const body = await res.json();
     assert.equal(body.status, "running");
-    assert.equal(body.oraclePrice, "100000000");
-    assert.equal(body.netPosition, "5000000");
-    assert.equal(body.collateralBalance, "500000000");
-    assert.equal(body.ethBalance, "500000000");
-    assert.equal(body.tokenBalance, "500000000");
-    assert.equal(body.inventorySkew, 0.05);
-    assert.equal(body.utilizationPct, 15);
-    assert.equal(body.bestBid, "99000000");
-    assert.equal(body.bestAsk, "101000000");
-    assert.equal(body.gasSpiking, false);
-    assert.equal(body.dryRun, false);
     assert.ok(typeof body.uptimeSeconds === "number");
-    assert.equal(body.throttled, false);
+
+    assert.equal(body.config.network, "hardhat");
+    assert.equal(body.config.dryRun, false);
+    assert.equal(body.config.commitHash, "abc123");
+    assert.equal(body.config.quoting.numLevelsPerSide, 5);
+    assert.equal(body.config.quoting.baseQuantity, "1000000");
+    assert.equal(body.config.quoting.minSpreadBps, 10);
+    assert.equal(body.config.gas.gasSpikeThresholdPct, 200);
+    assert.equal(body.config.risk.maxPositionSize, "100000000");
+    assert.equal(body.config.timing.pollIntervalMs, 3000);
+
+    assert.equal(body.market.oraclePrice, "100000000");
+    assert.equal(body.market.bestBid, "99000000");
+    assert.equal(body.market.bestAsk, "101000000");
+
+    assert.equal(body.inventory.netPosition, "5000000");
+    assert.equal(body.inventory.collateralBalance, "500000000");
+    assert.equal(body.inventory.ethBalance, "500000000");
+    assert.equal(body.inventory.tokenBalance, "500000000");
+    assert.equal(body.inventory.inventorySkew, 0.05);
+    assert.equal(body.inventory.utilizationPct, 15);
+
+    assert.equal(body.gas.gasSpiking, false);
+    assert.equal(body.risk.throttled, false);
   });
 
   it("reports initializing status before init completes", async () => {
