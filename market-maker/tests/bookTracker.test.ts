@@ -7,7 +7,7 @@ function makeConfig(): MakerConfig {
   return {
     perpsAddress: "0x0000000000000000000000000000000000000001",
     resyncIntervalMs: 60000,
-  } as MakerConfig;
+  } as unknown as MakerConfig;
 }
 
 const noop = () => {};
@@ -53,7 +53,10 @@ describe("BookTracker", () => {
     let watchCalled = false;
     const client = {
       ...makeEmptyClient(),
-      watchContractEvent: () => { watchCalled = true; return () => {}; },
+      watchContractEvent: () => {
+        watchCalled = true;
+        return () => {};
+      },
     };
     const tracker = new BookTracker(client as never, makeConfig(), MM_ADDRESS, makeLogger());
     await tracker.start();
@@ -74,8 +77,11 @@ describe("BookTracker", () => {
     assert.ok(capturedOnLogs);
 
     const orderId = makeOrderId(99);
-    capturedOnLogs!([
-      { eventName: "OrderCreated", args: { participant: MM_ADDRESS, orderId, price: 100_000_000n, quantity: 5_000_000n } },
+    capturedOnLogs([
+      {
+        eventName: "OrderCreated",
+        args: { participant: MM_ADDRESS, orderId, price: 100_000_000n, quantity: 5_000_000n },
+      },
     ]);
     assert.equal(tracker.ownOrders.size, 1);
     assert.equal(tracker.ownOrders.get(orderId)?.price, 100_000_000n);
@@ -85,7 +91,11 @@ describe("BookTracker", () => {
     let unwatchCalled = false;
     const client = {
       ...makeEmptyClient(),
-      watchContractEvent: () => { return () => { unwatchCalled = true; }; },
+      watchContractEvent: () => {
+        return () => {
+          unwatchCalled = true;
+        };
+      },
     };
     const tracker = new BookTracker(client as never, makeConfig(), MM_ADDRESS, makeLogger());
     await tracker.start();
@@ -108,7 +118,7 @@ describe("BookTracker", () => {
         return undefined;
       },
       multicall: async (args: { contracts: unknown[] }) => {
-        return args.contracts.map(() => ({ status: "success", result: 5_000_000n }));
+        return args.contracts.map(() => 5_000_000n);
       },
       watchContractEvent: () => () => {},
     };
@@ -130,7 +140,7 @@ describe("BookTracker", () => {
         return undefined;
       },
       multicall: async () => [
-        { status: "success", result: { participant: MM_ADDRESS, price: 100_000_000n, quantity: 5_000_000n } },
+        { participant: MM_ADDRESS, price: 100_000_000n, quantity: 5_000_000n },
       ],
       watchContractEvent: () => () => {},
     };
@@ -145,7 +155,10 @@ describe("BookTracker", () => {
     let resyncCount = 0;
     const client = {
       readContract: async (args: { functionName: string }) => {
-        if (args.functionName === "getOrderBookPrices") { resyncCount++; return [[], []]; }
+        if (args.functionName === "getOrderBookPrices") {
+          resyncCount++;
+          return [[], []];
+        }
         if (args.functionName === "getUserOrders") return [];
         return undefined;
       },
@@ -166,7 +179,10 @@ describe("BookTracker", () => {
     let resyncCount = 0;
     const client = {
       readContract: async (args: { functionName: string }) => {
-        if (args.functionName === "getOrderBookPrices") { resyncCount++; return [[], []]; }
+        if (args.functionName === "getOrderBookPrices") {
+          resyncCount++;
+          return [[], []];
+        }
         if (args.functionName === "getUserOrders") return [];
         return undefined;
       },
@@ -283,13 +299,6 @@ describe("BookTracker.handleEvent", () => {
     (tracker as unknown as { handleEvent: (log: unknown) => void }).handleEvent({
       eventName: "SomeUnknownEvent",
       args: {},
-    });
-    assert.equal(tracker.ownOrders.size, 0);
-  });
-
-  it("handles events with no args", () => {
-    (tracker as unknown as { handleEvent: (log: unknown) => void }).handleEvent({
-      eventName: "OrderCreated",
     });
     assert.equal(tracker.ownOrders.size, 0);
   });

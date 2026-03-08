@@ -14,14 +14,7 @@ import { HealthCheck } from "../src/healthcheck.ts";
 import type { MakerConfig } from "../src/config.ts";
 import { perpsSimpleAbi, priceOracleMockAbi } from "../src/abi.ts";
 import { hardhat } from "../src/client.ts";
-import {
-  startHardhatNode,
-  createMakerConfig,
-  waitFor,
-  sleep,
-  loadFixture,
-  type HardhatNode,
-} from "./helpers.ts";
+import { startHardhatNode, createMakerConfig, loadFixture, type HardhatNode } from "./helpers.ts";
 import { deployWithCollateralFixture } from "../../contracts/fixtures/viem.ts";
 
 const silentLogger = pino({ level: "silent" });

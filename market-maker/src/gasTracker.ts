@@ -34,6 +34,7 @@ export class GasTracker {
   /**
    * One-time: estimate gas for createOrder / cancelOrder.
    * Falls back to defaults if estimation fails (e.g. no orders to cancel).
+   * TODO: gas estimation on Arbitrum is not constant since it includes L1 fees, call estimate on each transaction
    */
   async calibrate(mmAddress: `0x${string}`): Promise<void> {
     if (this.gasEstimatesCached) return;
@@ -81,23 +82,25 @@ export class GasTracker {
 
   private async updateEthPrice(): Promise<void> {
     try {
-      const [, answer, , ,] = await this.publicClient.readContract({
-        address: this.config.ethPriceFeedAddress!,
-        abi: aggregatorV3InterfaceAbi,
-        functionName: "latestRoundData",
-      });
-
-      const decimals = await this.publicClient.readContract({
-        address: this.config.ethPriceFeedAddress!,
-        abi: aggregatorV3InterfaceAbi,
-        functionName: "decimals",
+      const [[, answer], decimals] = await this.publicClient.multicall({
+        allowFailure: false,
+        contracts: [
+          {
+            address: this.config.ethPriceFeedAddress!,
+            abi: aggregatorV3InterfaceAbi,
+            functionName: "latestRoundData",
+          },
+          {
+            address: this.config.ethPriceFeedAddress!,
+            abi: aggregatorV3InterfaceAbi,
+            functionName: "decimals",
+          },
+        ],
       });
 
       // Scale ETH price to 6-decimal USDC terms
       if (answer > 0n) {
-        this.ethPriceUsd = decimals >= 6
-          ? answer / 10n ** BigInt(decimals - 6)
-          : answer * 10n ** BigInt(6 - decimals);
+        this.ethPriceUsd = scaleDecimals(answer, BigInt(decimals), 6n);
       }
     } catch {
       this.logger.warn("ETH price feed read failed");
@@ -128,7 +131,7 @@ export class GasTracker {
   cappedGasPrice(): bigint {
     const medianBig = BigInt(Math.round(this.medianGasPrice));
     if (medianBig === 0n) return this.currentGasPrice;
-    const cap = medianBig * BigInt(Math.round(this.config.gasCapMultiplier * 100)) / 100n;
+    const cap = (medianBig * BigInt(Math.round(this.config.gasCapMultiplier * 100))) / 100n;
     // Never go below current gas price — a cap below base fee causes tx failure
     return this.currentGasPrice < cap ? cap : this.currentGasPrice;
   }
@@ -140,4 +143,8 @@ export class GasTracker {
     // Combined: gasUnits * gasPrice * ethPriceUsd / 1e18
     return (gasUnits * this.currentGasPrice * this.ethPriceUsd) / 10n ** 18n;
   }
+}
+
+function scaleDecimals(value: bigint, from: bigint, to: bigint) {
+  return from >= to ? value / 10n ** BigInt(from - to) : value * 10n ** BigInt(to - from);
 }

@@ -118,7 +118,7 @@ async function main(): Promise<void> {
     }
 
     book.stop();
-    health.stop();
+    await health.stop();
     process.exit(0);
   };
 

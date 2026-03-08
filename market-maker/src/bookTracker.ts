@@ -1,4 +1,4 @@
-import type { PublicClient, WatchContractEventReturnType } from "viem";
+import type { Log, PublicClient, WatchContractEventReturnType } from "viem";
 import type { MakerConfig } from "./config.ts";
 import type pino from "pino";
 import { perpsSimpleAbi } from "./abi.ts";
@@ -89,33 +89,34 @@ export class BookTracker {
     ];
 
     if (depthCalls.length > 0) {
-      const results = await this.publicClient.multicall({ contracts: depthCalls });
+      const results = await this.publicClient.multicall({
+        contracts: depthCalls,
+        allowFailure: false,
+      });
 
       for (let i = 0; i < bidPrices.length; i++) {
         const r = results[i];
-        if (r.status === "success") {
-          this.bidDepth.set(bidPrices[i], r.result as bigint);
-        }
+        this.bidDepth.set(bidPrices[i], r);
       }
       for (let i = 0; i < askPrices.length; i++) {
         const r = results[bidPrices.length + i];
-        if (r.status === "success") {
-          this.askDepth.set(askPrices[i], r.result as bigint);
-        }
+        this.askDepth.set(askPrices[i], r);
       }
     }
 
     this.bestBid = bidPrices.length > 0 ? bidPrices[0] : 0n;
     this.bestAsk = askPrices.length > 0 ? askPrices[0] : 0n;
     this.midPrice =
-      this.bestBid > 0n && this.bestAsk > 0n
-        ? (this.bestBid + this.bestAsk) / 2n
-        : 0n;
+      this.bestBid > 0n && this.bestAsk > 0n ? (this.bestBid + this.bestAsk) / 2n : 0n;
 
     await this.resyncOwnOrders();
     this.lastResyncAt = Date.now();
     this.logger.info(
-      { bestBid: this.bestBid.toString(), bestAsk: this.bestAsk.toString(), ownOrders: this.ownOrders.size },
+      {
+        bestBid: this.bestBid.toString(),
+        bestAsk: this.bestAsk.toString(),
+        ownOrders: this.ownOrders.size,
+      },
       "book resync",
     );
   }
@@ -139,18 +140,19 @@ export class BookTracker {
       args: [id] as const,
     }));
 
-    const results = await this.publicClient.multicall({ contracts: orderCalls });
+    const results = await this.publicClient.multicall({
+      contracts: orderCalls,
+      allowFailure: false,
+    });
 
     for (let i = 0; i < orderIds.length; i++) {
-      const r = results[i];
-      if (r.status === "success") {
-        const order = r.result as { participant: `0x${string}`; price: bigint; quantity: bigint };
-        this.ownOrders.set(orderIds[i], {
-          orderId: orderIds[i],
-          price: order.price,
-          quantity: order.quantity,
-        });
-      }
+      const order = results[i];
+      const orderId = orderIds[i];
+      this.ownOrders.set(orderId, {
+        orderId: orderId,
+        price: order.price,
+        quantity: order.quantity,
+      });
     }
   }
 
@@ -160,46 +162,52 @@ export class BookTracker {
       abi: perpsSimpleAbi,
       onLogs: (logs) => {
         for (const log of logs) {
-          this.handleEvent(log);
+          this.handleEvent(log as any);
         }
       },
     });
   }
 
-  private handleEvent(log: { eventName?: string; args?: Record<string, unknown> }): void {
-    const name = log.eventName;
-    const args = log.args ?? {};
+  private handleEvent(log: Log<bigint, number, false, undefined, false, typeof perpsSimpleAbi>) {
+    switch (log.eventName) {
+      case "OrderCreated": {
+        const participant = log.args.participant;
+        const orderId = log.args.orderId;
+        const price = log.args.price;
+        const quantity = log.args.quantity;
+        if (!participant || !orderId || price === undefined || quantity === undefined) return;
 
-    if (name === "OrderCreated") {
-      const participant = args.participant as `0x${string}` | undefined;
-      const orderId = args.orderId as `0x${string}` | undefined;
-      const price = args.price as bigint | undefined;
-      const quantity = args.quantity as bigint | undefined;
-      if (!participant || !orderId || price === undefined || quantity === undefined) return;
-
-      if (participant.toLowerCase() === this.mmAddress.toLowerCase()) {
-        this.ownOrders.set(orderId, { orderId, price, quantity });
-      }
-    } else if (name === "OrderCancelled") {
-      const orderId = args.orderId as `0x${string}` | undefined;
-      if (orderId) this.ownOrders.delete(orderId);
-    } else if (name === "OrderUpdated") {
-      const orderId = args.orderId as `0x${string}` | undefined;
-      const newQuantity = args.newQuantity as bigint | undefined;
-      if (!orderId || newQuantity === undefined) return;
-
-      const existing = this.ownOrders.get(orderId);
-      if (existing) {
-        if (newQuantity === 0n) {
-          this.ownOrders.delete(orderId);
-        } else {
-          existing.quantity = newQuantity;
+        if (participant.toLowerCase() === this.mmAddress.toLowerCase()) {
+          this.ownOrders.set(orderId, { orderId, price, quantity });
         }
+        break;
       }
-    } else if (name === "OrderMatched") {
-      const makerOrderId = args.makerOrderId as `0x${string}` | undefined;
-      if (makerOrderId) {
-        this.logger.info({ makerOrderId }, "own order matched");
+      case "OrderCancelled": {
+        const orderId = log.args.orderId;
+        if (orderId) this.ownOrders.delete(orderId);
+        break;
+      }
+      case "OrderUpdated": {
+        const orderId = log.args.orderId;
+        const newQuantity = log.args.newQuantity;
+        if (!orderId || newQuantity === undefined) return;
+
+        const existing = this.ownOrders.get(orderId);
+        if (existing) {
+          if (newQuantity === 0n) {
+            this.ownOrders.delete(orderId);
+          } else {
+            existing.quantity = newQuantity;
+          }
+        }
+        break;
+      }
+      case "OrderMatched": {
+        const makerOrderId = log.args.makerOrderId;
+        if (makerOrderId) {
+          this.logger.info({ makerOrderId }, "own order matched");
+        }
+        break;
       }
     }
   }
