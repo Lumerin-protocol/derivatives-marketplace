@@ -184,24 +184,39 @@ export class PositionTracker {
     const unwatch = this.publicClient.watchContractEvent({
       address: this.config.perpsAddress,
       abi: perpsSimpleAbi,
-      onLogs: (logs) => {
+      onLogs: async (logs) => {
         for (const log of logs) {
           this.logger.info({ log }, "Event received");
+          //TODO: I think here could be a race, since onLogs is sync function, so if
+          //internals are async, there might be a race
           switch (log.eventName) {
-            case "Transfer":
-              this.onTransfer(log.args.from!, log.args.to!, log.args.value!);
+            case "Transfer": {
+              if (log.args.from && log.args.to && log.args.value) {
+                this.onTransfer(log.args.from, log.args.to, log.args.value);
+              }
               break;
-            case "OrderMatched":
-              this.onOrderMatched(log.args.maker!, log.args.taker!);
+            }
+            case "OrderMatched": {
+              const { maker, taker } = log.args;
+              if (maker && taker) {
+                await this.onOrderMatched(maker, taker);
+              }
               break;
-            case "PositionLiquidated":
-              this.onPositionLiquidated(log.args.user!);
+            }
+            case "PositionLiquidated": {
+              if (log.args.user) {
+                this.onPositionLiquidated(log.args.user);
+              }
               break;
+            }
             case "OrderCreated":
             case "OrderCancelled":
-            case "OrderUpdated":
-              this.onOrderEvent(log.args.participant!);
+            case "OrderUpdated": {
+              if (log.args.participant) {
+                await this.onOrderEvent(log.args.participant);
+              }
               break;
+            }
             default:
               this.logger.debug({ log }, "Unknown event");
               break;
@@ -212,7 +227,6 @@ export class PositionTracker {
     });
 
     this.unwatchFns.push(unwatch);
-
     this.logger.info("Event watchers started");
   }
 
@@ -245,11 +259,11 @@ export class PositionTracker {
     }
   }
 
-  private onOrderMatched(maker: Address, taker: Address): void {
-    this.syncUser(maker).catch((err) =>
+  private async onOrderMatched(maker: Address, taker: Address): Promise<void> {
+    await this.syncUser(maker).catch((err) =>
       this.logger.error({ err, user: maker }, "Failed to sync maker after OrderMatched"),
     );
-    this.syncUser(taker).catch((err) =>
+    await this.syncUser(taker).catch((err) =>
       this.logger.error({ err, user: taker }, "Failed to sync taker after OrderMatched"),
     );
   }
@@ -259,9 +273,9 @@ export class PositionTracker {
     this.logger.info({ user }, "Position liquidated (removed from tracker)");
   }
 
-  private onOrderEvent(user: Address): void {
+  private async onOrderEvent(user: Address): Promise<void> {
     // Order margin changed — lightweight multicall (2 reads)
-    this.recomputeFromContract(user).catch((err) =>
+    await this.recomputeFromContract(user).catch((err) =>
       this.logger.error({ err, user }, "Failed to recompute from contract"),
     );
   }
@@ -298,10 +312,7 @@ export class PositionTracker {
       allowFailure: false,
     });
 
-    const position = results[0] as { netQuantity: bigint; aggregatedEntryPrice: bigint };
-    const balance = results[1] as bigint;
-    const maintenanceMargin = results[2] as bigint;
-    const marketPrice = results[3] as bigint;
+    const [position, balance, maintenanceMargin, marketPrice] = results;
 
     if (position.netQuantity === 0n) {
       this.users.delete(user);
@@ -339,7 +350,7 @@ export class PositionTracker {
     const existing = this.users.get(user);
     if (!existing) return;
 
-    const results = await this.publicClient.multicall({
+    const [maintenanceMargin, marketPrice] = await this.publicClient.multicall({
       contracts: [
         {
           address: this.config.perpsAddress,
@@ -351,9 +362,6 @@ export class PositionTracker {
       ],
       allowFailure: false,
     });
-
-    const maintenanceMargin = results[0] as bigint;
-    const marketPrice = results[1] as bigint;
 
     const { orderMargin, liquidationPrice } = computeLiquidationState(
       existing.netQuantity,

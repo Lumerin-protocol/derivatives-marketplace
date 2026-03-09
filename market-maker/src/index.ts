@@ -78,6 +78,21 @@ async function main(): Promise<void> {
   risk.initialize();
   health.executorStats = executor.stats;
   health.walletAddress = mmAddress;
+
+  health.onStop = async () => {
+    logger.info("stop requested via API, cancelling orders");
+    await executor.cancelAll();
+    book.stop();
+  };
+
+  health.onStart = async () => {
+    logger.info("start requested via API, re-initializing");
+    await book.start();
+    await oracle.update();
+    await gas.update();
+    await inventory.update();
+  };
+
   await health.start();
 
   for (let attempt = 1; ; attempt++) {
@@ -118,7 +133,7 @@ async function main(): Promise<void> {
     }
 
     book.stop();
-    health.stop();
+    await health.stop();
     process.exit(0);
   };
 
@@ -131,6 +146,11 @@ async function main(): Promise<void> {
   let consecutiveErrors = 0;
 
   while (!shuttingDown) {
+    if (health.paused) {
+      await sleep(config.pollIntervalMs);
+      continue;
+    }
+
     try {
       await oracle.update();
       await gas.update();

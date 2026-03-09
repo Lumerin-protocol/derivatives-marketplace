@@ -27,8 +27,12 @@ export class HealthCheck {
   lastTickAt = 0;
   executorStats: ExecutorStats | null = null;
   walletAddress = "";
-  status: "initializing" | "init-error" | "running" | "error" = "initializing";
+  status: "initializing" | "init-error" | "running" | "error" | "stopped" = "initializing";
   lastError: ErrorInfo | null = null;
+  paused = false;
+
+  onStop: (() => Promise<void>) | null = null;
+  onStart: (() => Promise<void>) | null = null;
 
   private readonly config: MakerConfig;
   private readonly oracle: OracleTracker;
@@ -62,6 +66,16 @@ export class HealthCheck {
 
       this.server = createServer((req, res) => {
         try {
+          if (req.method === "POST" && req.url === "/stop") {
+            this.handleStop(res);
+            return;
+          }
+
+          if (req.method === "POST" && req.url === "/start") {
+            this.handleStart(res);
+            return;
+          }
+
           if (req.method === "GET" && req.url === "/health") {
             const body = JSON.stringify({
               status: this.status,
@@ -162,6 +176,62 @@ export class HealthCheck {
         resolve();
       });
     });
+  }
+
+  private handleStop(res: import("node:http").ServerResponse): void {
+    if (this.paused) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, status: this.status }));
+      return;
+    }
+
+    this.paused = true;
+    this.status = "stopped";
+    this.lastError = null;
+
+    if (this.onStop) {
+      this.onStop()
+        .then(() => {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, status: this.status }));
+        })
+        .catch((err) => {
+          this.logger.error({ err }, "onStop callback failed");
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "stop callback failed" }));
+        });
+    } else {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, status: this.status }));
+    }
+  }
+
+  private handleStart(res: import("node:http").ServerResponse): void {
+    if (!this.paused) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, status: this.status }));
+      return;
+    }
+
+    this.paused = false;
+    this.status = "running";
+    this.lastError = null;
+
+    if (this.onStart) {
+      this.onStart()
+        .then(() => {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, status: this.status }));
+        })
+        .catch((err) => {
+          this.logger.error({ err }, "onStart callback failed");
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "start callback failed" }));
+        });
+    } else {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, status: this.status }));
+    }
   }
 
   stop(): Promise<void> {
