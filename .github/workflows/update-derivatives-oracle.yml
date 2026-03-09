@@ -210,8 +210,9 @@ jobs:
     needs: build
     if: needs.build.outputs.is_cicd_branch != 'true'
     outputs:
-      deploy_status: ${{ steps.deploy.outputs.deploy_status }}
+      deploy_status: ${{ steps.deploy.outputs.deploy_status || steps.check_deploy.outputs.deploy_status }}
       ipfs_hash: ${{ steps.pinata_pin.outputs.ipfs_hash }}
+      publish_status: ${{ steps.publish.outputs.publish_status || 'skipped' }}
 
     services:
       # Local IPFS node for graph build (needs Kubo-compatible API)
@@ -360,7 +361,7 @@ jobs:
             echo "   Uploaded to Pinata (CID: $PINNED_CID, size: $PIN_SIZE)"
 
             # 3. Verify content is retrievable from Pinata's gateway
-            VERIFY_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 \
+            VERIFY_CODE=$(curl -sL -o /dev/null -w "%{http_code}" --max-time 30 \
               "$PINATA_GATEWAY/$PINNED_CID")
 
             if [ "$VERIFY_CODE" = "200" ]; then
@@ -378,7 +379,42 @@ jobs:
           echo "   Manifest CID: $MANIFEST_CID"
           echo "ipfs_hash=$MANIFEST_CID" >> $GITHUB_OUTPUT
 
+      - name: Check if deployment changed
+        id: check_deploy
+        run: |
+          MANIFEST_CID="${{ steps.pinata_pin.outputs.ipfs_hash }}"
+          SUBGRAPH="${{ needs.build.outputs.subgraph_name }}"
+          USERID="${{ needs.build.outputs.graph_userid }}"
+
+          echo "🔍 Checking current Studio deployment..."
+          RESPONSE=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -d '{"query": "{ _meta { deployment } }"}' \
+            "https://api.studio.thegraph.com/query/${USERID}/${SUBGRAPH}/version/latest" 2>/dev/null || true)
+
+          CURRENT_CID=$(echo "$RESPONSE" | jq -r '.data._meta.deployment // empty' 2>/dev/null || true)
+
+          echo "   Current: ${CURRENT_CID:-<none>}"
+          echo "   New:     $MANIFEST_CID"
+
+          if [ -n "$CURRENT_CID" ] && [ "$CURRENT_CID" = "$MANIFEST_CID" ]; then
+            echo ""
+            echo "✅ IPFS hash unchanged — skipping deploy and publish"
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "deploy_status=no_change" >> $GITHUB_OUTPUT
+
+            echo "## ✅ No Changes Detected" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Current deployment \`$CURRENT_CID\` matches new build." >> $GITHUB_STEP_SUMMARY
+            echo "No new Studio version created." >> $GITHUB_STEP_SUMMARY
+          else
+            echo ""
+            echo "🔄 Deployment change detected"
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: Authenticate with The Graph Studio
+        if: steps.check_deploy.outputs.changed == 'true'
         working-directory: ./indexer
         env:
           GRAPH_DEPLOY_KEY: ${{ needs.build.outputs.environment == 'dev' && secrets.DEV_GRAPH_DPKY || needs.build.outputs.environment == 'stg' && secrets.STG_GRAPH_DPKY || secrets.LMN_GRAPH_DPKY }}
@@ -390,6 +426,7 @@ jobs:
 
       - name: Deploy subgraph to Studio
         id: deploy
+        if: steps.check_deploy.outputs.changed == 'true'
         working-directory: ./indexer
         run: |
           echo "🚀 Deploying subgraph to The Graph Studio..."
@@ -450,6 +487,106 @@ jobs:
           echo "Content is permanently pinned to Pinata. Re-run the workflow to retry deployment." >> $GITHUB_STEP_SUMMARY
 
           exit 1
+
+      - name: Install Foundry
+        if: steps.check_deploy.outputs.changed == 'true' && steps.deploy.outputs.deploy_status == 'deployed'
+        uses: foundry-rs/foundry-toolchain@v1
+
+      # Publish the new deployment to The Graph's decentralized network via the
+      # L2GNS contract on Arbitrum One. Requires GNS_PUBLISHER_KEY (private key
+      # of the wallet that owns the SubgraphNFT) and GNS_SUBGRAPH_ID (numeric
+      # subgraph token ID). Gracefully skips if not configured.
+      - name: Publish to The Graph Network
+        id: publish
+        if: steps.check_deploy.outputs.changed == 'true' && steps.deploy.outputs.deploy_status == 'deployed'
+        env:
+          GNS_PUBLISHER_KEY: ${{ secrets.GNS_PUBLISHER_KEY }}
+          ARBITRUM_RPC_URL: ${{ vars.ARBITRUM_RPC_URL }}
+          GNS_SUBGRAPH_ID: ${{ vars.GNS_SUBGRAPH_ID }}
+        run: |
+          if [ -z "$GNS_PUBLISHER_KEY" ] || [ -z "$GNS_SUBGRAPH_ID" ]; then
+            echo "⏭️  Auto-publish skipped — secrets not configured"
+            echo "   Required: GNS_PUBLISHER_KEY (secret), GNS_SUBGRAPH_ID (variable)"
+            echo "publish_status=skipped" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          MANIFEST_CID="${{ steps.pinata_pin.outputs.ipfs_hash }}"
+          GNS_CONTRACT="0xec9A7fb6CbC2E41926127929c2dcE6e9c5D33Bec"
+          RPC_URL="${ARBITRUM_RPC_URL:-https://arb1.arbitrum.io/rpc}"
+
+          # CIDv0 (Qm...) = base58(0x1220 + 32-byte SHA-256 digest)
+          # The GNS contract wants just the 32-byte digest as bytes32
+          DEPLOYMENT_ID=$(python3 -c "
+          ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+          def b58decode(s):
+              n = 0
+              for c in s:
+                  n = n * 58 + ALPHABET.index(c)
+              result = n.to_bytes(max(1, (n.bit_length() + 7) // 8), 'big')
+              pad = len(s) - len(s.lstrip('1'))
+              return b'\x00' * pad + result
+          raw = b58decode('$MANIFEST_CID')
+          print('0x' + raw[2:].hex())
+          ")
+
+          echo "📡 Publishing to The Graph Network..."
+          echo "   GNS Contract:  $GNS_CONTRACT"
+          echo "   Subgraph ID:   $GNS_SUBGRAPH_ID"
+          echo "   Deployment ID: $DEPLOYMENT_ID"
+          echo "   Manifest CID:  $MANIFEST_CID"
+          echo "   RPC:           ${RPC_URL%%/api*}..."
+          echo ""
+
+          VERSION_METADATA="0x0000000000000000000000000000000000000000000000000000000000000000"
+
+          set +e
+          RESULT=$(cast send \
+            --private-key "$GNS_PUBLISHER_KEY" \
+            --rpc-url "$RPC_URL" \
+            --json \
+            "$GNS_CONTRACT" \
+            "publishNewVersion(uint256,bytes32,bytes32)" \
+            "$GNS_SUBGRAPH_ID" \
+            "$DEPLOYMENT_ID" \
+            "$VERSION_METADATA" 2>&1)
+          SEND_EXIT=$?
+          set -e
+
+          if [ $SEND_EXIT -ne 0 ]; then
+            echo "❌ Publish transaction failed"
+            echo "   Error: $RESULT"
+            echo "publish_status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          TX_HASH=$(echo "$RESULT" | jq -r '.transactionHash')
+          TX_STATUS=$(echo "$RESULT" | jq -r '.status')
+          GAS_USED=$(echo "$RESULT" | jq -r '.gasUsed')
+
+          if [ "$TX_STATUS" != "0x1" ] && [ "$TX_STATUS" != "1" ]; then
+            echo "❌ Publish transaction reverted (status: $TX_STATUS)"
+            echo "   Tx: https://arbiscan.io/tx/$TX_HASH"
+            echo "publish_status=reverted" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          echo "✅ Published to The Graph Network!"
+          echo "   Tx Hash: $TX_HASH"
+          echo "   Gas Used: $GAS_USED"
+          echo "   Explorer: https://arbiscan.io/tx/$TX_HASH"
+
+          echo "publish_status=published" >> $GITHUB_OUTPUT
+          echo "tx_hash=$TX_HASH" >> $GITHUB_OUTPUT
+
+          echo "## 📡 Published to The Graph Network" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Transaction | [\`${TX_HASH:0:16}...\`](https://arbiscan.io/tx/$TX_HASH) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Subgraph ID | $GNS_SUBGRAPH_ID |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deployment | \`$MANIFEST_CID\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Gas Used | $GAS_USED |" >> $GITHUB_STEP_SUMMARY
 
   verify:
     name: 🔍 Verify
@@ -592,4 +729,4 @@ jobs:
           version: ${{ needs.setup.outputs.version }}
           slack_webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          additional_info: "${{ needs.setup.outputs.is_cicd_branch == 'true' && '*Mode:* CI/CD Test (no build/deploy)' || (needs.deploy.outputs.deploy_status == 'no_update' && format('*Status:* Already deployed (no changes) • <https://api.studio.thegraph.com/query/{1}/{0}/version/latest|Query Playground>', needs.build.outputs.subgraph_name, needs.build.outputs.graph_userid) || format('*Subgraph:* `{0}` • <https://api.studio.thegraph.com/query/{1}/{0}/version/latest|Query Playground>', needs.build.outputs.subgraph_name, needs.build.outputs.graph_userid)) }}"
+          additional_info: "${{ needs.setup.outputs.is_cicd_branch == 'true' && '*Mode:* CI/CD Test (no build/deploy)' || (needs.deploy.outputs.deploy_status == 'no_change' && format('*Status:* No changes (IPFS hash unchanged) • <https://api.studio.thegraph.com/query/{1}/{0}/version/latest|Query Playground>', needs.build.outputs.subgraph_name, needs.build.outputs.graph_userid) || (needs.deploy.outputs.deploy_status == 'no_update' && format('*Status:* Already deployed (no changes) • <https://api.studio.thegraph.com/query/{1}/{0}/version/latest|Query Playground>', needs.build.outputs.subgraph_name, needs.build.outputs.graph_userid) || format('*Subgraph:* `{0}` • *Published:* {2} • <https://api.studio.thegraph.com/query/{1}/{0}/version/latest|Query Playground>', needs.build.outputs.subgraph_name, needs.build.outputs.graph_userid, needs.deploy.outputs.publish_status))) }}"
