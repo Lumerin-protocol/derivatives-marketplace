@@ -178,9 +178,14 @@ export class OrderExecutor {
       return false;
     }
 
-    // If fewer orders resting than desired (e.g. after a fill), requote to refill
+    // If fewer orders resting than desired (e.g. after a full fill), requote to refill
     const expectedCount = desired.bids.length + desired.asks.length;
     if (this.book.ownOrders.size < expectedCount) {
+      return true;
+    }
+
+    // If any price level has less quantity than desired (partial fill), top up
+    if (this.hasQuantityDeficit(desired)) {
       return true;
     }
 
@@ -234,27 +239,53 @@ export class OrderExecutor {
   }
 
   /**
-   * Find desired levels that don't have a matching existing order (should be placed).
-   * Quantities are already signed: positive = buy, negative = sell.
+   * Find desired levels that need new orders placed.
+   * For levels with no existing order, places the full desired quantity.
+   * For partially filled levels, places a top-up order for the deficit.
    */
   private findNewOrders(desired: DesiredQuotes): QuoteLevel[] {
-    const existingPrices = new Set<bigint>();
-    for (const order of this.book.ownOrders.values()) {
-      existingPrices.add(order.price);
-    }
+    const existingQtyByPrice = this.aggregateOwnQuantityByPrice();
 
     const toPlace: QuoteLevel[] = [];
     for (const b of desired.bids) {
-      if (!existingPrices.has(b.price)) {
-        toPlace.push(b);
+      const existing = existingQtyByPrice.get(b.price) ?? 0n;
+      const deficit = b.quantity - existing;
+      if (deficit > 0n) {
+        toPlace.push({ price: b.price, quantity: deficit });
       }
     }
     for (const a of desired.asks) {
-      if (!existingPrices.has(a.price)) {
-        toPlace.push(a);
+      const existing = existingQtyByPrice.get(a.price) ?? 0n;
+      const deficit = a.quantity - existing;
+      if (deficit < 0n) {
+        toPlace.push({ price: a.price, quantity: deficit });
       }
     }
     return toPlace;
+  }
+
+  /** Check whether any price level with an existing order has less quantity than desired. */
+  private hasQuantityDeficit(desired: DesiredQuotes): boolean {
+    const existingQtyByPrice = this.aggregateOwnQuantityByPrice();
+
+    for (const b of desired.bids) {
+      const existing = existingQtyByPrice.get(b.price);
+      if (existing !== undefined && b.quantity - existing > 0n) return true;
+    }
+    for (const a of desired.asks) {
+      const existing = existingQtyByPrice.get(a.price);
+      if (existing !== undefined && a.quantity - existing < 0n) return true;
+    }
+    return false;
+  }
+
+  private aggregateOwnQuantityByPrice(): Map<bigint, bigint> {
+    const qtyByPrice = new Map<bigint, bigint>();
+    for (const order of this.book.ownOrders.values()) {
+      const current = qtyByPrice.get(order.price) ?? 0n;
+      qtyByPrice.set(order.price, current + order.quantity);
+    }
+    return qtyByPrice;
   }
 
   /** Compute gas cost in USD from a tx receipt. */

@@ -517,6 +517,112 @@ describe("OrderExecutor", () => {
     assert.equal(deps.cancelledOrders.length, 0, "surviving ask is still correct");
   });
 
+  it("tops up partially filled bid with deficit quantity", async () => {
+    const deps = makeDeps();
+    const executor = makeExecutor(deps);
+
+    const desired: DesiredQuotes = {
+      bids: [{ price: 99_000_000n, quantity: 1_000_000n }],
+      asks: [{ price: 101_000_000n, quantity: -1_000_000n }],
+    };
+
+    await executor.reconcile(desired);
+    assert.equal(deps.placedOrders.length, 2, "initial placement");
+
+    // Simulate both orders resting, then bid gets partially filled (1M → 300K)
+    const bidId = makeOrderId(700);
+    const askId = makeOrderId(701);
+    deps.book.ownOrders.set(bidId, { orderId: bidId, price: 99_000_000n, quantity: 300_000n });
+    deps.book.ownOrders.set(askId, { orderId: askId, price: 101_000_000n, quantity: -1_000_000n });
+
+    deps.placedOrders.length = 0;
+    deps.cancelledOrders.length = 0;
+    await executor.reconcile(desired);
+
+    assert.equal(deps.placedOrders.length, 1, "should place top-up order");
+    assert.equal(deps.cancelledOrders.length, 0, "should not cancel anything");
+    const [topUpPrice, topUpQty] = deps.placedOrders[0] as [bigint, bigint];
+    assert.equal(topUpPrice, 99_000_000n, "top-up at same price");
+    assert.equal(topUpQty, 700_000n, "top-up for deficit quantity");
+  });
+
+  it("tops up partially filled ask with deficit quantity", async () => {
+    const deps = makeDeps();
+    const executor = makeExecutor(deps);
+
+    const desired: DesiredQuotes = {
+      bids: [{ price: 99_000_000n, quantity: 1_000_000n }],
+      asks: [{ price: 101_000_000n, quantity: -1_000_000n }],
+    };
+
+    await executor.reconcile(desired);
+
+    // Simulate ask partially filled (-1M → -400K)
+    const bidId = makeOrderId(710);
+    const askId = makeOrderId(711);
+    deps.book.ownOrders.set(bidId, { orderId: bidId, price: 99_000_000n, quantity: 1_000_000n });
+    deps.book.ownOrders.set(askId, { orderId: askId, price: 101_000_000n, quantity: -400_000n });
+
+    deps.placedOrders.length = 0;
+    deps.cancelledOrders.length = 0;
+    await executor.reconcile(desired);
+
+    assert.equal(deps.placedOrders.length, 1, "should place top-up order");
+    assert.equal(deps.cancelledOrders.length, 0);
+    const [topUpPrice, topUpQty] = deps.placedOrders[0] as [bigint, bigint];
+    assert.equal(topUpPrice, 101_000_000n);
+    assert.equal(topUpQty, -600_000n, "top-up for deficit (negative = sell)");
+  });
+
+  it("skips top-up when existing quantity matches desired", async () => {
+    const deps = makeDeps();
+    const executor = makeExecutor(deps);
+
+    const desired: DesiredQuotes = {
+      bids: [{ price: 99_000_000n, quantity: 1_000_000n }],
+      asks: [],
+    };
+
+    await executor.reconcile(desired);
+
+    // Existing order at same price with full quantity
+    const bidId = makeOrderId(720);
+    deps.book.ownOrders.set(bidId, { orderId: bidId, price: 99_000_000n, quantity: 1_000_000n });
+
+    deps.placedOrders.length = 0;
+    deps.cancelledOrders.length = 0;
+    await executor.reconcile(desired);
+
+    assert.equal(deps.placedOrders.length, 0, "no top-up needed");
+    assert.equal(deps.cancelledOrders.length, 0);
+  });
+
+  it("tops up when multiple own orders at same price sum to less than desired", async () => {
+    const deps = makeDeps();
+    const executor = makeExecutor(deps);
+
+    const desired: DesiredQuotes = {
+      bids: [{ price: 99_000_000n, quantity: 1_000_000n }],
+      asks: [],
+    };
+
+    await executor.reconcile(desired);
+
+    // Two orders at same price, summing to 600K < desired 1M
+    const id1 = makeOrderId(730);
+    const id2 = makeOrderId(731);
+    deps.book.ownOrders.set(id1, { orderId: id1, price: 99_000_000n, quantity: 200_000n });
+    deps.book.ownOrders.set(id2, { orderId: id2, price: 99_000_000n, quantity: 400_000n });
+
+    deps.placedOrders.length = 0;
+    deps.cancelledOrders.length = 0;
+    await executor.reconcile(desired);
+
+    assert.equal(deps.placedOrders.length, 1);
+    const [, topUpQty] = deps.placedOrders[0] as [bigint, bigint];
+    assert.equal(topUpQty, 400_000n, "deficit = 1M - 600K = 400K");
+  });
+
   it("records gas costs after successful transactions", async () => {
     const gasCosts: bigint[] = [];
     const deps = makeDeps({
