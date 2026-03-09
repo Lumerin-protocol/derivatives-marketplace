@@ -498,20 +498,20 @@ jobs:
 
       # Publish the new deployment to The Graph's decentralized network via the
       # L2GNS contract on Arbitrum One (all environments publish here).
-      # Org secrets: GNS_PUBLISHER_KEY_{DEV,STG,PRD}, ARBITRUM_RPC_URL_MAIN
+      # Org secrets: {DEV,STG,LMN}_GNS_PUBLISHER_KEY, ARBITRUM_RPC_URL_MAIN
       # Per-repo env var: GNS_SUBGRAPH_ID (numeric subgraph token ID)
       # Gracefully skips if secrets are not configured.
       - name: Publish to The Graph Network
         id: publish
         if: steps.check_deploy.outputs.changed == 'true' && steps.deploy.outputs.deploy_status == 'deployed'
         env:
-          GNS_PUBLISHER_KEY: ${{ needs.build.outputs.environment == 'dev' && secrets.GNS_PUBLISHER_KEY_DEV || needs.build.outputs.environment == 'stg' && secrets.GNS_PUBLISHER_KEY_STG || secrets.GNS_PUBLISHER_KEY_PRD }}
+          GNS_PUBLISHER_KEY: ${{ needs.build.outputs.environment == 'dev' && secrets.DEV_GNS_PUBLISHER_KEY || needs.build.outputs.environment == 'stg' && secrets.STG_GNS_PUBLISHER_KEY || secrets.LMN_GNS_PUBLISHER_KEY }}
           ARBITRUM_RPC_URL: ${{ secrets.ARBITRUM_RPC_URL_MAIN }}
           GNS_SUBGRAPH_ID: ${{ needs.build.outputs.gns_subgraph_id }}
         run: |
           if [ -z "$GNS_PUBLISHER_KEY" ] || [ -z "$GNS_SUBGRAPH_ID" ]; then
             echo "⏭️  Auto-publish skipped — secrets not configured"
-            echo "   Required: GNS_PUBLISHER_KEY_{DEV,STG,PRD} (org secret)"
+            echo "   Required: {DEV,STG,LMN}_GNS_PUBLISHER_KEY (org secret)"
             echo "   Required: GNS_SUBGRAPH_ID (environment variable per repo)"
             echo "publish_status=skipped" >> $GITHUB_OUTPUT
             exit 0
