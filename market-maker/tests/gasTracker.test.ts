@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { GasTracker } from "../src/gasTracker.ts";
 import type { MakerConfig } from "../src/config.ts";
-import { PublicClient } from "viem";
+import type { PublicClient } from "viem";
 
 const noop = () => {};
 function makeLogger(): never {

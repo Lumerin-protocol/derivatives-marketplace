@@ -212,4 +212,135 @@ describe("HealthCheck", () => {
     await health.stop();
     health = null;
   });
+
+  it("POST /stop sets status to stopped and paused flag", async () => {
+    const { config, oracle, inventory, book, gas, risk, port } = makeDeps();
+    health = new HealthCheck(config, oracle, inventory, book, gas, risk, makeLogger());
+    health.status = "running";
+    await health.start();
+
+    const res = await fetch(`http://localhost:${port}/stop`, { method: "POST" });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.status, "stopped");
+
+    assert.equal(health.paused, true);
+    assert.equal(health.status, "stopped");
+
+    const healthRes = await fetch(`http://localhost:${port}/health`);
+    const healthBody = await healthRes.json();
+    assert.equal(healthBody.status, "stopped");
+  });
+
+  it("POST /start resumes from stopped state", async () => {
+    const { config, oracle, inventory, book, gas, risk, port } = makeDeps();
+    health = new HealthCheck(config, oracle, inventory, book, gas, risk, makeLogger());
+    health.status = "running";
+    await health.start();
+
+    await fetch(`http://localhost:${port}/stop`, { method: "POST" });
+    assert.equal(health.paused, true);
+
+    const res = await fetch(`http://localhost:${port}/start`, { method: "POST" });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.status, "running");
+
+    assert.equal(health.paused, false);
+    assert.equal(health.status, "running");
+  });
+
+  it("POST /stop is idempotent", async () => {
+    const { config, oracle, inventory, book, gas, risk, port } = makeDeps();
+    health = new HealthCheck(config, oracle, inventory, book, gas, risk, makeLogger());
+    health.status = "running";
+    await health.start();
+
+    const res1 = await fetch(`http://localhost:${port}/stop`, { method: "POST" });
+    assert.equal(res1.status, 200);
+
+    const res2 = await fetch(`http://localhost:${port}/stop`, { method: "POST" });
+    assert.equal(res2.status, 200);
+    assert.equal(health.paused, true);
+  });
+
+  it("POST /start when already running is a no-op", async () => {
+    const { config, oracle, inventory, book, gas, risk, port } = makeDeps();
+    health = new HealthCheck(config, oracle, inventory, book, gas, risk, makeLogger());
+    health.status = "running";
+    await health.start();
+
+    const res = await fetch(`http://localhost:${port}/start`, { method: "POST" });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.status, "running");
+    assert.equal(health.paused, false);
+  });
+
+  it("POST /stop calls onStop callback", async () => {
+    const { config, oracle, inventory, book, gas, risk, port } = makeDeps();
+    health = new HealthCheck(config, oracle, inventory, book, gas, risk, makeLogger());
+    health.status = "running";
+    let callbackCalled = false;
+    health.onStop = async () => {
+      callbackCalled = true;
+    };
+    await health.start();
+
+    const res = await fetch(`http://localhost:${port}/stop`, { method: "POST" });
+    assert.equal(res.status, 200);
+    assert.equal(callbackCalled, true);
+  });
+
+  it("POST /start calls onStart callback", async () => {
+    const { config, oracle, inventory, book, gas, risk, port } = makeDeps();
+    health = new HealthCheck(config, oracle, inventory, book, gas, risk, makeLogger());
+    health.status = "running";
+    let callbackCalled = false;
+    health.onStart = async () => {
+      callbackCalled = true;
+    };
+    await health.start();
+
+    await fetch(`http://localhost:${port}/stop`, { method: "POST" });
+    const res = await fetch(`http://localhost:${port}/start`, { method: "POST" });
+    assert.equal(res.status, 200);
+    assert.equal(callbackCalled, true);
+  });
+
+  it("POST /stop returns 500 when onStop callback fails", async () => {
+    const { config, oracle, inventory, book, gas, risk, port } = makeDeps();
+    health = new HealthCheck(config, oracle, inventory, book, gas, risk, makeLogger());
+    health.status = "running";
+    health.onStop = async () => {
+      throw new Error("cancel failed");
+    };
+    await health.start();
+
+    const res = await fetch(`http://localhost:${port}/stop`, { method: "POST" });
+    assert.equal(res.status, 500);
+    const body = await res.json();
+    assert.equal(body.ok, false);
+  });
+
+  it("GET /stop returns 404", async () => {
+    const { config, oracle, inventory, book, gas, risk, port } = makeDeps();
+    health = new HealthCheck(config, oracle, inventory, book, gas, risk, makeLogger());
+    await health.start();
+
+    const res = await fetch(`http://localhost:${port}/stop`);
+    assert.equal(res.status, 404);
+  });
+
+  it("GET /start returns 404", async () => {
+    const { config, oracle, inventory, book, gas, risk, port } = makeDeps();
+    health = new HealthCheck(config, oracle, inventory, book, gas, risk, makeLogger());
+    await health.start();
+
+    const res = await fetch(`http://localhost:${port}/start`);
+    assert.equal(res.status, 404);
+  });
 });
