@@ -57,7 +57,7 @@ describe("PerpsSimple - removeCollateral", function () {
     const { perps } = contracts;
     const { buyer } = accounts;
 
-    const requiredMargin = await perps.read.getRequiredMargin([buyer.account.address]);
+    const requiredMargin = await perps.read.getMaintenanceMargin([buyer.account.address]);
     assert.ok(requiredMargin > 0n);
 
     const balance = await perps.read.balanceOf([buyer.account.address]);
@@ -75,7 +75,7 @@ describe("PerpsSimple - removeCollateral", function () {
     const { buyer } = accounts;
 
     const balance = await perps.read.balanceOf([buyer.account.address]);
-    const requiredMargin = await perps.read.getRequiredMargin([buyer.account.address]);
+    const requiredMargin = await perps.read.getMaintenanceMargin([buyer.account.address]);
 
     const excessMargin = balance - requiredMargin;
     if (excessMargin > 0n) {

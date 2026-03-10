@@ -226,6 +226,9 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         bytes32 orderId = bytes32(++nonce);
         emit OrderCreated(orderId, sender, _price, _quantity);
 
+        // Snapshot position before matching to detect reduce-only orders
+        int256 positionBefore = positions[sender].netQuantity;
+
         int256 remainingQuantity = _matchWithOppositeOrders(sender, _price, _quantity);
 
         if (remainingQuantity != _quantity) {
@@ -258,8 +261,13 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             _addPriceLevel(_price, isBuy);
         }
 
-        // Check margin requirement
-        _ensureSufficientMargin(sender);
+        // Skip margin check for reduce-only orders (opposite side, not exceeding position)
+        bool isReduceOnly = positionBefore != 0 && (positionBefore > 0 ? _quantity < 0 : _quantity > 0)
+            && _abs(_quantity) <= _abs(positionBefore);
+
+        if (!isReduceOnly) {
+            _ensureInitialMargin(sender);
+        }
     }
 
     /// @notice Match incoming order with opposite orders using limit price logic (direct walk).
@@ -428,9 +436,17 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         Position storage makerPos = positions[makerParticipant];
         Position storage takerPos = positions[taker];
         _emitOrderMatched(
-            matchedOrderId, makerParticipant, taker, _price, _takerQty, _makerFee, _takerFee,
-            makerPos.netQuantity, takerPos.netQuantity,
-            makerPos.aggregatedEntryPrice, takerPos.aggregatedEntryPrice
+            matchedOrderId,
+            makerParticipant,
+            taker,
+            _price,
+            _takerQty,
+            _makerFee,
+            _takerFee,
+            makerPos.netQuantity,
+            takerPos.netQuantity,
+            makerPos.aggregatedEntryPrice,
+            takerPos.aggregatedEntryPrice
         );
     }
 
@@ -448,8 +464,17 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         uint256 takerEntry
     ) private {
         emit OrderMatched(
-            matchedOrderId, maker, taker, price, takerQty, makerFee, takerFee,
-            makerNetQty, takerNetQty, makerEntry, takerEntry
+            matchedOrderId,
+            maker,
+            taker,
+            price,
+            takerQty,
+            makerFee,
+            takerFee,
+            makerNetQty,
+            takerNetQty,
+            makerEntry,
+            takerEntry
         );
     }
 
@@ -543,10 +568,9 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             revert InsufficientCollateral();
         }
 
-        // Check margin requirement
-        uint256 requiredMargin = getRequiredMargin(_msgSender());
+        // Check margin requirement (initial margin to prevent withdrawing into the buffer zone)
         uint256 remainingCollateral = balanceOf(_msgSender()) - _amount;
-        if (remainingCollateral < requiredMargin) {
+        if (remainingCollateral < getInitialMargin(_msgSender())) {
             revert InsufficientMargin();
         }
 
@@ -554,38 +578,6 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         collateralToken.safeTransfer(_msgSender(), _amount);
 
         emit CollateralRemoved(_msgSender(), _amount);
-    }
-
-    /// @notice Get maintenance margin requirement for a user
-    /// @param _user Address of the user
-    /// @return Required maintenance margin amount
-    function getMaintenanceMargin(address _user) public view returns (uint256) {
-        // Margin for open orders (use initial margin for orders)
-        uint256 totalMargin = (userTotalOrderValue[_user] * marginPercent) / 100;
-
-        // Maintenance margin for net position
-        Position memory position = positions[_user];
-        if (position.netQuantity != 0) {
-            uint256 currentPrice = getMarketPrice();
-            uint256 positionValue = _calculateValue(currentPrice, _abs(position.netQuantity));
-            uint256 requiredMarginForPosition = (positionValue * maintenanceMarginPercent) / 100;
-
-            // Add unrealized loss to margin requirement
-            int256 unrealizedPnl = _calculatePositionPnl(position, currentPrice);
-            if (unrealizedPnl < 0) {
-                requiredMarginForPosition += uint256(-unrealizedPnl);
-            }
-
-            // Add pending funding owed to margin requirement
-            int256 pendingFunding = getPendingFunding(_user);
-            if (pendingFunding > 0) {
-                requiredMarginForPosition += uint256(pendingFunding);
-            }
-
-            totalMargin += requiredMarginForPosition;
-        }
-
-        return totalMargin;
     }
 
     /// @notice Check if a user's position can be liquidated
@@ -722,19 +714,36 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         return (priceDiff * _position.netQuantity) / int256(10 ** QUANTITY_DECIMALS);
     }
 
-    /// @notice Get required margin for a user
+    /// @notice Get initial margin requirement for a user (uses marginPercent for positions)
     /// @param _user Address of the user
-    /// @return Required margin amount
+    /// @return Required initial margin amount
+    function getInitialMargin(address _user) public view returns (uint256) {
+        return getMargin(_user, marginPercent);
+    }
+
+    /// @notice Get initial margin for a user
+    /// @dev Deprecated: use getInitialMargin instead
     function getRequiredMargin(address _user) public view returns (uint256) {
-        // Margin for open orders
+        return getInitialMargin(_user);
+    }
+
+    /// @notice Get maintenance margin requirement for a user
+    /// @param _user Address of the user
+    /// @return Required maintenance margin amount
+    function getMaintenanceMargin(address _user) public view returns (uint256) {
+        return getMargin(_user, maintenanceMarginPercent);
+    }
+
+    function getMargin(address _user, uint8 _marginPercent) private view returns (uint256) {
+        // Margin for open orders (use initial margin for orders)
         uint256 totalMargin = (userTotalOrderValue[_user] * marginPercent) / 100;
 
-        // Margin for net position
+        // Maintenance margin for net position
         Position memory position = positions[_user];
         if (position.netQuantity != 0) {
             uint256 currentPrice = getMarketPrice();
             uint256 positionValue = _calculateValue(currentPrice, _abs(position.netQuantity));
-            uint256 requiredMarginForPosition = (positionValue * marginPercent) / 100;
+            uint256 requiredMarginForPosition = (positionValue * _marginPercent) / 100;
 
             // Add unrealized loss to margin requirement
             int256 unrealizedPnl = _calculatePositionPnl(position, currentPrice);
@@ -754,10 +763,16 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         return totalMargin;
     }
 
-    /// @notice Ensure user has sufficient margin
-    function _ensureSufficientMargin(address _user) private view {
-        uint256 requiredMargin = getRequiredMargin(_user);
-        if (balanceOf(_user) < requiredMargin) {
+    /// @notice Ensure user meets initial margin requirement (for opening exposure / withdrawals)
+    function _ensureInitialMargin(address _user) private view {
+        if (balanceOf(_user) < getInitialMargin(_user)) {
+            revert InsufficientMargin();
+        }
+    }
+
+    /// @notice Ensure user meets maintenance margin requirement
+    function _ensureMaintenanceMargin(address _user) private view {
+        if (balanceOf(_user) < getMaintenanceMargin(_user)) {
             revert InsufficientMargin();
         }
     }

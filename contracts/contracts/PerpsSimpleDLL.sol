@@ -226,6 +226,9 @@ contract PerpsSimpleDLL is Initializable, UUPSUpgradeable, OwnableUpgradeable, E
         bool isBuy = _quantity > 0;
         int256 remainingQuantity = _quantity;
 
+        // Snapshot position before matching to detect reduce-only orders
+        int256 positionBefore = positions[_msgSender()].netQuantity;
+
         remainingQuantity = _matchWithOppositeOrders(_msgSender(), _price, remainingQuantity);
 
         if (remainingQuantity != 0) {
@@ -253,8 +256,14 @@ contract PerpsSimpleDLL is Initializable, UUPSUpgradeable, OwnableUpgradeable, E
             _addPriceLevel(_price, isBuy);
         }
 
-        // Check margin requirement
-        _ensureSufficientMargin(_msgSender());
+        // Skip margin check for reduce-only orders (opposite side, not exceeding position)
+        bool isReduceOnly = positionBefore != 0
+            && (positionBefore > 0 ? _quantity < 0 : _quantity > 0)
+            && _abs(_quantity) <= _abs(positionBefore);
+
+        if (!isReduceOnly) {
+            _ensureInitialMargin(_msgSender());
+        }
     }
 
     /// @notice Match incoming order with opposite orders using limit price logic (direct walk).
@@ -531,10 +540,9 @@ contract PerpsSimpleDLL is Initializable, UUPSUpgradeable, OwnableUpgradeable, E
             revert InsufficientCollateral();
         }
 
-        // Check margin requirement
-        uint256 requiredMargin = getRequiredMargin(_msgSender());
+        // Check margin requirement (initial margin to prevent withdrawing into the buffer zone)
         uint256 remainingCollateral = balanceOf(_msgSender()) - _amount;
-        if (remainingCollateral < requiredMargin) {
+        if (remainingCollateral < _getInitialMargin(_msgSender())) {
             revert InsufficientMargin();
         }
 
@@ -702,27 +710,21 @@ contract PerpsSimpleDLL is Initializable, UUPSUpgradeable, OwnableUpgradeable, E
         return (priceDiff * _position.netQuantity) / int256(10 ** QUANTITY_DECIMALS);
     }
 
-    /// @notice Get required margin for a user
-    /// @param _user Address of the user
-    /// @return Required margin amount
-    function getRequiredMargin(address _user) public view returns (uint256) {
-        // Margin for open orders
+    /// @notice Get initial margin requirement for a user (uses marginPercent for positions)
+    function _getInitialMargin(address _user) private view returns (uint256) {
         uint256 totalMargin = (userTotalOrderValue[_user] * marginPercent) / 100;
 
-        // Margin for net position
         Position memory position = positions[_user];
         if (position.netQuantity != 0) {
             uint256 currentPrice = getMarketPrice();
             uint256 positionValue = _calculateValue(currentPrice, _abs(position.netQuantity));
             uint256 requiredMarginForPosition = (positionValue * marginPercent) / 100;
 
-            // Add unrealized loss to margin requirement
             int256 unrealizedPnl = _calculatePositionPnl(position, currentPrice);
             if (unrealizedPnl < 0) {
                 requiredMarginForPosition += uint256(-unrealizedPnl);
             }
 
-            // Add pending funding owed to margin requirement
             int256 pendingFunding = getPendingFunding(_user);
             if (pendingFunding > 0) {
                 requiredMarginForPosition += uint256(pendingFunding);
@@ -734,10 +736,16 @@ contract PerpsSimpleDLL is Initializable, UUPSUpgradeable, OwnableUpgradeable, E
         return totalMargin;
     }
 
-    /// @notice Ensure user has sufficient margin
-    function _ensureSufficientMargin(address _user) private view {
-        uint256 requiredMargin = getRequiredMargin(_user);
-        if (balanceOf(_user) < requiredMargin) {
+    /// @notice Ensure user meets initial margin requirement (for opening exposure / withdrawals)
+    function _ensureInitialMargin(address _user) private view {
+        if (balanceOf(_user) < _getInitialMargin(_user)) {
+            revert InsufficientMargin();
+        }
+    }
+
+    /// @notice Ensure user meets maintenance margin requirement
+    function _ensureMaintenanceMargin(address _user) private view {
+        if (balanceOf(_user) < getMaintenanceMargin(_user)) {
             revert InsufficientMargin();
         }
     }

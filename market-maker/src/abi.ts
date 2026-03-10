@@ -1211,13 +1211,6 @@ export const perpsSimpleAbi = [
   {
     type: 'function',
     inputs: [{ name: '_user', internalType: 'address', type: 'address' }],
-    name: 'getRequiredMargin',
-    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    inputs: [{ name: '_user', internalType: 'address', type: 'address' }],
     name: 'getUnrealizedPnl',
     outputs: [{ name: '', internalType: 'int256', type: 'int256' }],
     stateMutability: 'view',
@@ -2341,13 +2334,6 @@ export const perpsSimpleDllAbi = [
     outputs: [
       { name: 'totalQuantity', internalType: 'uint256', type: 'uint256' },
     ],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    inputs: [{ name: '_user', internalType: 'address', type: 'address' }],
-    name: 'getRequiredMargin',
-    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
     stateMutability: 'view',
   },
   {

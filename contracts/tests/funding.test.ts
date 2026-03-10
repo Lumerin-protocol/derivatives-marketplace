@@ -462,27 +462,6 @@ describe("PerpsSimple - Funding Fees", function () {
   });
 
   describe("Funding and margin requirements", function () {
-    it("should include pending funding owed in required margin", async function () {
-      const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithFundingAndPositionsFixture);
-      const { perps } = contracts;
-      const { buyer, seller, buyer2 } = accounts;
-      const tick = config.minimumPriceIncrement;
-
-      const marginBefore = await perps.read.getRequiredMargin([buyer.account.address]);
-
-      const smallQty = parseUnits("1", config.quantityDecimals);
-      await perps.write.createOrder([config.marketPrice + tick, smallQty], { account: buyer2.account });
-      await perps.write.createOrder([config.marketPrice + 3n * tick, -smallQty], { account: seller.account });
-
-      await networkHelpers.time.increase(86400);
-
-      const marginAfter = await perps.read.getRequiredMargin([buyer.account.address]);
-      const pendingFunding = await perps.read.getPendingFunding([buyer.account.address]);
-
-      assert.ok(pendingFunding > 0n);
-      assert.equal(marginAfter, marginBefore + pendingFunding);
-    });
-
     it("should include pending funding owed in maintenance margin", async function () {
       const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithFundingAndPositionsFixture);
       const { perps } = contracts;
@@ -510,7 +489,7 @@ describe("PerpsSimple - Funding Fees", function () {
       const { buyer, seller, buyer2 } = accounts;
       const tick = config.minimumPriceIncrement;
 
-      const marginBefore = await perps.read.getRequiredMargin([buyer.account.address]);
+      const marginBefore = await perps.read.getMaintenanceMargin([buyer.account.address]);
 
       const smallQty = parseUnits("1", config.quantityDecimals);
       await perps.write.createOrder([config.marketPrice - 3n * tick, smallQty], { account: buyer2.account });
@@ -518,7 +497,7 @@ describe("PerpsSimple - Funding Fees", function () {
 
       await networkHelpers.time.increase(86400);
 
-      const marginAfter = await perps.read.getRequiredMargin([buyer.account.address]);
+      const marginAfter = await perps.read.getMaintenanceMargin([buyer.account.address]);
       const pendingFunding = await perps.read.getPendingFunding([buyer.account.address]);
 
       assert.ok(pendingFunding < 0n);
