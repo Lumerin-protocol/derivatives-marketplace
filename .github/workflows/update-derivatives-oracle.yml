@@ -383,14 +383,38 @@ jobs:
           echo "   Manifest CID: $MANIFEST_CID"
           echo "ipfs_hash=$MANIFEST_CID" >> $GITHUB_OUTPUT
 
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
       - name: Check if deployment changed
         id: check_deploy
+        env:
+          ARBITRUM_RPC_URL: ${{ secrets.ARBITRUM_RPC_URL_MAIN }}
+          GNS_SUBGRAPH_ID: ${{ needs.build.outputs.gns_subgraph_id }}
         run: |
           MANIFEST_CID="${{ steps.pinata_pin.outputs.ipfs_hash }}"
           SUBGRAPH="${{ needs.build.outputs.subgraph_name }}"
           USERID="${{ needs.build.outputs.graph_userid }}"
 
-          echo "🔍 Checking current Studio deployment..."
+          # Convert CID to bytes32 for on-chain comparison
+          DEPLOYMENT_BYTES32=$(python3 -c "
+          ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+          def b58decode(s):
+              n = 0
+              for c in s:
+                  n = n * 58 + ALPHABET.index(c)
+              result = n.to_bytes(max(1, (n.bit_length() + 7) // 8), 'big')
+              pad = len(s) - len(s.lstrip('1'))
+              return b'\x00' * pad + result
+          raw = b58decode('$MANIFEST_CID')
+          print('0x' + raw[2:].hex())
+          ")
+
+          echo "🔍 Checking current deployment..."
+          echo "   New CID:     $MANIFEST_CID"
+          echo "   New bytes32: $DEPLOYMENT_BYTES32"
+
+          # --- Primary check: Studio API ---
           RESPONSE=$(curl -s -X POST \
             -H "Content-Type: application/json" \
             -d '{"query": "{ _meta { deployment } }"}' \
@@ -398,24 +422,64 @@ jobs:
 
           CURRENT_CID=$(echo "$RESPONSE" | jq -r '.data._meta.deployment // empty' 2>/dev/null || true)
 
-          echo "   Current: ${CURRENT_CID:-<none>}"
-          echo "   New:     $MANIFEST_CID"
-
-          if [ -n "$CURRENT_CID" ] && [ "$CURRENT_CID" = "$MANIFEST_CID" ]; then
-            echo ""
-            echo "✅ IPFS hash unchanged — skipping deploy and publish"
-            echo "changed=false" >> $GITHUB_OUTPUT
-            echo "deploy_status=no_change" >> $GITHUB_OUTPUT
-
-            echo "## ✅ No Changes Detected" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Current deployment \`$CURRENT_CID\` matches new build." >> $GITHUB_STEP_SUMMARY
-            echo "No new Studio version created." >> $GITHUB_STEP_SUMMARY
+          if [ -n "$CURRENT_CID" ]; then
+            echo "   Studio CID:  $CURRENT_CID"
+            if [ "$CURRENT_CID" = "$MANIFEST_CID" ]; then
+              echo ""
+              echo "✅ Studio deployment matches — skipping deploy and publish"
+              echo "changed=false" >> $GITHUB_OUTPUT
+              echo "deploy_status=no_change" >> $GITHUB_OUTPUT
+              echo "## ✅ No Changes Detected" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "Current deployment \`$CURRENT_CID\` matches new build." >> $GITHUB_STEP_SUMMARY
+              echo "No new Studio version created." >> $GITHUB_STEP_SUMMARY
+              exit 0
+            fi
           else
-            echo ""
-            echo "🔄 Deployment change detected"
-            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "   ⚠️  Studio API did not return a deployment CID"
+            echo "   Raw response: $RESPONSE"
           fi
+
+          # --- Fallback: query GNS contract on-chain (reliable, no rate limits) ---
+          if [ -z "$CURRENT_CID" ] && [ -n "$ARBITRUM_RPC_URL" ] && [ -n "$GNS_SUBGRAPH_ID" ]; then
+            echo ""
+            echo "   Falling back to on-chain GNS check..."
+            GNS_CONTRACT="0xec9A7fb6CbC2E41926127929c2dcE6e9c5D33Bec"
+
+            set +e
+            ONCHAIN_RESULT=$(cast call \
+              --rpc-url "$ARBITRUM_RPC_URL" \
+              "$GNS_CONTRACT" \
+              "subgraphs(uint256)(uint256,bytes32,uint256,bool,uint256)" \
+              "$GNS_SUBGRAPH_ID" 2>/dev/null)
+            CALL_EXIT=$?
+            set -e
+
+            if [ $CALL_EXIT -eq 0 ] && [ -n "$ONCHAIN_RESULT" ]; then
+              ONCHAIN_DEPLOYMENT=$(echo "$ONCHAIN_RESULT" | sed -n '2p')
+              echo "   On-chain:    $ONCHAIN_DEPLOYMENT"
+
+              if [ "$ONCHAIN_DEPLOYMENT" = "$DEPLOYMENT_BYTES32" ]; then
+                echo ""
+                echo "✅ On-chain deployment matches — skipping deploy and publish"
+                echo "changed=false" >> $GITHUB_OUTPUT
+                echo "deploy_status=no_change" >> $GITHUB_OUTPUT
+                echo "## ✅ No Changes Detected (on-chain)" >> $GITHUB_STEP_SUMMARY
+                echo "" >> $GITHUB_STEP_SUMMARY
+                echo "On-chain deployment matches new build (\`$MANIFEST_CID\`)." >> $GITHUB_STEP_SUMMARY
+                echo "No new Studio version created." >> $GITHUB_STEP_SUMMARY
+                exit 0
+              else
+                echo "   On-chain deployment differs — proceeding with deploy"
+              fi
+            else
+              echo "   ⚠️  Could not query GNS contract"
+            fi
+          fi
+
+          echo ""
+          echo "🔄 Deployment change detected"
+          echo "changed=true" >> $GITHUB_OUTPUT
 
       - name: Authenticate with The Graph Studio
         if: steps.check_deploy.outputs.changed == 'true'
@@ -492,10 +556,6 @@ jobs:
 
           exit 1
 
-      - name: Install Foundry
-        if: steps.check_deploy.outputs.changed == 'true' && steps.deploy.outputs.deploy_status == 'deployed'
-        uses: foundry-rs/foundry-toolchain@v1
-
       # Publish the new deployment to The Graph's decentralized network via the
       # L2GNS contract on Arbitrum One (all environments publish here).
       # Org secrets: {DEV,STG,LMN}_GNS_PUBLISHER_KEY, ARBITRUM_RPC_URL_MAIN
@@ -561,6 +621,11 @@ jobs:
           set -e
 
           if [ $SEND_EXIT -ne 0 ]; then
+            if echo "$RESULT" | grep -q "same subgraph deployment ID"; then
+              echo "✅ Already published to The Graph Network (same deployment ID on-chain)"
+              echo "publish_status=already_published" >> $GITHUB_OUTPUT
+              exit 0
+            fi
             echo "❌ Publish transaction failed"
             echo "   Error: $RESULT"
             echo "publish_status=failed" >> $GITHUB_OUTPUT
