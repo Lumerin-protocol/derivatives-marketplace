@@ -50,7 +50,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
     mapping(uint256 => StructuredLinkedList.List) private priceOrdersLongQueue; // FIFO queue of long orders by price
     mapping(uint256 => StructuredLinkedList.List) private priceOrdersShortQueue; // FIFO queue of short orders by price
     mapping(address => EnumerableSet.Bytes32Set) private participantOrderIdsIndex; // Orders by participant
-    mapping(address => uint256) private userTotalOrderValue; // Cached total order value per user
+    mapping(address => uint256) private _gap;
 
     // Price level tracking for limit order matching
     StructuredLinkedList.List private activeBidPrices; // Sorted bid prices (highest first)
@@ -73,6 +73,8 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
 
     // Order book limits
     uint256 public minimumMarginPerOrder; // Minimum margin (collateral) locked per resting order (0 = no minimum)
+    mapping(address => uint256) private userBuyOrderValue; // Cached total buy order value per user
+    mapping(address => uint256) private userSellOrderValue; // Cached total sell order value per user
 
     /// @notice Represents an order in the order book
     struct Order {
@@ -226,6 +228,9 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         bytes32 orderId = bytes32(++nonce);
         emit OrderCreated(orderId, sender, _price, _quantity);
 
+        // Snapshot position before matching to detect reduce-only orders
+        int256 positionBefore = positions[sender].netQuantity;
+
         int256 remainingQuantity = _matchWithOppositeOrders(sender, _price, _quantity);
 
         if (remainingQuantity != _quantity) {
@@ -250,7 +255,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
 
             // Create order with quantity that was not matched
             orders[orderId] = Order({ participant: sender, price: _price, quantity: remainingQuantity });
-            userTotalOrderValue[sender] += _calculateValue(_price, _abs(remainingQuantity));
+            _getOrderValue(isBuy)[sender] += _calculateValue(_price, _abs(remainingQuantity));
             participantOrders.add(orderId);
             StructuredLinkedList.List storage orderQueue = _priceOrderIds(_price, isBuy);
             orderQueue.pushBack(uint256(orderId));
@@ -258,8 +263,13 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             _addPriceLevel(_price, isBuy);
         }
 
-        // Check margin requirement
-        _ensureSufficientMargin(sender);
+        // Skip margin check for reduce-only orders (opposite side, not exceeding position)
+        bool isReduceOnly = positionBefore != 0 && (positionBefore > 0 ? _quantity < 0 : _quantity > 0)
+            && _abs(_quantity) <= _abs(positionBefore);
+
+        if (!isReduceOnly) {
+            _ensureInitialMargin(sender);
+        }
     }
 
     /// @notice Match incoming order with opposite orders using limit price logic (direct walk).
@@ -330,8 +340,9 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         _transferFee(_taker, takerFee);
         _transferFee(makerParticipant, makerFee);
 
-        // Update cached order value
-        userTotalOrderValue[makerParticipant] -= notionalValue;
+        // Update cached order value (maker is buy when taker is selling, and vice versa)
+        _getOrderValue(_remainingQty < 0)[makerParticipant] -= notionalValue;
+
         int256 newMakerQty = _reduceQuantity(makerQty, matchAmt);
         _makerOrder.quantity = newMakerQty;
 
@@ -385,14 +396,23 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         }
 
         bool isBid = order.quantity > 0;
-        userTotalOrderValue[order.participant] -= _calculateValue(order.price, _abs(order.quantity));
+        _getOrderValue(isBid)[order.participant] -= _calculateValue(order.price, _abs(order.quantity));
+
         _removeOrder(_orderId, order.participant, order.price, isBid);
         _removePriceLevelIfEmpty(order.price, isBid);
         emit OrderCancelled(_orderId, order.participant);
     }
 
+    function _getOrderValue(bool _isBuy) private view returns (mapping(address => uint256) storage) {
+        if (_isBuy) {
+            return userBuyOrderValue;
+        } else {
+            return userSellOrderValue;
+        }
+    }
+
     /// @notice Remove an order from the book (internal)
-    /// @dev Callers are responsible for updating userTotalOrderValue before this call.
+    /// @dev Callers are responsible for updating order values via _getOrderValue before this call.
     function _removeOrder(bytes32 _orderId, address _participant, uint256 _price, bool _isBid) private {
         _priceOrderIds(_price, _isBid).remove(uint256(_orderId));
         participantOrderIdsIndex[_participant].remove(_orderId);
@@ -428,9 +448,17 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         Position storage makerPos = positions[makerParticipant];
         Position storage takerPos = positions[taker];
         _emitOrderMatched(
-            matchedOrderId, makerParticipant, taker, _price, _takerQty, _makerFee, _takerFee,
-            makerPos.netQuantity, takerPos.netQuantity,
-            makerPos.aggregatedEntryPrice, takerPos.aggregatedEntryPrice
+            matchedOrderId,
+            makerParticipant,
+            taker,
+            _price,
+            _takerQty,
+            _makerFee,
+            _takerFee,
+            makerPos.netQuantity,
+            takerPos.netQuantity,
+            makerPos.aggregatedEntryPrice,
+            takerPos.aggregatedEntryPrice
         );
     }
 
@@ -448,8 +476,17 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         uint256 takerEntry
     ) private {
         emit OrderMatched(
-            matchedOrderId, maker, taker, price, takerQty, makerFee, takerFee,
-            makerNetQty, takerNetQty, makerEntry, takerEntry
+            matchedOrderId,
+            maker,
+            taker,
+            price,
+            takerQty,
+            makerFee,
+            takerFee,
+            makerNetQty,
+            takerNetQty,
+            makerEntry,
+            takerEntry
         );
     }
 
@@ -543,10 +580,9 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             revert InsufficientCollateral();
         }
 
-        // Check margin requirement
-        uint256 requiredMargin = getRequiredMargin(_msgSender());
+        // Check margin requirement (initial margin to prevent withdrawing into the buffer zone)
         uint256 remainingCollateral = balanceOf(_msgSender()) - _amount;
-        if (remainingCollateral < requiredMargin) {
+        if (remainingCollateral < getInitialMargin(_msgSender())) {
             revert InsufficientMargin();
         }
 
@@ -554,38 +590,6 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         collateralToken.safeTransfer(_msgSender(), _amount);
 
         emit CollateralRemoved(_msgSender(), _amount);
-    }
-
-    /// @notice Get maintenance margin requirement for a user
-    /// @param _user Address of the user
-    /// @return Required maintenance margin amount
-    function getMaintenanceMargin(address _user) public view returns (uint256) {
-        // Margin for open orders (use initial margin for orders)
-        uint256 totalMargin = (userTotalOrderValue[_user] * marginPercent) / 100;
-
-        // Maintenance margin for net position
-        Position memory position = positions[_user];
-        if (position.netQuantity != 0) {
-            uint256 currentPrice = getMarketPrice();
-            uint256 positionValue = _calculateValue(currentPrice, _abs(position.netQuantity));
-            uint256 requiredMarginForPosition = (positionValue * maintenanceMarginPercent) / 100;
-
-            // Add unrealized loss to margin requirement
-            int256 unrealizedPnl = _calculatePositionPnl(position, currentPrice);
-            if (unrealizedPnl < 0) {
-                requiredMarginForPosition += uint256(-unrealizedPnl);
-            }
-
-            // Add pending funding owed to margin requirement
-            int256 pendingFunding = getPendingFunding(_user);
-            if (pendingFunding > 0) {
-                requiredMarginForPosition += uint256(pendingFunding);
-            }
-
-            totalMargin += requiredMarginForPosition;
-        }
-
-        return totalMargin;
     }
 
     /// @notice Check if a user's position can be liquidated
@@ -722,42 +726,77 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         return (priceDiff * _position.netQuantity) / int256(10 ** QUANTITY_DECIMALS);
     }
 
-    /// @notice Get required margin for a user
+    /// @notice Get initial margin requirement for a user (uses marginPercent for positions)
     /// @param _user Address of the user
-    /// @return Required margin amount
-    function getRequiredMargin(address _user) public view returns (uint256) {
-        // Margin for open orders
-        uint256 totalMargin = (userTotalOrderValue[_user] * marginPercent) / 100;
+    /// @return Required initial margin amount
+    function getInitialMargin(address _user) public view returns (uint256) {
+        return getMargin(_user, marginPercent);
+    }
 
-        // Margin for net position
+    /// @notice Get initial margin for a user
+    /// @dev Deprecated: use getInitialMargin instead
+    function getRequiredMargin(address _user) public view returns (uint256) {
+        return getInitialMargin(_user);
+    }
+
+    /// @notice Get maintenance margin requirement for a user
+    /// @param _user Address of the user
+    /// @return Required maintenance margin amount
+    function getMaintenanceMargin(address _user) public view returns (uint256) {
+        return getMargin(_user, maintenanceMarginPercent);
+    }
+
+    function getMargin(address _user, uint8 _marginPercent) private view returns (uint256) {
+        uint256 buyVal = _getOrderValue(true)[_user];
+        uint256 sellVal = _getOrderValue(false)[_user];
         Position memory position = positions[_user];
+
+        uint256 totalMargin;
+
         if (position.netQuantity != 0) {
             uint256 currentPrice = getMarketPrice();
             uint256 positionValue = _calculateValue(currentPrice, _abs(position.netQuantity));
-            uint256 requiredMarginForPosition = (positionValue * marginPercent) / 100;
 
-            // Add unrealized loss to margin requirement
+            // Offset risk-reducing orders against the position
+            uint256 reducingVal;
+            if (position.netQuantity > 0) {
+                reducingVal = sellVal < positionValue ? sellVal : positionValue;
+            } else {
+                reducingVal = buyVal < positionValue ? buyVal : positionValue;
+            }
+            totalMargin = ((buyVal + sellVal - reducingVal) * marginPercent) / 100;
+
+            // Position margin
+            uint256 requiredMarginForPosition = (positionValue * _marginPercent) / 100;
+
             int256 unrealizedPnl = _calculatePositionPnl(position, currentPrice);
             if (unrealizedPnl < 0) {
                 requiredMarginForPosition += uint256(-unrealizedPnl);
             }
 
-            // Add pending funding owed to margin requirement
             int256 pendingFunding = getPendingFunding(_user);
             if (pendingFunding > 0) {
                 requiredMarginForPosition += uint256(pendingFunding);
             }
 
             totalMargin += requiredMarginForPosition;
+        } else {
+            totalMargin = ((buyVal + sellVal) * marginPercent) / 100;
         }
 
         return totalMargin;
     }
 
-    /// @notice Ensure user has sufficient margin
-    function _ensureSufficientMargin(address _user) private view {
-        uint256 requiredMargin = getRequiredMargin(_user);
-        if (balanceOf(_user) < requiredMargin) {
+    /// @notice Ensure user meets initial margin requirement (for opening exposure / withdrawals)
+    function _ensureInitialMargin(address _user) private view {
+        if (balanceOf(_user) < getInitialMargin(_user)) {
+            revert InsufficientMargin();
+        }
+    }
+
+    /// @notice Ensure user meets maintenance margin requirement
+    function _ensureMaintenanceMargin(address _user) private view {
+        if (balanceOf(_user) < getMaintenanceMargin(_user)) {
             revert InsufficientMargin();
         }
     }
@@ -1269,7 +1308,13 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
 
         cumulativeFundingPerUnit = 0;
         lastFundingUpdateTime = 0;
-        nonce = 0;
+        // nonce = 0;
+        emit LiquidationFeeUpdated(liquidationFee);
+        emit MatchFeeUpdated(takerFeeBps, makerFeeBps);
+        emit MinimumMarginPerOrderUpdated(minimumMarginPerOrder);
+        emit FundingParametersUpdated(fundingRateMaxBps, fundingPeriod);
+        emit MarginPercentUpdated(marginPercent);
+        emit MaintenanceMarginPercentUpdated(maintenanceMarginPercent);
     }
 
     /// @notice Clear all orders at a single price level and remove them from participant indexes
@@ -1281,7 +1326,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             bytes32 orderId = bytes32(orderIdUint);
             address participant = orders[orderId].participant;
             participantOrderIdsIndex[participant].remove(orderId);
-            userTotalOrderValue[participant] = 0;
+            delete _getOrderValue(_isBid)[participant];
             delete orders[orderId];
             queue.remove(orderIdUint);
             orderIdUint = nextOrderIdUint;

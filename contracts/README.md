@@ -77,16 +77,14 @@ Two margin tiers are enforced:
 - **Initial margin** (`marginPercent`) — required to place orders and hold positions. Calculated as a percentage of (open order notional + position notional at mark price + any unrealized loss).
 - **Maintenance margin** (`maintenanceMarginPercent`) — a lower threshold below which a position becomes liquidatable. Uses the same formula but with a smaller percentage.
 
-Withdrawals are blocked if removing collateral would breach the initial margin requirement.
-
 #### Margin Calculation
 
-Both margin tiers use the same structure but differ in which percentage is applied to the position component. The user's collateral balance (their internal receipt token balance) is compared against the calculated requirement — if it falls short, the action is rejected (initial margin) or the position becomes liquidatable (maintenance margin).
+Two margin tiers use the same structure but differ in which percentage is applied to the position component:
 
-**`getRequiredMargin(user)`** — initial margin, checked after every `createOrder` and `withdrawCollateral`:
+**Initial margin** (`_getInitialMargin`) — uses `marginPercent` for positions. Checked by `createOrder` (non-reduce-only) and `removeCollateral`:
 
 ```
-requiredMargin = orderMargin + positionMargin
+initialMargin = orderMargin + positionMargin
 
 orderMargin    = userTotalOrderValue * marginPercent / 100
 positionMargin = positionValue * marginPercent / 100
@@ -94,13 +92,13 @@ positionMargin = positionValue * marginPercent / 100
                + pendingFundingOwed
 ```
 
-**`getMaintenanceMargin(user)`** — maintenance margin, used by `isLiquidatable`:
+**`getMaintenanceMargin(user)`** — uses `maintenanceMarginPercent` for positions. Used by `isLiquidatable`:
 
 ```
 maintenanceMargin = orderMargin + positionMargin
 
-orderMargin       = userTotalOrderValue * marginPercent / 100     ← still uses initial %
-positionMargin    = positionValue * maintenanceMarginPercent / 100 ← lower %
+orderMargin       = userTotalOrderValue * marginPercent / 100
+positionMargin    = positionValue * maintenanceMarginPercent / 100
                   + abs(unrealizedLoss)
                   + pendingFundingOwed
 ```
@@ -111,7 +109,7 @@ Where:
 - `unrealizedLoss` — `(oraclePrice - entryPrice) * netQuantity / 10^QUANTITY_DECIMALS`, only added when negative (loss). Gains are ignored to be conservative.
 - `pendingFundingOwed` — only added when positive (user owes funding). Funding the user would receive is ignored.
 
-Note that the order component always uses the initial margin percentage, even in the maintenance margin calculation. This means resting orders are held to the stricter standard regardless, while only the position component relaxes to the lower maintenance threshold before liquidation is triggered.
+This creates a buffer zone between initial and maintenance margin. Users below initial margin cannot increase exposure or withdraw, but are not liquidated until they fall below maintenance margin. Reduce-only orders (opposite side of position, not exceeding position size) bypass the margin check entirely, ensuring users can always exit a losing position.
 
 ### Positions and PnL
 
@@ -193,7 +191,7 @@ mapping(address => int256) private userFundingSnapshot; // Per-user snapshot of 
 - **`createOrder()`** — Calls `_updateGlobalFunding()` at the top. Per-user settlement happens inside `_updateUserPosition` during matching.
 - **`_updateUserPosition()`** — Calls `_settleFunding(user)` at the very start, before any position logic, ensuring funding is settled at the old position size.
 - **`liquidate()`** — Calls `_updateGlobalFunding()` + `_settleFunding(user)` before liquidation logic. Pending funding debt affects liquidatability.
-- **`getMaintenanceMargin()` / `getRequiredMargin()`** — Include pending funding owed (if positive) in the margin requirement.
+- **`getMaintenanceMargin()`** — Includes pending funding owed (if positive) in the margin requirement.
 - **`getUnrealizedPnl()`** — Subtracts pending funding from unrealized PnL so users see the full picture.
 
 #### Position Lifecycle and Funding Snapshots

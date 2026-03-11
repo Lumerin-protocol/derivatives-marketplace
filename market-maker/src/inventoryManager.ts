@@ -68,7 +68,7 @@ export class InventoryManager {
         {
           address: this.config.perpsAddress,
           abi: perpsSimpleAbi,
-          functionName: "getRequiredMargin",
+          functionName: "getMaintenanceMargin",
           args: [this.mmAddress],
         },
         {

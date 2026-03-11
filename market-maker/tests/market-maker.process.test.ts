@@ -516,7 +516,7 @@ describe("MM process — post-fill on-chain state", () => {
     const reqMargin = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
       abi: perpsSimpleAbi,
-      functionName: "getRequiredMargin",
+      functionName: "getMaintenanceMargin",
       args: [MM_ACCOUNT.address],
     })) as bigint;
 

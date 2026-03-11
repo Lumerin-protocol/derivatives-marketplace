@@ -42,7 +42,7 @@ graph LR
 | **OracleTracker** | `oracleTracker.ts` | Reads `getMarketPrice()` each tick; tracks rolling volatility |
 | **GasTracker** | `gasTracker.ts` | Reads gas price, detects spikes, estimates tx costs in USD via ETH price feed |
 | **BookTracker** | `bookTracker.ts` | Maintains local mirror of order book via `getOrderBookPrices()` + event watching; tracks own orders |
-| **InventoryManager** | `inventoryManager.ts` | Reads `getUserPosition()`, `balanceOf()`, `getRequiredMargin()` to track net exposure and utilization |
+| **InventoryManager** | `inventoryManager.ts` | Reads `getUserPosition()`, `balanceOf()`, `getMaintenanceMargin()` to track net exposure and utilization |
 | **RiskManager** | `riskManager.ts` | Drawdown circuit breaker, daily loss limit, gas budget throttling, position limit enforcement |
 | **Quoter** | `quoter.ts` | Computes bid/ask levels: Avellaneda-Stoikov inspired spreads with gas floor, volatility scaling, inventory skew |
 | **OrderExecutor** | `orderExecutor.ts` | Diffs desired quotes vs resting orders; cancels stale, places new; gas-capped transactions |

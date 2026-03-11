@@ -2,7 +2,11 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
 import { parseUnits, getAddress, parseEventLogs } from "viem";
-import { deployPerpsWithCollateralFixture, deployPerpsWithOrdersFixture } from "./fixtures.ts";
+import {
+  deployPerpsWithCollateralFixture,
+  deployPerpsWithOrdersFixture,
+  deployPerpsWithLiquidatablePositionFixture,
+} from "./fixtures.ts";
 
 const { viem, networkHelpers } = await network.connect();
 
@@ -292,6 +296,126 @@ describe("PerpsSimple - createOrder", function () {
 
       await viem.assertions.revertWithCustomError(
         perps.write.createOrder([marketPrice, BigInt(quantity)], { account: buyer.account }),
+        perps,
+        "InsufficientMargin",
+      );
+    });
+
+    it("should allow reduce-only order when margin is tight", async function () {
+      const data = await networkHelpers.loadFixture(deployPerpsWithLiquidatablePositionFixture);
+      const { contracts, accounts, config } = data;
+      const { perps, priceOracle } = contracts;
+      const { seller } = accounts;
+
+      // Move price against the short seller (up) so margin is tight but not liquidatable
+      const tick = config.minimumPriceIncrement;
+      const priceIncrease = tick * 80n;
+      const newPrice = config.initialPrice + priceIncrease;
+      await priceOracle.write.setPrice([newPrice, config.oracle.decimals]);
+
+      // Verify seller is in the buffer zone: above maintenance (5%) but below initial (10%)
+      const balance = await perps.read.balanceOf([seller.account.address]);
+      const maintenanceMargin = await perps.read.getMaintenanceMargin([seller.account.address]);
+      assert.ok(balance > maintenanceMargin, "balance should be above maintenance margin");
+      assert.ok(
+        !(await perps.read.isLiquidatable([seller.account.address])),
+        "seller should not be liquidatable",
+      );
+
+      // Closing buy order (reduce-only) should succeed even though a resting order
+      // would push total margin above collateral balance
+      const closingPrice = config.initialPrice - tick * 10n;
+      await perps.write.createOrder([closingPrice, config.qty], { account: seller.account });
+
+      const orders = await perps.read.getUserOrders([seller.account.address]);
+      assert.equal(orders.length, 1, "closing order should be resting on the book");
+    });
+
+    it("should not become liquidatable after placing a reduce-only order", async function () {
+      const data = await networkHelpers.loadFixture(deployPerpsWithLiquidatablePositionFixture);
+      const { contracts, accounts, config } = data;
+      const { perps, priceOracle } = contracts;
+      const { seller } = accounts;
+
+      // Move price against seller enough that adding a resting closing order's value
+      // to userTotalOrderValue would push maintenance margin above collateral balance
+      const tick = config.minimumPriceIncrement;
+      const priceIncrease = tick * 95n;
+      const newPrice = config.initialPrice + priceIncrease;
+      await priceOracle.write.setPrice([newPrice, config.oracle.decimals]);
+
+      // Verify seller is in the buffer zone and not liquidatable
+      const balance = await perps.read.balanceOf([seller.account.address]);
+      const maintenanceMargin = await perps.read.getMaintenanceMargin([seller.account.address]);
+      assert.ok(balance > maintenanceMargin, "balance should be above maintenance margin");
+      assert.ok(
+        !(await perps.read.isLiquidatable([seller.account.address])),
+        "seller should not be liquidatable before closing order",
+      );
+
+      // Place a reduce-only closing order at a price that will rest
+      const closingPrice = config.initialPrice - tick * 10n;
+      await perps.write.createOrder([closingPrice, config.qty], { account: seller.account });
+
+      // The resting closing order should NOT push the user into liquidation
+      assert.ok(
+        !(await perps.read.isLiquidatable([seller.account.address])),
+        "seller should not be liquidatable after placing reduce-only closing order",
+      );
+    });
+
+    it("should reject position-increasing order when margin is tight", async function () {
+      const data = await networkHelpers.loadFixture(deployPerpsWithLiquidatablePositionFixture);
+      const { contracts, accounts, config } = data;
+      const { perps, priceOracle } = contracts;
+      const { seller } = accounts;
+
+      const tick = config.minimumPriceIncrement;
+      const priceIncrease = tick * 80n;
+      const newPrice = config.initialPrice + priceIncrease;
+      await priceOracle.write.setPrice([newPrice, config.oracle.decimals]);
+
+      // Verify seller is in the buffer zone: above maintenance (5%) but below initial (10%)
+      const balance = await perps.read.balanceOf([seller.account.address]);
+      const maintenanceMargin = await perps.read.getMaintenanceMargin([seller.account.address]);
+      assert.ok(balance > maintenanceMargin, "balance should be above maintenance margin");
+      assert.ok(
+        !(await perps.read.isLiquidatable([seller.account.address])),
+        "seller should not be liquidatable",
+      );
+
+      // Adding to short position should fail — same side, not reduce-only
+      await viem.assertions.revertWithCustomError(
+        perps.write.createOrder([newPrice + tick, -config.qty], { account: seller.account }),
+        perps,
+        "InsufficientMargin",
+      );
+    });
+
+    it("should reject order exceeding position size even if opposite side", async function () {
+      const data = await networkHelpers.loadFixture(deployPerpsWithLiquidatablePositionFixture);
+      const { contracts, accounts, config } = data;
+      const { perps, priceOracle } = contracts;
+      const { seller } = accounts;
+
+      const tick = config.minimumPriceIncrement;
+      const priceIncrease = tick * 80n;
+      const newPrice = config.initialPrice + priceIncrease;
+      await priceOracle.write.setPrice([newPrice, config.oracle.decimals]);
+
+      // Verify seller is in the buffer zone: above maintenance (5%) but below initial (10%)
+      const balance = await perps.read.balanceOf([seller.account.address]);
+      const maintenanceMargin = await perps.read.getMaintenanceMargin([seller.account.address]);
+      assert.ok(balance > maintenanceMargin, "balance should be above maintenance margin");
+      assert.ok(
+        !(await perps.read.isLiquidatable([seller.account.address])),
+        "seller should not be liquidatable",
+      );
+
+      // Buy order larger than position — would flip to long, not reduce-only
+      const closingPrice = config.initialPrice - tick * 10n;
+      await viem.assertions.revertWithCustomError(
+        perps.write.createOrder([closingPrice, config.qty * 2n], { account: seller.account }),
         perps,
         "InsufficientMargin",
       );

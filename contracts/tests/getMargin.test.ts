@@ -11,67 +11,6 @@ import {
 const { viem, networkHelpers } = await network.connect();
 
 describe("PerpsSimple - Margin View Functions", function () {
-  describe("getRequiredMargin", function () {
-    it("should return 0 when user has no orders or positions", async function () {
-      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
-      const { perps } = contracts;
-      const { buyer } = accounts;
-
-      const margin = await perps.read.getRequiredMargin([buyer.account.address]);
-      assert.equal(margin, 0n);
-    });
-
-    it("should include margin for open orders", async function () {
-      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsWithOrdersFixture);
-      const { perps } = contracts;
-      const { buyer } = accounts;
-
-      const margin = await perps.read.getRequiredMargin([buyer.account.address]);
-      assert.ok(margin > 0n);
-    });
-
-    it("should include margin for open positions", async function () {
-      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsWithPositionsFixture);
-      const { perps } = contracts;
-      const { buyer } = accounts;
-
-      const margin = await perps.read.getRequiredMargin([buyer.account.address]);
-      assert.ok(margin > 0n);
-    });
-
-    it("should increase when price moves against position", async function () {
-      const data = await networkHelpers.loadFixture(deployPerpsWithLiquidatablePositionFixture);
-      const { contracts, accounts } = data;
-      const { perps, priceOracle } = contracts;
-      const { seller } = accounts;
-
-      const marginBefore = await perps.read.getRequiredMargin([seller.account.address]);
-
-      const currentPrice = await perps.read.getMarketPrice();
-      const newPrice = (currentPrice * 110n) / 100n;
-      await priceOracle.write.setPrice([newPrice, 6]);
-
-      const marginAfter = await perps.read.getRequiredMargin([seller.account.address]);
-      assert.ok(marginAfter > marginBefore);
-    });
-
-    it("should decrease when price moves in favor of position", async function () {
-      const data = await networkHelpers.loadFixture(deployPerpsWithLiquidatablePositionFixture);
-      const { contracts, accounts } = data;
-      const { perps, priceOracle } = contracts;
-      const { seller } = accounts;
-
-      const marginBefore = await perps.read.getRequiredMargin([seller.account.address]);
-
-      const currentPrice = await perps.read.getMarketPrice();
-      const newPrice = (currentPrice * 90n) / 100n;
-      await priceOracle.write.setPrice([newPrice, 6]);
-
-      const marginAfter = await perps.read.getRequiredMargin([seller.account.address]);
-      assert.ok(marginAfter <= marginBefore);
-    });
-  });
-
   describe("getMaintenanceMargin", function () {
     it("should return 0 when user has no orders or positions", async function () {
       const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
@@ -82,15 +21,54 @@ describe("PerpsSimple - Margin View Functions", function () {
       assert.equal(margin, 0n);
     });
 
-    it("should be less than required margin for positions", async function () {
+    it("should include margin for open orders", async function () {
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsWithOrdersFixture);
+      const { perps } = contracts;
+      const { buyer } = accounts;
+
+      const margin = await perps.read.getMaintenanceMargin([buyer.account.address]);
+      assert.ok(margin > 0n);
+    });
+
+    it("should include margin for open positions", async function () {
       const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsWithPositionsFixture);
       const { perps } = contracts;
       const { buyer } = accounts;
 
-      const requiredMargin = await perps.read.getRequiredMargin([buyer.account.address]);
-      const maintenanceMargin = await perps.read.getMaintenanceMargin([buyer.account.address]);
+      const margin = await perps.read.getMaintenanceMargin([buyer.account.address]);
+      assert.ok(margin > 0n);
+    });
 
-      assert.ok(maintenanceMargin <= requiredMargin);
+    it("should increase when price moves against position", async function () {
+      const data = await networkHelpers.loadFixture(deployPerpsWithLiquidatablePositionFixture);
+      const { contracts, accounts } = data;
+      const { perps, priceOracle } = contracts;
+      const { seller } = accounts;
+
+      const marginBefore = await perps.read.getMaintenanceMargin([seller.account.address]);
+
+      const currentPrice = await perps.read.getMarketPrice();
+      const newPrice = (currentPrice * 110n) / 100n;
+      await priceOracle.write.setPrice([newPrice, 6]);
+
+      const marginAfter = await perps.read.getMaintenanceMargin([seller.account.address]);
+      assert.ok(marginAfter > marginBefore);
+    });
+
+    it("should decrease when price moves in favor of position", async function () {
+      const data = await networkHelpers.loadFixture(deployPerpsWithLiquidatablePositionFixture);
+      const { contracts, accounts } = data;
+      const { perps, priceOracle } = contracts;
+      const { seller } = accounts;
+
+      const marginBefore = await perps.read.getMaintenanceMargin([seller.account.address]);
+
+      const currentPrice = await perps.read.getMarketPrice();
+      const newPrice = (currentPrice * 90n) / 100n;
+      await priceOracle.write.setPrice([newPrice, 6]);
+
+      const marginAfter = await perps.read.getMaintenanceMargin([seller.account.address]);
+      assert.ok(marginAfter <= marginBefore);
     });
   });
 

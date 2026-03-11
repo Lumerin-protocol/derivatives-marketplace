@@ -88,7 +88,7 @@ describe("PerpsSimple - multicall", function () {
       const { perps } = contracts;
       const { buyer } = accounts;
 
-      const marginBefore = await perps.read.getRequiredMargin([buyer.account.address]);
+      const marginBefore = await perps.read.getMaintenanceMargin([buyer.account.address]);
       assert.ok(marginBefore > 0n);
 
       const orderIds = await perps.read.getUserOrders([buyer.account.address]);
@@ -98,7 +98,7 @@ describe("PerpsSimple - multicall", function () {
 
       await perps.write.multicall([calls], { account: buyer.account });
 
-      const marginAfter = await perps.read.getRequiredMargin([buyer.account.address]);
+      const marginAfter = await perps.read.getMaintenanceMargin([buyer.account.address]);
       assert.equal(marginAfter, 0n);
     });
   });

@@ -66,13 +66,13 @@ describe("PerpsSimple - cancelOrder", function () {
 
     await perps.write.createOrder([price, BigInt(quantity)], { account: buyer.account });
 
-    const marginBefore = await perps.read.getRequiredMargin([buyer.account.address]);
+    const marginBefore = await perps.read.getMaintenanceMargin([buyer.account.address]);
     assert.ok(marginBefore > 0n);
 
     const orders = await perps.read.getUserOrders([buyer.account.address]);
     await perps.write.cancelOrder([orders[0]], { account: buyer.account });
 
-    const marginAfter = await perps.read.getRequiredMargin([buyer.account.address]);
+    const marginAfter = await perps.read.getMaintenanceMargin([buyer.account.address]);
     assert.ok(marginAfter < marginBefore);
   });
 
