@@ -331,6 +331,39 @@ describe("PerpsSimple - createOrder", function () {
       assert.equal(orders.length, 1, "closing order should be resting on the book");
     });
 
+    it("should not become liquidatable after placing a reduce-only order", async function () {
+      const data = await networkHelpers.loadFixture(deployPerpsWithLiquidatablePositionFixture);
+      const { contracts, accounts, config } = data;
+      const { perps, priceOracle } = contracts;
+      const { seller } = accounts;
+
+      // Move price against seller enough that adding a resting closing order's value
+      // to userTotalOrderValue would push maintenance margin above collateral balance
+      const tick = config.minimumPriceIncrement;
+      const priceIncrease = tick * 95n;
+      const newPrice = config.initialPrice + priceIncrease;
+      await priceOracle.write.setPrice([newPrice, config.oracle.decimals]);
+
+      // Verify seller is in the buffer zone and not liquidatable
+      const balance = await perps.read.balanceOf([seller.account.address]);
+      const maintenanceMargin = await perps.read.getMaintenanceMargin([seller.account.address]);
+      assert.ok(balance > maintenanceMargin, "balance should be above maintenance margin");
+      assert.ok(
+        !(await perps.read.isLiquidatable([seller.account.address])),
+        "seller should not be liquidatable before closing order",
+      );
+
+      // Place a reduce-only closing order at a price that will rest
+      const closingPrice = config.initialPrice - tick * 10n;
+      await perps.write.createOrder([closingPrice, config.qty], { account: seller.account });
+
+      // The resting closing order should NOT push the user into liquidation
+      assert.ok(
+        !(await perps.read.isLiquidatable([seller.account.address])),
+        "seller should not be liquidatable after placing reduce-only closing order",
+      );
+    });
+
     it("should reject position-increasing order when margin is tight", async function () {
       const data = await networkHelpers.loadFixture(deployPerpsWithLiquidatablePositionFixture);
       const { contracts, accounts, config } = data;
