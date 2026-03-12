@@ -106,14 +106,14 @@ function loadPerpsFromContract(perps: Perps): void {
     perps.minimumPriceIncrement = minimumPriceIncrement.value;
   }
 
-  const takerFeeBps = contract.try_takerFeeBps();
-  if (!takerFeeBps.reverted) {
-    perps.takerFeeBps = takerFeeBps.value;
-  }
-
   const makerFeeBps = contract.try_makerFeeBps();
   if (!makerFeeBps.reverted) {
     perps.makerFeeBps = makerFeeBps.value;
+  }
+
+  const takerFeeBps = contract.try_takerFeeBps();
+  if (!takerFeeBps.reverted) {
+    perps.takerFeeBps = takerFeeBps.value;
   }
 
   const quantityDecimals = contract.try_QUANTITY_DECIMALS();
@@ -339,15 +339,18 @@ export function handleOrderUpdated(event: OrderUpdated): void {
 }
 
 export function handleOrderMatched(event: OrderMatched): void {
-  log.info("Order matched: makerOrderId {} maker {} taker {} price {} takerQty {} makerFee {} takerFee {}", [
-    event.params.makerOrderId.toHexString(),
-    event.params.maker.toHexString(),
-    event.params.taker.toHexString(),
-    event.params.tradePrice.toString(),
-    event.params.takerQuantity.toString(),
-    event.params.makerFee.toString(),
-    event.params.takerFee.toString(),
-  ]);
+  log.info(
+    "Order matched: makerOrderId {} maker {} taker {} price {} takerQty {} makerFee {} takerFee {}",
+    [
+      event.params.makerOrderId.toHexString(),
+      event.params.maker.toHexString(),
+      event.params.taker.toHexString(),
+      event.params.tradePrice.toString(),
+      event.params.takerQuantity.toString(),
+      event.params.makerFee.toString(),
+      event.params.takerFee.toString(),
+    ],
+  );
 
   const tradePrice = event.params.tradePrice;
   const takerQty = event.params.takerQuantity;
@@ -359,18 +362,36 @@ export function handleOrderMatched(event: OrderMatched): void {
   const quantityScale = BigInt.fromI32(10).pow(u8(perps.quantityDecimals));
 
   processUserMatch(
-    takerUser, takerQty, tradePrice, event.params.takerFee,
-    event.params.takerNetQtyAfter, event.params.takerEntryPriceAfter,
-    makerUser.id, event.params.makerOrderId,
-    event.transaction.hash, event.logIndex, event.block.number, event.block.timestamp,
-    0, quantityScale,
+    takerUser,
+    takerQty,
+    tradePrice,
+    event.params.takerFee,
+    event.params.takerNetQtyAfter,
+    event.params.takerEntryPriceAfter,
+    makerUser.id,
+    event.params.makerOrderId,
+    event.transaction.hash,
+    event.logIndex,
+    event.block.number,
+    event.block.timestamp,
+    0,
+    quantityScale,
   );
   processUserMatch(
-    makerUser, takerQty.neg(), tradePrice, event.params.makerFee,
-    event.params.makerNetQtyAfter, event.params.makerEntryPriceAfter,
-    takerUser.id, event.params.makerOrderId,
-    event.transaction.hash, event.logIndex, event.block.number, event.block.timestamp,
-    1, quantityScale,
+    makerUser,
+    takerQty.neg(),
+    tradePrice,
+    event.params.makerFee,
+    event.params.makerNetQtyAfter,
+    event.params.makerEntryPriceAfter,
+    takerUser.id,
+    event.params.makerOrderId,
+    event.transaction.hash,
+    event.logIndex,
+    event.block.number,
+    event.block.timestamp,
+    1,
+    quantityScale,
   );
 
   const volume = tradePrice.times(absQuantity).div(quantityScale);
@@ -381,7 +402,13 @@ export function handleOrderMatched(event: OrderMatched): void {
 }
 
 /** Load or create the per-user per-transaction Trade aggregate. */
-function getOrCreateTrade(txHash: Bytes, userId: Bytes, positionSessionId: string, timestamp: BigInt, blockNumber: BigInt): Trade {
+function getOrCreateTrade(
+  txHash: Bytes,
+  userId: Bytes,
+  positionSessionId: string,
+  timestamp: BigInt,
+  blockNumber: BigInt,
+): Trade {
   const tradeId = txHash.concat(userId);
   let trade = Trade.load(tradeId);
   if (!trade) {
@@ -404,7 +431,15 @@ function getOrCreateTrade(txHash: Bytes, userId: Bytes, positionSessionId: strin
 }
 
 /** Update the Trade aggregate with a new fill's data. */
-function updateTradeAggregate(trade: Trade, fillPrice: BigInt, fillQty: BigInt, fee: BigInt, pnl: BigInt, netQtyAfter: BigInt, entryPriceAfter: BigInt): void {
+function updateTradeAggregate(
+  trade: Trade,
+  fillPrice: BigInt,
+  fillQty: BigInt,
+  fee: BigInt,
+  pnl: BigInt,
+  netQtyAfter: BigInt,
+  entryPriceAfter: BigInt,
+): void {
   const zero = BigInt.zero();
   const absFillQty = absBigInt(fillQty);
   const oldAbsTotal = absBigInt(trade.tradeQuantity);
@@ -468,16 +503,44 @@ function processUserMatch(
 
   if (positionFlipped) {
     handleFlip(
-      user, tradeQty, tradePrice, tradingFee, realizedPnl, newNetQuantity, newEntryPrice,
-      oldNetQuantity, oldEntryPrice, counterpartyId, makerOrderId,
-      baseTradeId, txHash, blockNumber, logIndex, timestamp, sideIndex,
+      user,
+      tradeQty,
+      tradePrice,
+      tradingFee,
+      realizedPnl,
+      newNetQuantity,
+      newEntryPrice,
+      oldNetQuantity,
+      oldEntryPrice,
+      counterpartyId,
+      makerOrderId,
+      baseTradeId,
+      txHash,
+      blockNumber,
+      logIndex,
+      timestamp,
+      sideIndex,
     );
   } else {
     handleNonFlip(
-      user, tradeQty, tradePrice, tradingFee, realizedPnl, newNetQuantity, newEntryPrice,
-      oldNetQuantity, counterpartyId, makerOrderId,
-      isPositionOpened, isPositionClosed,
-      baseTradeId, txHash, blockNumber, logIndex, timestamp, sideIndex,
+      user,
+      tradeQty,
+      tradePrice,
+      tradingFee,
+      realizedPnl,
+      newNetQuantity,
+      newEntryPrice,
+      oldNetQuantity,
+      counterpartyId,
+      makerOrderId,
+      isPositionOpened,
+      isPositionClosed,
+      baseTradeId,
+      txHash,
+      blockNumber,
+      logIndex,
+      timestamp,
+      sideIndex,
     );
   }
 
@@ -548,7 +611,15 @@ function handleFlip(
       closeFill.blockNumber = blockNumber;
       closeFill.transactionHash = txHash;
       closeFill.save();
-      updateTradeAggregate(trade, tradePrice, closeQty, tradingFee, realizedPnl, zero, oldEntryPrice);
+      updateTradeAggregate(
+        trade,
+        tradePrice,
+        closeQty,
+        tradingFee,
+        realizedPnl,
+        zero,
+        oldEntryPrice,
+      );
       trade.save();
     }
   }
@@ -590,7 +661,15 @@ function handleFlip(
   openFill.blockNumber = blockNumber;
   openFill.transactionHash = txHash;
   openFill.save();
-  updateTradeAggregate(trade, tradePrice, newNetQuantity, zero, zero, newNetQuantity, newEntryPrice);
+  updateTradeAggregate(
+    trade,
+    tradePrice,
+    newNetQuantity,
+    zero,
+    zero,
+    newNetQuantity,
+    newEntryPrice,
+  );
   trade.save();
   user.tradeCount++;
 }
@@ -695,7 +774,15 @@ function handleNonFlip(
   fill.blockNumber = blockNumber;
   fill.transactionHash = txHash;
   fill.save();
-  updateTradeAggregate(trade, tradePrice, tradeQty, tradingFee, realizedPnl, newNetQuantity, newEntryPrice);
+  updateTradeAggregate(
+    trade,
+    tradePrice,
+    tradeQty,
+    tradingFee,
+    realizedPnl,
+    newNetQuantity,
+    newEntryPrice,
+  );
   trade.save();
   user.tradeCount++;
 }
