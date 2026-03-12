@@ -49,6 +49,9 @@ multicall_address       = "0xcA11bde05977b3631167028862bE2a173976CA11"
 
 ########################################
 # Monitoring Configuration
+# Note: monitoring resources are controlled by perpskeeper_service.create
+# and marketmaker_service.create in 05_*_mon.tf — these vars are reserved
+# for future use when a monitoring variable block is added to 00_variables.tf
 ########################################
 # monitoring = {
 #   create                    = true
@@ -74,7 +77,7 @@ multicall_address       = "0xcA11bde05977b3631167028862bE2a173976CA11"
 #   ecs_memory_threshold        = 90
 #   ecs_min_running_tasks       = 1
 #   lambda_error_threshold      = 5
-#   lambda_duration_threshold   = 240000  # 80% of 300s timeout
+#   lambda_duration_threshold   = 240000  # 80% of 500s timeout
 #   lambda_throttle_threshold   = 10
 #   alb_5xx_threshold           = 20
 #   alb_unhealthy_threshold     = 1
