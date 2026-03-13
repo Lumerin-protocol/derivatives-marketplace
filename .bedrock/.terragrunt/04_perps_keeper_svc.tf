@@ -201,7 +201,7 @@ resource "aws_route53_record" "perpskeeper_int_use1" {
 
 # Define Service
 resource "aws_ecs_service" "perpskeeper_use1" {
-  # lifecycle {ignore_changes = [task_definition] }
+  lifecycle {ignore_changes = [task_definition] }
   count                  = var.perpskeeper_service.create ? 1 : 0
   provider               = aws.use1
   name                   = "svc-${var.perpskeeper_service.svc_name}-${substr(var.account_shortname, 8, 3)}"
@@ -247,7 +247,7 @@ resource "aws_ecs_service" "perpskeeper_use1" {
 
 # Define Task  
 resource "aws_ecs_task_definition" "perpskeeper_use1" {
-  # lifecycle { ignore_changes = [container_definitions] }
+  lifecycle { ignore_changes = [container_definitions] }
   count                    = var.perpskeeper_service.create ? 1 : 0
   provider                 = aws.use1
   family                   = "tsk-${var.perpskeeper_service.svc_name}"
