@@ -1,4 +1,11 @@
-import { type PublicClient, type WalletClient, type Account, type Chain, encodeFunctionData } from "viem";
+import {
+  type PublicClient,
+  type WalletClient,
+  type Account,
+  type Chain,
+  encodeFunctionData,
+  InsufficientFundsError,
+} from "viem";
 import type { MakerConfig } from "./config.ts";
 import type { Quoter, DesiredQuotes, QuoteLevel } from "./quoter.ts";
 import type { BookTracker, OwnOrder } from "./bookTracker.ts";
@@ -64,7 +71,11 @@ export class OrderExecutor {
       const drift = this.priceDriftTicks();
       if (drift < this.config.urgentRequoteThresholdTicks) {
         this.logger.info(
-          { drift, threshold: this.config.urgentRequoteThresholdTicks, gasSpike: this.gas.gasSpikePct.toFixed(0) },
+          {
+            drift,
+            threshold: this.config.urgentRequoteThresholdTicks,
+            gasSpike: this.gas.gasSpikePct.toFixed(0),
+          },
           "requote skipped: gas spike, drift below urgent threshold",
         );
         return;
@@ -85,10 +96,22 @@ export class OrderExecutor {
     const calls: `0x${string}`[] = [];
 
     for (const order of ordersToCancel) {
-      calls.push(encodeFunctionData({ abi: perpsSimpleAbi, functionName: "cancelOrder", args: [order.orderId] }));
+      calls.push(
+        encodeFunctionData({
+          abi: perpsSimpleAbi,
+          functionName: "cancelOrder",
+          args: [order.orderId],
+        }),
+      );
     }
     for (const level of ordersToPlace) {
-      calls.push(encodeFunctionData({ abi: perpsSimpleAbi, functionName: "createOrder", args: [level.price, level.quantity] }));
+      calls.push(
+        encodeFunctionData({
+          abi: perpsSimpleAbi,
+          functionName: "createOrder",
+          args: [level.price, level.quantity],
+        }),
+      );
     }
 
     if (this.config.dryRun) {
@@ -118,7 +141,11 @@ export class OrderExecutor {
       this.stats.ordersPlaced += ordersToPlace.length;
 
       this.logger.info(
-        { cancels: ordersToCancel.length, places: ordersToPlace.length, gas: receipt.gasUsed.toString() },
+        {
+          cancels: ordersToCancel.length,
+          places: ordersToPlace.length,
+          gas: receipt.gasUsed.toString(),
+        },
         "multicall batch executed",
       );
     } catch (err) {
@@ -126,7 +153,7 @@ export class OrderExecutor {
         { cancels: ordersToCancel.length, places: ordersToPlace.length, err },
         "multicall batch failed",
       );
-      throw err;
+      throw this.wrapMulticallError(err);
     }
 
     this.lastRequoteAt = Date.now();
@@ -143,7 +170,11 @@ export class OrderExecutor {
     const maxFeePerGas = this.gas.cappedGasPrice();
 
     const calls = orders.map((order) =>
-      encodeFunctionData({ abi: perpsSimpleAbi, functionName: "cancelOrder", args: [order.orderId] }),
+      encodeFunctionData({
+        abi: perpsSimpleAbi,
+        functionName: "cancelOrder",
+        args: [order.orderId],
+      }),
     );
 
     if (this.config.dryRun) {
@@ -167,11 +198,35 @@ export class OrderExecutor {
       this.risk.recordGasCost(gasCost);
 
       this.stats.ordersCancelled += orders.length;
-      this.logger.info({ count: orders.length, gas: receipt.gasUsed.toString() }, "all orders cancelled via multicall");
+      this.logger.info(
+        { count: orders.length, gas: receipt.gasUsed.toString() },
+        "all orders cancelled via multicall",
+      );
     } catch (err) {
       this.logger.error({ count: orders.length, err }, "cancel-all multicall failed");
-      throw err;
+      throw this.wrapMulticallError(err);
     }
+  }
+
+  /**
+   * If the error looks like insufficient ETH for gas (viem InsufficientFundsError, RPC message, or
+   * multicall reverting with FailedCall()), wrap it with a hint so health/logs show it clearly.
+   */
+  private wrapMulticallError(err: unknown): unknown {
+    const hint = "multicall failed (possibly insufficient ETH for gas)";
+    for (let e: unknown = err; e != null; e = e instanceof Error ? e.cause : undefined) {
+      if (e instanceof InsufficientFundsError) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return new Error(`${hint}: ${msg}`, { cause: err });
+      }
+      if (e instanceof Error) {
+        if (/FailedCall\(\)/.test(e.message)) {
+          const msg = err instanceof Error ? err.message : String(err);
+          return new Error(`${hint}: ${msg}`, { cause: err });
+        }
+      }
+    }
+    return err;
   }
 
   private shouldRequote(desired: DesiredQuotes): boolean {
