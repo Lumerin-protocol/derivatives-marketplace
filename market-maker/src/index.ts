@@ -10,20 +10,14 @@ import { OrderExecutor } from "./orderExecutor.ts";
 import { RiskManager } from "./riskManager.ts";
 import { HealthCheck } from "./healthcheck.ts";
 import type { ErrorInfo } from "./healthcheck.ts";
-import { trimmedErrSerializer } from "./errSerializer.ts";
+import { serializeError } from "./errSerializer.ts";
 import { topUpCollateral } from "./collateral.ts";
 
 function toErrorInfo(err: unknown): ErrorInfo {
   if (!(err instanceof Error)) {
     return { message: String(err) };
   }
-  const info: ErrorInfo = { message: err.message };
-  for (const key of Object.keys(err)) {
-    if (key !== "message" && key !== "stack" && key !== "abi") {
-      info[key] = (err as unknown as Record<string, unknown>)[key];
-    }
-  }
-  return info;
+  return serializeError(err) as unknown as ErrorInfo;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -32,7 +26,7 @@ async function main(): Promise<void> {
   const config = loadConfig();
   const logger = pino({
     level: config.logLevel,
-    serializers: { err: trimmedErrSerializer },
+    serializers: { err: serializeError },
   });
 
   logger.info(
@@ -169,6 +163,8 @@ async function main(): Promise<void> {
             logger,
           });
         } catch (err) {
+          health.status = "error";
+          health.lastError = toErrorInfo(err);
           logger.error({ err }, "failed to top up collateral");
         }
       }
@@ -199,7 +195,12 @@ async function main(): Promise<void> {
         health.status = "error";
         health.lastError = risk.haltReason;
         consecutiveErrors++;
-        await executor.cancelAll();
+        try {
+          await executor.cancelAll();
+        } catch (err) {
+          health.lastError = toErrorInfo(err);
+          logger.error({ err }, "failed to cancel orders after risk halt");
+        }
       } else {
         const desired = quoter.computeQuotes();
         await executor.reconcile(desired);

@@ -126,6 +126,7 @@ export class OrderExecutor {
         { cancels: ordersToCancel.length, places: ordersToPlace.length, err },
         "multicall batch failed",
       );
+      throw err;
     }
 
     this.lastRequoteAt = Date.now();
@@ -169,6 +170,7 @@ export class OrderExecutor {
       this.logger.info({ count: orders.length, gas: receipt.gasUsed.toString() }, "all orders cancelled via multicall");
     } catch (err) {
       this.logger.error({ count: orders.length, err }, "cancel-all multicall failed");
+      throw err;
     }
   }
 

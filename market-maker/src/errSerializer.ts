@@ -1,30 +1,34 @@
 import pino from "pino";
 
-const MAX_FIELD_CHARS = 100;
-
-function truncate(val: string): string {
-  if (val.length <= MAX_FIELD_CHARS) return val;
-  return `${val.slice(0, MAX_FIELD_CHARS)}\n... (${val.length - MAX_FIELD_CHARS} chars trimmed)`;
+/**
+ * Returns a deep copy of the value with the `abi` field removed at every level.
+ * Viem error objects attach a huge ABI that is unnecessary for debugging.
+ */
+function stripAbiRecursive<T>(value: T): T {
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => stripAbiRecursive(item)) as T;
+  }
+  const obj = value as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(obj)) {
+    if (key === "abi") continue;
+    out[key] = stripAbiRecursive(obj[key]);
+  }
+  return out as T;
 }
 
-export function trimmedErrSerializer(err: unknown): Record<string, unknown> {
-  const serialized = pino.stdSerializers.err(err as Error);
-  if (typeof serialized !== "object" || serialized === null) return { raw: err };
-
-  for (const key of Object.keys(serialized)) {
-    const val = serialized[key];
-    if (typeof val === "string") {
-      serialized[key] = truncate(val);
-    } else if (typeof val === "object" && val !== null) {
-      delete serialized[key];
-    }
+/**
+ * Serializes an error for logs and API: errWithCause (includes cause) then
+ * strips `abi` recursively at every depth. Pino redact cannot match arbitrary
+ * depth (each `*` is one level only), so we strip in the serializer instead.
+ */
+export function serializeError(err: unknown): Record<string, unknown> {
+  if (err === null || typeof err !== "object" || !(err instanceof Error)) {
+    return { raw: err };
   }
-
-  // pino.stdSerializers.err omits non-enumerable `cause` — handle explicitly
-  const cause = err instanceof Error ? err.cause : undefined;
-  if (cause) {
-    serialized.cause = trimmedErrSerializer(cause);
-  }
-
-  return serialized;
+  const serialized = pino.stdSerializers.errWithCause(err) as Record<string, unknown>;
+  return stripAbiRecursive(serialized) as Record<string, unknown>;
 }
