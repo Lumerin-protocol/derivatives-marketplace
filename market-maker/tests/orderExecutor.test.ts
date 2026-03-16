@@ -169,6 +169,36 @@ describe("OrderExecutor", () => {
     assert.equal(deps.placedOrders.length, 0);
   });
 
+  it("rethrows when multicall fails so tick can set health.lastError", async () => {
+    const deps = makeDeps();
+    const multicallError = new Error("The contract function \"multicall\" reverted.\n\nError: FailedCall()");
+    const mockWalletThrowing = {
+      writeContract: async (_args: { functionName: string }) => {
+        throw multicallError;
+      },
+    };
+    const executor = new OrderExecutor(
+      { waitForTransactionReceipt: async () => ({ gasUsed: 0n, effectiveGasPrice: 0n }) } as never,
+      mockWalletThrowing as never,
+      { address: "0x1234" as `0x${string}` } as never,
+      { id: 31337 } as never,
+      deps.config,
+      deps.quoter,
+      deps.book,
+      deps.gas,
+      deps.risk,
+      deps.oracle,
+      makeLogger(),
+    );
+
+    const desired: DesiredQuotes = {
+      bids: [{ price: 99_000_000n, quantity: 1_000_000n }],
+      asks: [],
+    };
+
+    await assert.rejects(() => executor.reconcile(desired), { message: /multicall.*reverted|FailedCall/ });
+  });
+
   it("skips reconcile during cooldown", async () => {
     const deps = makeDeps({ config: makeConfig({ requoteCooldownMs: 999_999 }) });
     const executor = makeExecutor(deps);
@@ -270,7 +300,7 @@ describe("OrderExecutor", () => {
     assert.equal(deps.cancelledOrders.length, 0);
   });
 
-  it("handles cancelOrder failure gracefully", async () => {
+  it("rethrows on cancelOrder failure so tick can set health.lastError", async () => {
     const deps = makeDeps();
     const id = makeOrderId(20);
     deps.book.ownOrders.set(id, { orderId: id, price: 100n, quantity: 10n });
@@ -279,7 +309,9 @@ describe("OrderExecutor", () => {
       waitForTransactionReceipt: async () => ({ gasUsed: 200_000n, effectiveGasPrice: 1_000_000_000n }),
     };
     const mockWalletClient = {
-      writeContract: async () => { throw new Error("revert"); },
+      writeContract: async () => {
+        throw new Error("revert");
+      },
     };
 
     const executor = new OrderExecutor(
@@ -297,16 +329,18 @@ describe("OrderExecutor", () => {
     );
 
     const desired: DesiredQuotes = { bids: [], asks: [] };
-    await executor.reconcile(desired);
+    await assert.rejects(() => executor.reconcile(desired), { message: "revert" });
   });
 
-  it("handles placeOrder failure gracefully", async () => {
+  it("rethrows on placeOrder failure so tick can set health.lastError", async () => {
     const deps = makeDeps();
     const mockPublicClient = {
       waitForTransactionReceipt: async () => ({ gasUsed: 200_000n, effectiveGasPrice: 1_000_000_000n }),
     };
     const mockWalletClient = {
-      writeContract: async () => { throw new Error("out of gas"); },
+      writeContract: async () => {
+        throw new Error("out of gas");
+      },
     };
 
     const executor = new OrderExecutor(
@@ -327,7 +361,7 @@ describe("OrderExecutor", () => {
       bids: [{ price: 99_000_000n, quantity: 1_000_000n }],
       asks: [],
     };
-    await executor.reconcile(desired);
+    await assert.rejects(() => executor.reconcile(desired), { message: "out of gas" });
   });
 
   it("increases cooldown when risk is throttled", async () => {
