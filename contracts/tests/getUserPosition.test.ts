@@ -67,5 +67,31 @@ describe("PerpsSimple - getUserPosition", function () {
 
     const buyerPosition = await perps.read.getUserPosition([buyer.account.address]);
     assert.equal(buyerPosition.netQuantity, 0n);
+    assert.equal(buyerPosition.aggregatedEntryPrice, config.marketPrice, "closed position entry price preserved for event/indexer");
+  });
+
+  it("should overwrite entry price when new position opened after full close", async function () {
+    const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithPositionsFixture);
+    const { perps } = contracts;
+    const { seller, buyer } = accounts;
+    const tick = config.minimumPriceIncrement;
+
+    const entryBeforeClose = (await perps.read.getUserPosition([buyer.account.address])).aggregatedEntryPrice;
+    assert.equal(entryBeforeClose, config.marketPrice);
+
+    await perps.write.createOrder([config.marketPrice, BigInt(config.qty)], { account: seller.account });
+    await perps.write.createOrder([config.marketPrice, -BigInt(config.qty)], { account: buyer.account });
+
+    const afterClose = await perps.read.getUserPosition([buyer.account.address]);
+    assert.equal(afterClose.netQuantity, 0n);
+    assert.equal(afterClose.aggregatedEntryPrice, config.marketPrice);
+
+    const newPrice = config.marketPrice + tick;
+    await perps.write.createOrder([newPrice, -BigInt(config.qty)], { account: seller.account });
+    await perps.write.createOrder([newPrice, BigInt(config.qty)], { account: buyer.account });
+
+    const afterReopen = await perps.read.getUserPosition([buyer.account.address]);
+    assert.equal(afterReopen.netQuantity, BigInt(config.qty));
+    assert.equal(afterReopen.aggregatedEntryPrice, newPrice, "entry price must be new position price, not previous closed");
   });
 });
