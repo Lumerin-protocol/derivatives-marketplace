@@ -6,7 +6,7 @@ import { deployPerpsFixture } from "./fixtures.ts";
 
 const { viem, networkHelpers } = await network.connect();
 
-describe("PerpsSimple - addCollateral", function () {
+describe("HashPowerPerpsDEX - addCollateral", function () {
   it("should add collateral successfully", async function () {
     const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
     const { perps, usdcMock } = contracts;

@@ -9,7 +9,7 @@ import {
 
 const { networkHelpers } = await network.connect();
 
-describe("PerpsSimple - OrderMatched event", function () {
+describe("HashPowerPerpsDEX - OrderMatched event", function () {
   it("emits correct maker, taker, price, quantity for a full match", async function () {
     const { contracts, accounts, config } = await networkHelpers.loadFixture(
       deployPerpsWithCollateralFixture,

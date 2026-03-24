@@ -1,4 +1,4 @@
-# PerpsSimple — Gas Optimisation Summary
+# HashPowerPerpsDEX — Gas Optimisation Summary
 
 Measured on `createOrder` via `tests/gas-createOrder.test.ts`.  
 All scenarios use a single seller (maker) placing N resting orders, then a single buyer (taker) sweeping them in one `createOrder` call.

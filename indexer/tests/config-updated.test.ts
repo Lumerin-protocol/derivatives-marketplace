@@ -16,7 +16,7 @@ import {
   LiquidationFeeUpdated,
   FundingParametersUpdated,
   MinimumMarginPerOrderUpdated,
-} from "../generated/PerpsSimple/PerpsSimple";
+} from "../generated/HashPowerPerpsDEX/HashPowerPerpsDEX";
 import { assert } from "matchstick-as/assembly/index";
 import { setupDataSourceMock, paramUint, setupPerps } from "./helpers";
 

@@ -11,7 +11,7 @@ import { catchError } from "../lib/lib.ts";
 
 const { viem, networkHelpers } = await network.connect();
 
-describe("PerpsSimple - Funding Fees", function () {
+describe("HashPowerPerpsDEX - Funding Fees", function () {
   describe("setFundingParameters", function () {
     it("should allow owner to set funding parameters", async function () {
       const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);

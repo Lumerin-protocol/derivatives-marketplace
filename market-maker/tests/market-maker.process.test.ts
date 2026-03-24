@@ -4,7 +4,7 @@ import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { getContract, parseUnits, type Hex } from "viem";
 
-import { perpsSimpleAbi, priceOracleMockAbi } from "../src/abi.ts";
+import { hashPowerPerpsDexAbi, priceOracleMockAbi } from "../src/abi.ts";
 import {
   startHardhatNode,
   waitFor,
@@ -146,7 +146,7 @@ describe("MM process — quoting and fills", () => {
     const publicClient = createTestPublicClient();
     const orders = await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "getUserOrders",
       args: [MM_ACCOUNT.address],
     });
@@ -185,7 +185,7 @@ describe("MM process — quoting and fills", () => {
     const takerWallet = createTestWalletClient(TAKER_ACCOUNT.privateKey);
     const perps = getContract({
       address: deployment.contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       client: { public: publicClient, wallet: takerWallet },
     });
 
@@ -250,7 +250,7 @@ describe("MM process — on-chain book structure", () => {
   it("should place exactly numLevelsPerSide bids and asks on-chain", async () => {
     const orderIds = await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "getUserOrders",
       args: [MM_ACCOUNT.address],
     });
@@ -261,19 +261,19 @@ describe("MM process — on-chain book structure", () => {
   it("should have every order price tick-aligned", async () => {
     const tick = await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "minimumPriceIncrement",
     });
     const orderIds = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "getUserOrders",
       args: [MM_ACCOUNT.address],
     })) as `0x${string}`[];
 
     const orderCalls = orderIds.map((id) => ({
       address: deployment.contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "getOrder" as const,
       args: [id] as const,
     }));
@@ -289,14 +289,14 @@ describe("MM process — on-chain book structure", () => {
   it("should separate into positive-qty bids and negative-qty asks", async () => {
     const orderIds = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "getUserOrders",
       args: [MM_ACCOUNT.address],
     })) as `0x${string}`[];
 
     const orderCalls = orderIds.map((id) => ({
       address: deployment.contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "getOrder" as const,
       args: [id] as const,
     }));
@@ -316,14 +316,14 @@ describe("MM process — on-chain book structure", () => {
   it("should have increasing order size at deeper levels", async () => {
     const orderIds = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "getUserOrders",
       args: [MM_ACCOUNT.address],
     })) as `0x${string}`[];
 
     const orderCalls = orderIds.map((id) => ({
       address: deployment.contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "getOrder" as const,
       args: [id] as const,
     }));
@@ -355,17 +355,17 @@ describe("MM process — on-chain book structure", () => {
     const [bestBid, bestAsk, oraclePrice] = await Promise.all([
       publicClient.readContract({
         address: deployment.contracts.perpsAddress,
-        abi: perpsSimpleAbi,
+        abi: hashPowerPerpsDexAbi,
         functionName: "getBestBidPrice",
       }) as Promise<bigint>,
       publicClient.readContract({
         address: deployment.contracts.perpsAddress,
-        abi: perpsSimpleAbi,
+        abi: hashPowerPerpsDexAbi,
         functionName: "getBestAskPrice",
       }) as Promise<bigint>,
       publicClient.readContract({
         address: deployment.contracts.perpsAddress,
-        abi: perpsSimpleAbi,
+        abi: hashPowerPerpsDexAbi,
         functionName: "getMarketPrice",
       }) as Promise<bigint>,
     ]);
@@ -379,12 +379,12 @@ describe("MM process — on-chain book structure", () => {
     const [onChainBid, onChainAsk] = await Promise.all([
       publicClient.readContract({
         address: deployment.contracts.perpsAddress,
-        abi: perpsSimpleAbi,
+        abi: hashPowerPerpsDexAbi,
         functionName: "getBestBidPrice",
       }) as Promise<bigint>,
       publicClient.readContract({
         address: deployment.contracts.perpsAddress,
-        abi: perpsSimpleAbi,
+        abi: hashPowerPerpsDexAbi,
         functionName: "getBestAskPrice",
       }) as Promise<bigint>,
     ]);
@@ -398,7 +398,7 @@ describe("MM process — on-chain book structure", () => {
   it("should show MM depth in getQuantityAtPrice for each book level", async () => {
     const [bidPrices, askPrices] = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "getOrderBookPrices",
       args: [200n],
     })) as [bigint[], bigint[]];
@@ -409,13 +409,13 @@ describe("MM process — on-chain book structure", () => {
     const depthCalls = [
       ...bidPrices.slice(0, 3).map((p) => ({
         address: deployment.contracts.perpsAddress,
-        abi: perpsSimpleAbi,
+        abi: hashPowerPerpsDexAbi,
         functionName: "getQuantityAtPrice" as const,
         args: [p, true] as const,
       })),
       ...askPrices.slice(0, 3).map((p) => ({
         address: deployment.contracts.perpsAddress,
-        abi: perpsSimpleAbi,
+        abi: hashPowerPerpsDexAbi,
         functionName: "getQuantityAtPrice" as const,
         args: [p, false] as const,
       })),
@@ -431,7 +431,7 @@ describe("MM process — on-chain book structure", () => {
   it("should match on-chain collateral balance with health API", async () => {
     const balance = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "balanceOf",
       args: [MM_ACCOUNT.address],
     })) as bigint;
@@ -447,7 +447,7 @@ describe("MM process — on-chain book structure", () => {
 
     const result = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "simulateOrder",
       args: [bestAsk, qty],
     })) as [bigint, bigint, bigint];
@@ -461,7 +461,7 @@ describe("MM process — on-chain book structure", () => {
   it("should have zero position before any fills", async () => {
     const pos = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "getUserPosition",
       args: [MM_ACCOUNT.address],
     })) as { netQuantity: bigint; aggregatedEntryPrice: bigint };
@@ -496,14 +496,14 @@ describe("MM process — post-fill on-chain state", () => {
     const takerWallet = createTestWalletClient(TAKER_ACCOUNT.privateKey);
     const perps = getContract({
       address: deployment.contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       client: { public: publicClient, wallet: takerWallet },
     });
     await perps.write.createOrder([bestAsk, qty]);
 
     const pos = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "getUserPosition",
       args: [MM_ACCOUNT.address],
     })) as { netQuantity: bigint; aggregatedEntryPrice: bigint };
@@ -515,7 +515,7 @@ describe("MM process — post-fill on-chain state", () => {
   it("should have non-zero required margin after position opens", async () => {
     const reqMargin = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "getMaintenanceMargin",
       args: [MM_ACCOUNT.address],
     })) as bigint;
@@ -531,7 +531,7 @@ describe("MM process — post-fill on-chain state", () => {
 
     const orderIds = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "getUserOrders",
       args: [MM_ACCOUNT.address],
     })) as `0x${string}`[];
@@ -556,7 +556,7 @@ describe("MM process — post-fill on-chain state", () => {
 
     const pnl = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "getUnrealizedPnl",
       args: [MM_ACCOUNT.address],
     })) as bigint;
@@ -575,7 +575,7 @@ describe("MM process — post-fill on-chain state", () => {
 
     const posBefore = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "getUserPosition",
       args: [MM_ACCOUNT.address],
     })) as { netQuantity: bigint };
@@ -588,7 +588,7 @@ describe("MM process — post-fill on-chain state", () => {
     const takerWallet = createTestWalletClient(TAKER_ACCOUNT.privateKey);
     const perps = getContract({
       address: deployment.contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       client: { public: publicClient, wallet: takerWallet },
     });
     // Taker sells into MM's bid
@@ -596,7 +596,7 @@ describe("MM process — post-fill on-chain state", () => {
 
     const posAfter = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "getUserPosition",
       args: [MM_ACCOUNT.address],
     })) as { netQuantity: bigint };
@@ -610,7 +610,7 @@ describe("MM process — post-fill on-chain state", () => {
   it("should not be liquidatable with sufficient collateral", async () => {
     const isLiquidatable = (await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "isLiquidatable",
       args: [MM_ACCOUNT.address],
     })) as boolean;
@@ -646,7 +646,7 @@ describe("MM process — graceful shutdown", () => {
     const publicClient = createTestPublicClient();
     const orders = await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "getUserOrders",
       args: [MM_ACCOUNT.address],
     });

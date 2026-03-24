@@ -6,7 +6,7 @@ import pino from "pino";
 import { HealthCheck } from "../src/healthcheck.ts";
 import { PositionTracker } from "../src/positionTracker.ts";
 import { Liquidator } from "../src/liquidator.ts";
-import { perpsSimpleAbi } from "../src/abi.ts";
+import { hashPowerPerpsDexAbi } from "../src/abi.ts";
 import {
   startHardhatNode,
   createKeeperConfig,
@@ -120,13 +120,13 @@ describe("HealthCheck", () => {
 
     const marketPrice = await clients.publicClient.readContract({
       address: contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "getMarketPrice",
     });
     const qty = parseUnits("1", deployConfig.quantityDecimals);
     const perps = getContract({
       address: contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       client: clients.publicClient,
     });
     await perps.write.createOrder([marketPrice, -qty], { account: clients.sellerWallet.account });

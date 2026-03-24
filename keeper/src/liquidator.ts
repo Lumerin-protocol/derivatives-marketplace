@@ -1,5 +1,5 @@
 import type { PublicClient, WalletClient, Account } from "viem";
-import { perpsSimpleAbi, aggregatorV3InterfaceAbi } from "./abi.ts";
+import { hashPowerPerpsDexAbi, aggregatorV3InterfaceAbi } from "./abi.ts";
 import type { Config } from "./config.ts";
 import type { PositionTracker, UserState } from "./positionTracker.ts";
 import type pino from "pino";
@@ -44,10 +44,10 @@ export class Liquidator {
       contracts: [
         {
           address: this.config.perpsAddress,
-          abi: perpsSimpleAbi as any,
+          abi: hashPowerPerpsDexAbi as any,
           functionName: "liquidationFee",
         },
-        { address: this.config.perpsAddress, abi: perpsSimpleAbi as any, functionName: "decimals" },
+        { address: this.config.perpsAddress, abi: hashPowerPerpsDexAbi as any, functionName: "decimals" },
         ...(this.config.ethPriceFeedAddress
           ? [
               {
@@ -129,7 +129,7 @@ export class Liquidator {
     try {
       const currentPrice = await this.publicClient.readContract({
         address: this.config.perpsAddress,
-        abi: perpsSimpleAbi,
+        abi: hashPowerPerpsDexAbi,
         functionName: "getMarketPrice",
       });
 
@@ -206,7 +206,7 @@ export class Liquidator {
       try {
         await this.publicClient.simulateContract({
           address: this.config.perpsAddress,
-          abi: perpsSimpleAbi,
+          abi: hashPowerPerpsDexAbi,
           functionName: "liquidateBatch",
           args: [[user.address]],
           account: this.account,
@@ -214,7 +214,7 @@ export class Liquidator {
 
         const gasEstimate = await this.publicClient.estimateContractGas({
           address: this.config.perpsAddress,
-          abi: perpsSimpleAbi,
+          abi: hashPowerPerpsDexAbi,
           functionName: "liquidateBatch",
           args: [[user.address]],
           account: this.account,
@@ -262,7 +262,7 @@ export class Liquidator {
     try {
       const txHash = await this.walletClient.writeContract({
         address: this.config.perpsAddress,
-        abi: perpsSimpleAbi,
+        abi: hashPowerPerpsDexAbi,
         functionName: "liquidateBatch",
         args: [addresses],
         account: this.account,
@@ -303,7 +303,7 @@ export class Liquidator {
     try {
       const txHash = await this.walletClient.writeContract({
         address: this.config.perpsAddress,
-        abi: perpsSimpleAbi,
+        abi: hashPowerPerpsDexAbi,
         functionName: "liquidateBatch",
         args: [[user.address]],
         account: this.account,

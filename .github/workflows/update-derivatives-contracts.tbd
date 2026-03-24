@@ -9,7 +9,7 @@ on:
 
     paths:
       - '.github/workflows/update-derivatives-contracts.yml'
-      - 'contracts/contracts/PerpsSimple.sol'
+      - 'contracts/contracts/HashPowerPerpsDEX.sol'
 
   workflow_dispatch:
     inputs:

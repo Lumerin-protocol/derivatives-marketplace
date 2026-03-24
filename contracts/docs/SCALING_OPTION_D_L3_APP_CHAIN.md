@@ -2,7 +2,7 @@
 
 ## Summary
 
-Deploy PerpsSimple on a dedicated L3 app-specific chain (e.g., Arbitrum Orbit or OP Stack) that settles to an L2. This gives you full control over block gas limits, block time, fee structure, and even custom precompiles -- effectively removing the gas constraints that cause scaling bottlenecks while keeping the existing Solidity contract largely intact.
+Deploy HashPowerPerpsDEX on a dedicated L3 app-specific chain (e.g., Arbitrum Orbit or OP Stack) that settles to an L2. This gives you full control over block gas limits, block time, fee structure, and even custom precompiles -- effectively removing the gas constraints that cause scaling bottlenecks while keeping the existing Solidity contract largely intact.
 
 ## Architecture
 
@@ -19,7 +19,7 @@ flowchart TD
 
     subgraph l3 [L3 - Perps App Chain]
         SEQ["Sequencer\n~200ms blocks\n100M+ gas limit"]
-        PERPS["PerpsSimple.sol\n(unchanged or minimal changes)"]
+        PERPS["HashPowerPerpsDEX.sol\n(unchanged or minimal changes)"]
         ORACLE["Price Oracle"]
         BRIDGE_L3["Bridge Contract"]
 
@@ -110,7 +110,7 @@ flowchart LR
 - No Stylus VM equivalent
 - No AnyTrust mode (must post all data to L1/L2)
 
-## What Changes in PerpsSimple.sol
+## What Changes in HashPowerPerpsDEX.sol
 
 ### Minimal Changes Required
 
@@ -205,7 +205,7 @@ Options for price feeds on L3:
 
 ### Phase 2: Deploy Contracts (1 week)
 
-1. Deploy PerpsSimple.sol to L3 (via UUPS proxy)
+1. Deploy HashPowerPerpsDEX.sol to L3 (via UUPS proxy)
 2. Deploy or bridge oracle price feed
 3. Deploy keeper bot targeting L3 RPC
 4. Test end-to-end: deposit USDC via bridge -> trade -> withdraw

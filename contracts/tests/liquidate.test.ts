@@ -10,7 +10,7 @@ import {
 
 const { viem, networkHelpers } = await network.connect();
 
-describe("PerpsSimple - liquidateBatch", function () {
+describe("HashPowerPerpsDEX - liquidateBatch", function () {
   it("should revert when position is healthy", async function () {
     const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsWithPositionsFixture);
     const { perps } = contracts;

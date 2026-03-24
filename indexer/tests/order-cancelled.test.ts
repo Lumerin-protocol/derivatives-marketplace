@@ -2,7 +2,7 @@ import { describe, test, beforeEach, clearStore } from "matchstick-as/assembly/i
 import { Address, BigInt, Bytes } from "@graphprotocol/graph-ts";
 import { newTypedMockEventWithParams } from "matchstick-as/assembly/defaults";
 import { handleOrderCreated, handleOrderCancelled } from "../src/perps";
-import { OrderCreated, OrderCancelled } from "../generated/PerpsSimple/PerpsSimple";
+import { OrderCreated, OrderCancelled } from "../generated/HashPowerPerpsDEX/HashPowerPerpsDEX";
 import { assert } from "matchstick-as/assembly/index";
 import {
   userAddress,

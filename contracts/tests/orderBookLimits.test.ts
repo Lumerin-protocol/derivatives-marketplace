@@ -7,7 +7,7 @@ import { catchError } from "../lib/lib.ts";
 
 const { viem, networkHelpers } = await network.connect();
 
-describe("PerpsSimple - Order Book Limits", function () {
+describe("HashPowerPerpsDEX - Order Book Limits", function () {
   describe("minimumMarginPerOrder", function () {
     it("should allow owner to set minimumMarginPerOrder", async function () {
       const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);

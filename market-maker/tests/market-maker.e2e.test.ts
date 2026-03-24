@@ -12,7 +12,7 @@ import { OrderExecutor } from "../src/orderExecutor.ts";
 import { RiskManager } from "../src/riskManager.ts";
 import { HealthCheck } from "../src/healthcheck.ts";
 import type { MakerConfig } from "../src/config.ts";
-import { perpsSimpleAbi, priceOracleMockAbi } from "../src/abi.ts";
+import { hashPowerPerpsDexAbi, priceOracleMockAbi } from "../src/abi.ts";
 import { hardhat } from "../src/client.ts";
 import { startHardhatNode, createMakerConfig, loadFixture, type HardhatNode } from "./helpers.ts";
 import { deployWithCollateralFixture } from "../../contracts/fixtures/viem.ts";
@@ -119,7 +119,7 @@ describe("MM quoting", () => {
 
     const onChainPrice = await deployment.clients.publicClient.readContract({
       address: deployment.contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "getMarketPrice",
     });
     assert.equal(stack.oracle.currentPrice, onChainPrice);

@@ -1,6 +1,6 @@
 # Perps Liquidation Keeper
 
-An off-chain keeper bot that monitors the [PerpsSimple](../contracts/contracts/PerpsSimple.sol) perpetuals contract and automatically liquidates under-margined positions. It minimizes RPC usage by maintaining local state from contract events and pre-computing liquidation price thresholds so the main loop only needs a single `getMarketPrice()` call per tick.
+An off-chain keeper bot that monitors the [HashPowerPerpsDEX](../contracts/contracts/HashPowerPerpsDEX.sol) perpetuals contract and automatically liquidates under-margined positions. It minimizes RPC usage by maintaining local state from contract events and pre-computing liquidation price thresholds so the main loop only needs a single `getMarketPrice()` call per tick.
 
 ## Table of Contents
 
@@ -36,7 +36,7 @@ Create a `.env` file in the repository root (shared with `contracts/`):
 ```bash
 # Required
 ETH_NODE_ADDRESS=wss://your-rpc-endpoint    # WebSocket preferred; HTTP works with polling
-PERPS_ADDRESS=0x...                          # Deployed PerpsSimple contract address
+PERPS_ADDRESS=0x...                          # Deployed HashPowerPerpsDEX contract address
 KEEPER_PRIVATE_KEY=0x...                     # Keeper wallet private key
 
 # Optional (defaults shown)
@@ -68,7 +68,7 @@ pnpm typecheck
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
 | `ETH_NODE_ADDRESS` | Yes | -- | RPC URL. WebSocket preferred for real-time event subscriptions; HTTP falls back to polling. |
-| `PERPS_ADDRESS` | Yes | -- | Deployed PerpsSimple contract address. |
+| `PERPS_ADDRESS` | Yes | -- | Deployed HashPowerPerpsDEX contract address. |
 | `KEEPER_PRIVATE_KEY` | Yes | -- | Private key of the keeper wallet used to submit liquidation transactions. |
 | `POLL_INTERVAL_MS` | No | `5000` | How often (ms) to poll `getMarketPrice()` and scan for liquidatable positions. |
 | `RESYNC_INTERVAL_MS` | No | `300000` | How often (ms) to perform a full re-sync from on-chain state. Safety net against missed events or reorgs. |
@@ -90,7 +90,7 @@ flowchart TB
     end
 
     subgraph chain [On-Chain]
-        PerpsContract["PerpsSimple Contract"]
+        PerpsContract["HashPowerPerpsDEX Contract"]
         Oracle["Price Oracle"]
     end
 
@@ -120,7 +120,7 @@ Real-time event processing via `watchContractEvent`. Events are split into two c
 
 **Zero-RPC events** (state derived entirely from event args):
 
-- **`Transfer(from, to, value)`** -- ERC20 event on the PerpsSimple contract. Adjusts local balance (`balance += / -=`) and recomputes `liquidationPrice` locally.
+- **`Transfer(from, to, value)`** -- ERC20 event on the HashPowerPerpsDEX contract. Adjusts local balance (`balance += / -=`) and recomputes `liquidationPrice` locally.
 - **`PositionTrade(user, tradePrice, quantity, netQuantityAfter, aggregatedEntryPriceAfter)`** -- Updates `netQuantity` and `entryPrice` directly from args. For **new users** (not yet tracked): reads `balanceOf` + `getMaintenanceMargin` once to initialize.
 - **`PositionClosed(user, quantityClosed, pnl)`** -- If the user had no `PositionTrade` in the same block (full offset, no flip): removes the user from the tracker. Otherwise ignored (partial close already handled by PositionTrade).
 - **`PositionLiquidated(user, ...)`** -- Removes the user from the tracker immediately.
@@ -288,7 +288,7 @@ This value is cached and remains valid until the user's orders change (triggered
 
 ### Contract Interface
 
-All interactions target the [PerpsSimple](../contracts/contracts/PerpsSimple.sol) contract. ABI is available at `src/abi.ts`.
+All interactions target the [HashPowerPerpsDEX](../contracts/contracts/HashPowerPerpsDEX.sol) contract. ABI is available at `src/abi.ts`.
 
 **Read functions:**
 

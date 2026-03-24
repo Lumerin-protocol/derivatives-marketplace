@@ -1,7 +1,7 @@
 import type { Log, PublicClient, WatchContractEventReturnType } from "viem";
 import type { MakerConfig } from "./config.ts";
 import type pino from "pino";
-import { perpsSimpleAbi } from "./abi.ts";
+import { hashPowerPerpsDexAbi } from "./abi.ts";
 
 export interface OwnOrder {
   orderId: `0x${string}`;
@@ -68,7 +68,7 @@ export class BookTracker {
 
     const [bidPrices, askPrices] = await this.publicClient.readContract({
       address: this.config.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "getOrderBookPrices",
       args: [200n],
     });
@@ -76,13 +76,13 @@ export class BookTracker {
     const depthCalls = [
       ...bidPrices.map((p) => ({
         address: this.config.perpsAddress,
-        abi: perpsSimpleAbi,
+        abi: hashPowerPerpsDexAbi,
         functionName: "getQuantityAtPrice" as const,
         args: [p, true] as const,
       })),
       ...askPrices.map((p) => ({
         address: this.config.perpsAddress,
-        abi: perpsSimpleAbi,
+        abi: hashPowerPerpsDexAbi,
         functionName: "getQuantityAtPrice" as const,
         args: [p, false] as const,
       })),
@@ -126,7 +126,7 @@ export class BookTracker {
 
     const orderIds = await this.publicClient.readContract({
       address: this.config.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "getUserOrders",
       args: [this.mmAddress],
     });
@@ -135,7 +135,7 @@ export class BookTracker {
 
     const orderCalls = orderIds.map((id) => ({
       address: this.config.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "getOrder" as const,
       args: [id] as const,
     }));
@@ -159,7 +159,7 @@ export class BookTracker {
   private watchEvents(): void {
     this.unwatch = this.publicClient.watchContractEvent({
       address: this.config.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       onLogs: (logs) => {
         for (const log of logs) {
           this.handleEvent(log as any);
@@ -168,7 +168,7 @@ export class BookTracker {
     });
   }
 
-  private handleEvent(log: Log<bigint, number, false, undefined, false, typeof perpsSimpleAbi>) {
+  private handleEvent(log: Log<bigint, number, false, undefined, false, typeof hashPowerPerpsDexAbi>) {
     switch (log.eventName) {
       case "OrderCreated": {
         const participant = log.args.participant;

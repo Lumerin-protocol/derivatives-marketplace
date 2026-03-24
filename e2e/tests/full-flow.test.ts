@@ -6,7 +6,7 @@ import { waitFor } from "../../contracts/fixtures/helpers.ts";
 import { waitForStack, deploySubgraph, SUBGRAPH_URL } from "../setup/subgraph.ts";
 import { startKeeper, type KeeperProcess } from "../setup/keeper.ts";
 import { deployWithLiquidatablePositionFixture } from "../../contracts/fixtures/viem.ts";
-import { perpsSimpleAbi } from "../../contracts/abi/abi.ts";
+import { hashPowerPerpsDexAbi } from "../../contracts/abi/abi.ts";
 
 // ── Shared state ──────────────────────────────────────────────────────────────
 
@@ -52,7 +52,7 @@ describe("Deployment", () => {
 });
 
 describe("Subgraph indexing", () => {
-  it("indexes the PerpsSimple contract on deployment", { timeout: 40_000 }, async (t) => {
+  it("indexes the HashPowerPerpsDEX contract on deployment", { timeout: 40_000 }, async (t) => {
     console.log("Waiting for perps entity to appear in subgraph...");
 
     const data = await pollSubgraph<{ perps: { contractAddress: string } | null }>(
@@ -122,7 +122,7 @@ describe("Keeper liquidation", () => {
       await waitFor(async () => {
         const pos = (await clients.publicClient.readContract({
           address: contracts.perpsAddress,
-          abi: perpsSimpleAbi,
+          abi: hashPowerPerpsDexAbi,
           functionName: "getUserPosition",
           args: [clients.sellerWallet.account.address],
         })) as { netQuantity: bigint };

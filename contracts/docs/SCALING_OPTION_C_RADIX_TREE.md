@@ -115,7 +115,7 @@ The key advantage: when a subtree's `sumQty` fits within the remaining order siz
 
 This means filling 1,000 orders at the same price costs the same as filling 1 order, as long as the subtree can be removed whole.
 
-## What Changes in PerpsSimple.sol
+## What Changes in HashPowerPerpsDEX.sol
 
 ### Complete Replacement of Order Book Layer
 

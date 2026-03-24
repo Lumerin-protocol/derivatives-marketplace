@@ -36,7 +36,7 @@ export async function deployPerpsFixture(conn: Conn) {
   const makerFeeBps = 0n;
   const collateralAmount = parseUnits("100000", tokenDecimals);
 
-  const perpsImpl = await viem.deployContract("contracts/PerpsSimple.sol:PerpsSimple", [
+  const perpsImpl = await viem.deployContract("contracts/HashPowerPerpsDEX.sol:HashPowerPerpsDEX", [
     minimumPriceIncrement,
   ]);
   const perpsProxy = await viem.deployContract("ERC1967Proxy", [
@@ -52,7 +52,7 @@ export async function deployPerpsFixture(conn: Conn) {
       ],
     }),
   ]);
-  const perps = await viem.getContractAt("PerpsSimple", perpsProxy.address);
+  const perps = await viem.getContractAt("HashPowerPerpsDEX", perpsProxy.address);
   const quantityDecimals = await perps.read.QUANTITY_DECIMALS();
   const fundingDecimals = await perps.read.FUNDING_DECIMALS();
 

@@ -10,7 +10,7 @@ import {
 
 const { viem, networkHelpers } = await network.connect();
 
-describe("PerpsSimple - getUnrealizedPnl", function () {
+describe("HashPowerPerpsDEX - getUnrealizedPnl", function () {
   it("should return 0 when user has no position", async function () {
     const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
     const { perps } = contracts;

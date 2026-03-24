@@ -6,7 +6,7 @@ import { deployPerpsWithCollateralFixture } from "./fixtures.ts";
 
 const { viem, networkHelpers } = await network.connect();
 
-describe("PerpsSimple - Self-Trade Behavior", function () {
+describe("HashPowerPerpsDEX - Self-Trade Behavior", function () {
   it("partial self-trade: buy partially fills own sell, no net position", async function () {
     const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
     const { perps } = contracts;

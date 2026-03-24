@@ -1,4 +1,4 @@
-# PerpsSimple.sol Scaling Analysis
+# HashPowerPerpsDEX.sol Scaling Analysis
 
 ## Current Issues
 

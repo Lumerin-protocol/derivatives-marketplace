@@ -18,7 +18,7 @@ import {
   deployWithCollateralFixture,
   deployWithLiquidatablePositionFixture,
 } from "../../contracts/fixtures/viem.ts";
-import { perpsSimpleAbi, priceOracleMockAbi } from "../src/abi.ts";
+import { hashPowerPerpsDexAbi, priceOracleMockAbi } from "../src/abi.ts";
 
 const silentLogger = pino({ level: "silent" });
 
@@ -47,7 +47,7 @@ describe("PositionTracker", () => {
 
     marketPrice = (await clients.publicClient.readContract({
       address: contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "getMarketPrice",
     })) as bigint;
     qty = parseUnits("1", dc.quantityDecimals);
@@ -343,7 +343,7 @@ describe("Liquidator", () => {
   async function getUserPosition(user: Address) {
     return (await deployment.clients.publicClient.readContract({
       address: deployment.contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "getUserPosition",
       args: [user],
     })) as { netQuantity: bigint };

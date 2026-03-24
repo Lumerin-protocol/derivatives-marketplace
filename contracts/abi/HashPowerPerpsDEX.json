@@ -1120,7 +1120,7 @@
             "type": "int256"
           }
         ],
-        "internalType": "struct PerpsSimple.Order",
+        "internalType": "struct HashPowerPerpsDEX.Order",
         "name": "",
         "type": "tuple"
       }
@@ -1275,7 +1275,7 @@
             "type": "uint256"
           }
         ],
-        "internalType": "struct PerpsSimple.Position",
+        "internalType": "struct HashPowerPerpsDEX.Position",
         "name": "",
         "type": "tuple"
       }

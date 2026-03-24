@@ -6,7 +6,7 @@ import { deployPerpsWithCollateralFixture, deployPerpsWithPositionsFixture } fro
 
 const { viem, networkHelpers } = await network.connect();
 
-describe("PerpsSimple - getUserPosition", function () {
+describe("HashPowerPerpsDEX - getUserPosition", function () {
   it("should return zero position when user has no position", async function () {
     const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
     const { perps } = contracts;

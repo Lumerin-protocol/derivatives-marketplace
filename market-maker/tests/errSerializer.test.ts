@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createPublicClient, http } from "viem";
 import { hardhat } from "viem/chains";
-import { perpsSimpleAbi } from "../src/abi.ts";
+import { hashPowerPerpsDexAbi } from "../src/abi.ts";
 import { serializeError } from "../src/errSerializer.ts";
 
 describe("serializeError", () => {
@@ -63,7 +63,7 @@ describe("serializeError", () => {
     try {
       await client.readContract({
         address: "0x0000000000000000000000000000000000000001",
-        abi: perpsSimpleAbi,
+        abi: hashPowerPerpsDexAbi,
         functionName: "getOrder",
         args: ["0x" + "00".repeat(32) as `0x${string}`],
       });

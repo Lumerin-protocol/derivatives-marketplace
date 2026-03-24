@@ -7,7 +7,7 @@ import { roundToNearest } from "../lib/round.ts";
 
 const { viem, networkHelpers } = await network.connect();
 
-describe("PerpsSimple - getMarketPrice", function () {
+describe("HashPowerPerpsDEX - getMarketPrice", function () {
   it("should return the oracle price", async function () {
     const { contracts, config } = await networkHelpers.loadFixture(deployPerpsFixture);
     const { perps } = contracts;

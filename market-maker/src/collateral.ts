@@ -1,6 +1,6 @@
 import type { PublicClient, WalletClient, Account, Chain } from "viem";
 import type pino from "pino";
-import { ierc20PermitAbi, ierc5267Abi, perpsSimpleAbi } from "./abi.ts";
+import { ierc20PermitAbi, ierc5267Abi, hashPowerPerpsDexAbi } from "./abi.ts";
 import type { InventoryManager } from "./inventoryManager.ts";
 
 const permitTypes = {
@@ -72,7 +72,7 @@ export async function topUpCollateral(opts: {
 
   const hash = await walletClient.writeContract({
     address: perpsAddress,
-    abi: perpsSimpleAbi,
+    abi: hashPowerPerpsDexAbi,
     functionName: "addCollateralWithPermit",
     args: [amount, deadline, v, r, s],
     account,

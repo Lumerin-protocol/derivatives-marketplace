@@ -8,7 +8,7 @@ import { txUrl, addrUrl } from "../lib/explorer.ts";
 import { logTitle, logInfo, logStep, logSuccess, logPrompt } from "../lib/log.ts";
 
 async function main() {
-  logTitle("PerpsSimple Deployment");
+  logTitle("HashPowerPerpsDEX Deployment");
   const { viem } = await hre.network.connect();
 
   const env = requireEnvsSet(
@@ -55,24 +55,24 @@ async function main() {
 
   console.log();
 
-  // Deploy PerpsSimple implementation
-  logInfo("Deploy PerpsSimple implementation", {
-    contract: "PerpsSimple",
+  // Deploy HashPowerPerpsDEX implementation
+  logInfo("Deploy HashPowerPerpsDEX implementation", {
+    contract: "HashPowerPerpsDEX",
     args: `minimumPriceIncrement=${env.MINIMUM_PRICE_INCREMENT}`,
   });
   await logPrompt("Proceed?");
-  console.log("Deploying PerpsSimple implementation...");
-  const perpsImpl = await viem.deployContract("contracts/PerpsSimple.sol:PerpsSimple", [
+  console.log("Deploying HashPowerPerpsDEX implementation...");
+  const perpsImpl = await viem.deployContract("contracts/HashPowerPerpsDEX.sol:HashPowerPerpsDEX", [
     BigInt(env.MINIMUM_PRICE_INCREMENT),
   ]);
   logStep("Deployed", addrUrl(pc, perpsImpl.address));
 
-  console.log("Verifying PerpsSimple implementation...");
+  console.log("Verifying HashPowerPerpsDEX implementation...");
   await verifyContract(perpsImpl.address, []);
   logStep("Verified", addrUrl(pc, perpsImpl.address));
 
-  // Deploy PerpsSimple proxy
-  logInfo("Deploy PerpsSimple proxy", {
+  // Deploy HashPowerPerpsDEX proxy
+  logInfo("Deploy HashPowerPerpsDEX proxy", {
     implementation: perpsImpl.address,
     collateralToken: env.COLLATERAL_TOKEN_ADDRESS,
     priceOracle: env.PRICE_ORACLE_ADDRESS,
@@ -80,7 +80,7 @@ async function main() {
     maintenanceMarginPercent: `${env.MAINTENANCE_MARGIN_PERCENT}%`,
   });
   await logPrompt("Proceed?");
-  console.log("Deploying PerpsSimple proxy...");
+  console.log("Deploying HashPowerPerpsDEX proxy...");
   const encodedInitFn = encodeFunctionData({
     abi: perpsImpl.abi,
     functionName: "initialize",
@@ -98,7 +98,7 @@ async function main() {
   ]);
   logStep("Deployed", addrUrl(pc, perpsProxy.address));
 
-  const perps = await viem.getContractAt("PerpsSimple", perpsProxy.address);
+  const perps = await viem.getContractAt("HashPowerPerpsDEX", perpsProxy.address);
 
   // Set fees
   logInfo("Set fees", {

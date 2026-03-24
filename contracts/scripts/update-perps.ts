@@ -6,7 +6,7 @@ import { txUrl, addrUrl } from "../lib/explorer.ts";
 import { logTitle, logInfo, logStep, logSuccess, logPrompt } from "../lib/log.ts";
 
 async function main() {
-  logTitle("PerpsSimple Upgrade");
+  logTitle("HashPowerPerpsDEX Upgrade");
 
   const env = requireEnvsSet("PERPS_ADDRESS", "MINIMUM_PRICE_INCREMENT");
 
@@ -18,7 +18,7 @@ async function main() {
   logInfo("deployer", { Address: addrUrl(pc, deployer.account.address) });
 
   // Get current proxy contract
-  const perps = await viem.getContractAt("PerpsSimple", proxyAddress);
+  const perps = await viem.getContractAt("HashPowerPerpsDEX", proxyAddress);
   const currentOwner = await perps.read.owner();
   logInfo("proxy", {
     Address: addrUrl(pc, proxyAddress),
@@ -33,14 +33,14 @@ async function main() {
 
   console.log();
 
-  // Deploy new PerpsSimple implementation
-  logInfo("Deploy new PerpsSimple implementation", {
-    contract: "PerpsSimple",
+  // Deploy new HashPowerPerpsDEX implementation
+  logInfo("Deploy new HashPowerPerpsDEX implementation", {
+    contract: "HashPowerPerpsDEX",
     args: `minimumPriceIncrement=${env.MINIMUM_PRICE_INCREMENT}`,
   });
   await logPrompt("Proceed?");
   console.log("Deploying new implementation...");
-  const newImpl = await viem.deployContract("contracts/PerpsSimple.sol:PerpsSimple", [
+  const newImpl = await viem.deployContract("contracts/HashPowerPerpsDEX.sol:HashPowerPerpsDEX", [
     BigInt(env.MINIMUM_PRICE_INCREMENT),
   ]);
   logStep("Deployed", addrUrl(pc, newImpl.address));

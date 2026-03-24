@@ -6,7 +6,7 @@ import { deployPerpsWithCollateralFixture, deployPerpsWithOrdersFixture } from "
 
 const { viem, networkHelpers } = await network.connect();
 
-describe("PerpsSimple - removeCollateral", function () {
+describe("HashPowerPerpsDEX - removeCollateral", function () {
   it("should remove collateral successfully", async function () {
     const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
     const { perps, usdcMock } = contracts;

@@ -1,7 +1,7 @@
 import type { PublicClient } from "viem";
 import type { MakerConfig } from "./config.ts";
 import type pino from "pino";
-import { perpsSimpleAbi, multicall3Abi } from "./abi.ts";
+import { hashPowerPerpsDexAbi, multicall3Abi } from "./abi.ts";
 import { bigAbs } from "./math.ts";
 import { erc20Abi } from "viem";
 
@@ -40,7 +40,7 @@ export class InventoryManager {
     if (!this.collateralTokenAddress) {
       this.collateralTokenAddress = await this.publicClient.readContract({
         address: this.config.perpsAddress,
-        abi: perpsSimpleAbi,
+        abi: hashPowerPerpsDexAbi,
         functionName: "collateralToken",
       });
     }
@@ -49,13 +49,13 @@ export class InventoryManager {
       contracts: [
         {
           address: this.config.perpsAddress,
-          abi: perpsSimpleAbi,
+          abi: hashPowerPerpsDexAbi,
           functionName: "getUserPosition",
           args: [this.mmAddress],
         },
         {
           address: this.config.perpsAddress,
-          abi: perpsSimpleAbi,
+          abi: hashPowerPerpsDexAbi,
           functionName: "balanceOf",
           args: [this.mmAddress],
         },
@@ -67,7 +67,7 @@ export class InventoryManager {
         },
         {
           address: this.config.perpsAddress,
-          abi: perpsSimpleAbi,
+          abi: hashPowerPerpsDexAbi,
           functionName: "getMaintenanceMargin",
           args: [this.mmAddress],
         },
