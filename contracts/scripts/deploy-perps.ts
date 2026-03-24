@@ -62,13 +62,15 @@ async function main() {
   });
   await logPrompt("Proceed?");
   console.log("Deploying HashPowerPerpsDEX implementation...");
-  const perpsImpl = await viem.deployContract("contracts/HashPowerPerpsDEX.sol:HashPowerPerpsDEX", [
-    BigInt(env.MINIMUM_PRICE_INCREMENT),
-  ]);
+  const args = [BigInt(env.MINIMUM_PRICE_INCREMENT)] as const;
+  const perpsImpl = await viem.deployContract(
+    "contracts/HashPowerPerpsDEX.sol:HashPowerPerpsDEX",
+    args,
+  );
   logStep("Deployed", addrUrl(pc, perpsImpl.address));
 
   console.log("Verifying HashPowerPerpsDEX implementation...");
-  await verifyContract(perpsImpl.address, []);
+  await verifyContract(perpsImpl.address, args);
   logStep("Verified", addrUrl(pc, perpsImpl.address));
 
   // Deploy HashPowerPerpsDEX proxy
