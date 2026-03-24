@@ -1,6 +1,6 @@
 import { run } from "hardhat";
 import { parseUnits, formatUnits } from "viem";
-import { deployPerpsFixture } from "../tests/fixtures";
+import { deployPerpsFixture } from "../tests/fixtures.ts";
 
 async function main() {
   console.log("Starting local deployment...\n");
@@ -97,16 +97,8 @@ async function main() {
     formatUnits(config.minimumPriceIncrement, config.tokenDecimals),
     "USDC",
   );
-  console.log(
-    "Taker fee:             ",
-    config.takerFeeBps.toString(),
-    "bps",
-  );
-  console.log(
-    "Maker fee:             ",
-    config.makerFeeBps.toString(),
-    "bps",
-  );
+  console.log("Taker fee:             ", config.takerFeeBps.toString(), "bps");
+  console.log("Maker fee:             ", config.makerFeeBps.toString(), "bps");
   console.log(
     "Min match fee floor:   ",
     formatUnits(config.liquidationFee, config.tokenDecimals),
