@@ -250,6 +250,18 @@ jobs:
               echo ""
               echo "ℹ️  Version ${SUBGRAPH_VERSION} already exists — skipping to tag"
               SKIP_DEPLOY=true
+            elif echo "$DEPLOY_OUTPUT" | grep -qi "already deployed"; then
+              CONFLICT=$(echo "$DEPLOY_OUTPUT" | grep -oP 'under the name \K[^\s.]+' || true)
+              echo ""
+              echo "⚠️  Duplicate content detected — conflicts with ${CONFLICT}"
+              echo "   Removing conflicting version and retrying..."
+              goldsky subgraph tag delete "${CONFLICT}" --tag "${GOLDSKY_ROLLING_TAG}" --token "${GOLDSKY_API_KEY}" --force 2>/dev/null || true
+              goldsky subgraph delete "${CONFLICT}" --token "${GOLDSKY_API_KEY}" --force 2>/dev/null || true
+              sleep 3
+              echo "📤 Retrying deploy..."
+              goldsky subgraph deploy "${GOLDSKY_SUBGRAPH_NAME}/${SUBGRAPH_VERSION}" \
+                --path . \
+                --token "${GOLDSKY_API_KEY}"
             else
               echo ""
               echo "❌ Deployment failed"

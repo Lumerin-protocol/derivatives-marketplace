@@ -118,8 +118,8 @@ runs:
                 VPAT=0
             fi
             VFULL=${VMAJ}.${VMIN}.${VPAT}
-            VTAG=v${VFULL}-${SHORT_SHA}
-            VERSION="v${VFULL}-${SHORT_SHA}"
+            VTAG=v${VFULL}
+            VERSION="v${VFULL}"
         else
             # Non-production - use commit count as patch for uniqueness
             if git rev-parse refs/remotes/origin/main &>/dev/null; then
@@ -131,8 +131,8 @@ runs:
             VFULL=${VMAJ}.${VMIN}.${VPAT}
             RNAME=${GITHUB_REF_NAME##*/}
             [ "$GITHUB_EVENT_NAME" = "pull_request" ] && RNAME=pr${GITHUB_REF_NAME%/merge}
-            VTAG=v${VFULL}-${RNAME}-${SHORT_SHA}
-            VERSION="v${VFULL}-${RNAME}-${SHORT_SHA}"
+            VTAG=v${VFULL}-${RNAME}
+            VERSION="v${VFULL}-${RNAME}"
         fi
 
         # Output variables
