@@ -131,7 +131,7 @@ jobs:
       - name: Build contracts and generate ABIs
         working-directory: ./contracts
         run: |
-          pnpm install --frozen-lockfile
+          pnpm install --no-frozen-lockfile
           pnpm hardhat compile
           echo "✅ Contracts compiled and ABIs generated"
 
