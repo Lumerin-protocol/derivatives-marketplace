@@ -251,7 +251,7 @@ jobs:
               echo "ℹ️  Version ${SUBGRAPH_VERSION} already exists — skipping to tag"
               SKIP_DEPLOY=true
             elif echo "$DEPLOY_OUTPUT" | grep -qi "already deployed"; then
-              CONFLICT=$(echo "$DEPLOY_OUTPUT" | grep -oP 'under the name \K[^\s.]+' || true)
+              CONFLICT=$(echo "$DEPLOY_OUTPUT" | grep -oP 'under the name \K\S+(?=\.)' || true)
               echo ""
               echo "⚠️  Duplicate content detected — conflicts with ${CONFLICT}"
               echo "   Removing conflicting version and retrying..."
