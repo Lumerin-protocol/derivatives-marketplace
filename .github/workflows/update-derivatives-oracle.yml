@@ -204,9 +204,7 @@ jobs:
           path: .
 
       - name: Install Goldsky CLI
-        run: |
-          curl -fsSL https://goldsky.com | sh
-          echo "$HOME/.goldsky/bin" >> $GITHUB_PATH
+        run: curl -fsSL https://goldsky.com | sh -s -- -f
 
       - name: Deploy and tag
         id: goldsky_deploy
