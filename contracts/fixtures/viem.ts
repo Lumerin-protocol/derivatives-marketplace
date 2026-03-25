@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { type Address, encodeFunctionData, getContract, maxUint256, parseUnits } from "viem";
-import { perpsSimpleAbi, usdcMockAbi, priceOracleMockAbi } from "../abi/abi.ts";
+import { hashPowerPerpsDexAbi, usdcMockAbi, priceOracleMockAbi } from "../abi/abi.ts";
 import {
   HARDHAT_ACCOUNTS,
   createTestPublicClient,
@@ -57,7 +57,7 @@ export async function deployPerpsFixture() {
 
   const usdcArtifact = loadArtifact("contracts/USDCMock.sol/USDCMock.json");
   const oracleArtifact = loadArtifact("contracts/PriceOracleMock.sol/PriceOracleMock.json");
-  const perpsArtifact = loadArtifact("contracts/PerpsSimple.sol/PerpsSimple.json");
+  const perpsArtifact = loadArtifact("contracts/HashPowerPerpsDEX.sol/HashPowerPerpsDEX.json");
   const proxyArtifact = loadArtifact(
     "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol/ERC1967Proxy.json",
   );
@@ -97,7 +97,7 @@ export async function deployPerpsFixture() {
   ]);
 
   const initData = encodeFunctionData({
-    abi: perpsSimpleAbi,
+    abi: hashPowerPerpsDexAbi,
     functionName: "initialize",
     args: [usdcAddress, oracleAddress, marginPercent, maintenanceMarginPercent],
   });
@@ -109,7 +109,7 @@ export async function deployPerpsFixture() {
 
   const perps = getContract({
     address: perpsProxyAddress,
-    abi: perpsSimpleAbi,
+    abi: hashPowerPerpsDexAbi,
     client: { public: publicClient, wallet: ownerWallet },
   });
 
@@ -178,7 +178,7 @@ export async function deployWithCollateralFixture() {
   for (const wallet of [clients.sellerWallet, clients.buyerWallet, clients.buyer2Wallet, clients.seller2Wallet]) {
     const perps = getContract({
       address: contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       client: { public: clients.publicClient, wallet },
     });
     await perps.write.addCollateral([collateralPerUser]);
@@ -199,7 +199,7 @@ export async function deployWithLiquidatablePositionFixture() {
   const makePerps = (wallet: typeof clients.ownerWallet) =>
     getContract({
       address: contracts.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       client: { public: clients.publicClient, wallet },
     });
 

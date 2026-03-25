@@ -12,7 +12,7 @@ graph TD
   end
 
   subgraph On-Chain
-    Contract["PerpsSimple<br/>(on-chain CLOB)"]
+    Contract["HashPowerPerpsDEX<br/>(on-chain CLOB)"]
     Collateral["USDC<br/>(ERC-20 collateral)"]
   end
 
@@ -52,7 +52,7 @@ graph TD
 
 ### Components
 
-**Smart Contracts** (`contracts/`) — The core perpetual trading engine. A single upgradeable `PerpsSimple` contract implements the full on-chain central limit order book, collateral custody, margin accounting, position management, and liquidation logic. See [`contracts/README.md`](contracts/README.md) for implementation details.
+**Smart Contracts** (`contracts/`) — The core perpetual trading engine. A single upgradeable `HashPowerPerpsDEX` contract implements the full on-chain central limit order book, collateral custody, margin accounting, position management, and liquidation logic. See [`contracts/README.md`](contracts/README.md) for implementation details.
 
 **Hashprice Oracle** — An external Chainlink-compatible price oracle ([`hashprice-oracle`](https://github.com/Lumerin-protocol/hashprice-oracle)) that feeds BTC hashprice data to the contract. The contract reads the oracle through the standard `AggregatorV3Interface`, so any Chainlink-style feed can be swapped in.
 

@@ -6,7 +6,7 @@ import type { GasTracker } from "./gasTracker.ts";
 import type { RiskManager } from "./riskManager.ts";
 import type { OracleTracker } from "./oracleTracker.ts";
 import type pino from "pino";
-import { perpsSimpleAbi } from "./abi.ts";
+import { hashPowerPerpsDexAbi } from "./abi.ts";
 import { bigAbs } from "./math.ts";
 
 export class OrderExecutor {
@@ -85,10 +85,10 @@ export class OrderExecutor {
     const calls: `0x${string}`[] = [];
 
     for (const order of ordersToCancel) {
-      calls.push(encodeFunctionData({ abi: perpsSimpleAbi, functionName: "cancelOrder", args: [order.orderId] }));
+      calls.push(encodeFunctionData({ abi: hashPowerPerpsDexAbi, functionName: "cancelOrder", args: [order.orderId] }));
     }
     for (const level of ordersToPlace) {
-      calls.push(encodeFunctionData({ abi: perpsSimpleAbi, functionName: "createOrder", args: [level.price, level.quantity] }));
+      calls.push(encodeFunctionData({ abi: hashPowerPerpsDexAbi, functionName: "createOrder", args: [level.price, level.quantity] }));
     }
 
     if (this.config.dryRun) {
@@ -102,7 +102,7 @@ export class OrderExecutor {
     try {
       const hash = await this.walletClient.writeContract({
         address: this.config.perpsAddress,
-        abi: perpsSimpleAbi,
+        abi: hashPowerPerpsDexAbi,
         functionName: "multicall",
         args: [calls],
         account: this.account,
@@ -143,7 +143,7 @@ export class OrderExecutor {
     const maxFeePerGas = this.gas.cappedGasPrice();
 
     const calls = orders.map((order) =>
-      encodeFunctionData({ abi: perpsSimpleAbi, functionName: "cancelOrder", args: [order.orderId] }),
+      encodeFunctionData({ abi: hashPowerPerpsDexAbi, functionName: "cancelOrder", args: [order.orderId] }),
     );
 
     if (this.config.dryRun) {
@@ -154,7 +154,7 @@ export class OrderExecutor {
     try {
       const hash = await this.walletClient.writeContract({
         address: this.config.perpsAddress,
-        abi: perpsSimpleAbi,
+        abi: hashPowerPerpsDexAbi,
         functionName: "multicall",
         args: [calls],
         account: this.account,

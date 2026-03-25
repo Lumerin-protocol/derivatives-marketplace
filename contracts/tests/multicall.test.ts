@@ -6,7 +6,7 @@ import { deployPerpsWithCollateralFixture, deployPerpsWithOrdersFixture } from "
 
 const { viem, networkHelpers } = await network.connect();
 
-describe("PerpsSimple - multicall", function () {
+describe("HashPowerPerpsDEX - multicall", function () {
   describe("Batch Create Orders", function () {
     it("should create multiple orders in a single transaction", async function () {
       const { contracts, accounts, config } = await networkHelpers.loadFixture(

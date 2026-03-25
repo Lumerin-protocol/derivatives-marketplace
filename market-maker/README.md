@@ -1,6 +1,6 @@
 # Perps Market Maker
 
-Automated market maker for the PerpsSimple on-chain CLOB. Provides two-sided liquidity by placing layered limit orders around the oracle price, dynamically adjusting quotes based on inventory, volatility, and gas conditions.
+Automated market maker for the HashPowerPerpsDEX on-chain CLOB. Provides two-sided liquidity by placing layered limit orders around the oracle price, dynamically adjusting quotes based on inventory, volatility, and gas conditions.
 
 ## Architecture
 
@@ -9,7 +9,7 @@ The bot runs a single poll loop (`tick`) that reads on-chain state, computes des
 ```mermaid
 graph LR
   subgraph On-chain
-    CLOB[PerpsSimple CLOB]
+    CLOB[HashPowerPerpsDEX CLOB]
   end
 
   subgraph State readers
@@ -90,7 +90,7 @@ All configuration is via environment variables. Create a `.env` file in the repo
 |---|---|
 | `NETWORK` | Chain identifier: `arbitrum`, `arbitrum-sepolia`, or `hardhat` |
 | `ETH_NODE_ADDRESS` | RPC endpoint (HTTP or WebSocket) |
-| `PERPS_ADDRESS` | Deployed PerpsSimple proxy contract address |
+| `PERPS_ADDRESS` | Deployed HashPowerPerpsDEX proxy contract address |
 | `MAKER_PRIVATE_KEY` | Hex-encoded private key for the MM wallet |
 
 ### Quoting

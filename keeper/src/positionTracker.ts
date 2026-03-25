@@ -1,5 +1,5 @@
 import type { Address, PublicClient, WatchContractEventReturnType } from "viem";
-import { perpsSimpleAbi } from "./abi.ts";
+import { hashPowerPerpsDexAbi } from "./abi.ts";
 import type { Config } from "./config.ts";
 import { computeLiquidationPrice, computeLiquidationState } from "./positionHelper.ts";
 import type pino from "pino";
@@ -77,12 +77,12 @@ export class PositionTracker {
       contracts: [
         {
           address: this.config.perpsAddress,
-          abi: perpsSimpleAbi,
+          abi: hashPowerPerpsDexAbi,
           functionName: "maintenanceMarginPercent",
         },
         {
           address: this.config.perpsAddress,
-          abi: perpsSimpleAbi,
+          abi: hashPowerPerpsDexAbi,
           functionName: "QUANTITY_DECIMALS",
         },
       ] as const,
@@ -101,13 +101,13 @@ export class PositionTracker {
 
     const addresses = (await this.publicClient.readContract({
       address: this.config.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "getUsersWithPositions",
     })) as Address[];
 
     const marketPrice = await this.publicClient.readContract({
       address: this.config.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "getMarketPrice",
     });
 
@@ -123,19 +123,19 @@ export class PositionTracker {
     const calls = addresses.flatMap((addr) => [
       {
         address: this.config.perpsAddress as Address,
-        abi: perpsSimpleAbi,
+        abi: hashPowerPerpsDexAbi,
         functionName: "getUserPosition" as const,
         args: [addr] as const,
       },
       {
         address: this.config.perpsAddress as Address,
-        abi: perpsSimpleAbi,
+        abi: hashPowerPerpsDexAbi,
         functionName: "balanceOf" as const,
         args: [addr] as const,
       },
       {
         address: this.config.perpsAddress as Address,
-        abi: perpsSimpleAbi,
+        abi: hashPowerPerpsDexAbi,
         functionName: "getMaintenanceMargin" as const,
         args: [addr] as const,
       },
@@ -183,7 +183,7 @@ export class PositionTracker {
   private startEventWatchers(): void {
     const unwatch = this.publicClient.watchContractEvent({
       address: this.config.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       onLogs: async (logs) => {
         for (const log of logs) {
           this.logger.info({ log }, "Event received");
@@ -287,25 +287,25 @@ export class PositionTracker {
       contracts: [
         {
           address: this.config.perpsAddress,
-          abi: perpsSimpleAbi,
+          abi: hashPowerPerpsDexAbi,
           functionName: "getUserPosition",
           args: [user],
         },
         {
           address: this.config.perpsAddress,
-          abi: perpsSimpleAbi,
+          abi: hashPowerPerpsDexAbi,
           functionName: "balanceOf",
           args: [user],
         },
         {
           address: this.config.perpsAddress,
-          abi: perpsSimpleAbi,
+          abi: hashPowerPerpsDexAbi,
           functionName: "getMaintenanceMargin",
           args: [user],
         },
         {
           address: this.config.perpsAddress,
-          abi: perpsSimpleAbi,
+          abi: hashPowerPerpsDexAbi,
           functionName: "getMarketPrice",
         },
       ],
@@ -354,11 +354,11 @@ export class PositionTracker {
       contracts: [
         {
           address: this.config.perpsAddress,
-          abi: perpsSimpleAbi,
+          abi: hashPowerPerpsDexAbi,
           functionName: "getMaintenanceMargin",
           args: [user],
         },
-        { address: this.config.perpsAddress, abi: perpsSimpleAbi, functionName: "getMarketPrice" },
+        { address: this.config.perpsAddress, abi: hashPowerPerpsDexAbi, functionName: "getMarketPrice" },
       ],
       allowFailure: false,
     });

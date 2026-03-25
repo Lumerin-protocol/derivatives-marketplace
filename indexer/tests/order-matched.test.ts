@@ -2,7 +2,7 @@ import { describe, test, beforeEach, clearStore } from "matchstick-as/assembly/i
 import { Address, BigInt, Bytes } from "@graphprotocol/graph-ts";
 import { newTypedMockEventWithParams } from "matchstick-as/assembly/defaults";
 import { handleOrderMatched } from "../src/perps";
-import { OrderMatched } from "../generated/PerpsSimple/PerpsSimple";
+import { OrderMatched } from "../generated/HashPowerPerpsDEX/HashPowerPerpsDEX";
 import { assert } from "matchstick-as/assembly/index";
 import { userAddress, orderId, paramAddr, paramBytes, paramUint, paramInt, setupDataSourceMock, setupPerps } from "./helpers";
 import { positionSessionId, createEventId } from "../src/ids";
@@ -216,6 +216,9 @@ describe("handleOrderMatched", () => {
 
     assert.fieldEquals("User", taker.toHexString(), "netQuantity", qty.plus(qty).toString());
     assert.fieldEquals("User", taker.toHexString(), "aggregatedEntryPrice", "3100000");
+    // PositionSession.entryPrice must be updated when adding to an existing position (scale-in)
+    const sessionId = positionSessionId(event1.block.number, event1.logIndex.toI32() * 2);
+    assert.fieldEquals("PositionSession", sessionId, "entryPrice", "3100000");
   });
 
   test("aggregates multiple fills into one trade per user per tx", () => {
@@ -286,6 +289,7 @@ describe("handleOrderMatched", () => {
     handleOrderMatched(closeEvent);
 
     assert.fieldEquals("PositionSession", sessionId, "status", "CLOSE");
+    assert.fieldEquals("PositionSession", sessionId, "entryPrice", entryPrice.toString());
     assert.fieldEquals("PositionSession", sessionId, "realizedPnl", "100000");
     assert.fieldEquals("PositionSession", sessionId, "closedQuantity", qty.toString());
     assert.fieldEquals("PositionSession", sessionId, "closePrice", exitPrice.toString());

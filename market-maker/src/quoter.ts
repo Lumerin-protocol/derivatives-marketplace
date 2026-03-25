@@ -5,7 +5,7 @@ import type { GasTracker } from "./gasTracker.ts";
 import type { InventoryManager } from "./inventoryManager.ts";
 import type { RiskManager } from "./riskManager.ts";
 import type pino from "pino";
-import { perpsSimpleAbi } from "./abi.ts";
+import { hashPowerPerpsDexAbi } from "./abi.ts";
 import { roundDownToTick, roundUpToTick, BPS_SCALE, calculateNotional } from "./math.ts";
 
 export interface QuoteLevel {
@@ -49,7 +49,7 @@ export class Quoter {
   async initialize(): Promise<void> {
     this.tick = await this.publicClient.readContract({
       address: this.config.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "minimumPriceIncrement",
     });
     this.logger.info({ tick: this.tick.toString() }, "quoter initialized");

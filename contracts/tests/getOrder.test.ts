@@ -6,7 +6,7 @@ import { deployPerpsWithCollateralFixture, deployPerpsWithOrdersFixture } from "
 
 const { viem, networkHelpers } = await network.connect();
 
-describe("PerpsSimple - getOrder", function () {
+describe("HashPowerPerpsDEX - getOrder", function () {
   it("should return order details", async function () {
     const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsWithOrdersFixture);
     const { perps } = contracts;

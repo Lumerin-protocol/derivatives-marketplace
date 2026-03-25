@@ -17,8 +17,8 @@ import {
   FundingParametersUpdated,
   MinimumMarginPerOrderUpdated,
   BadDebt,
-  PerpsSimple as PerpsContract,
-} from "../generated/PerpsSimple/PerpsSimple";
+  HashPowerPerpsDEX as PerpsContract,
+} from "../generated/HashPowerPerpsDEX/HashPowerPerpsDEX";
 import {
   Perps,
   User,
@@ -191,7 +191,7 @@ function getOrCreatePriceLevel(price: BigInt, isBid: boolean): PriceLevel {
 // ============ Event Handlers ============
 
 export function handleInitialized(event: Initialized): void {
-  log.info("PerpsSimple initialized with version: {}", [event.params.version.toString()]);
+  log.info("HashPowerPerpsDEX initialized with version: {}", [event.params.version.toString()]);
 
   const perps = getOrCreatePerps();
   perps.initializedAt = event.block.timestamp;

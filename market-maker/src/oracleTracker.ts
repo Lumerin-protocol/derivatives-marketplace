@@ -1,7 +1,7 @@
 import type { PublicClient } from "viem";
 import type { MakerConfig } from "./config.ts";
 import type pino from "pino";
-import { perpsSimpleAbi } from "./abi.ts";
+import { hashPowerPerpsDexAbi } from "./abi.ts";
 import { RollingWindow } from "./math.ts";
 
 export class OracleTracker {
@@ -24,7 +24,7 @@ export class OracleTracker {
   async update(): Promise<void> {
     const price = await this.publicClient.readContract({
       address: this.perpsAddress,
-      abi: perpsSimpleAbi,
+      abi: hashPowerPerpsDexAbi,
       functionName: "getMarketPrice",
     });
 

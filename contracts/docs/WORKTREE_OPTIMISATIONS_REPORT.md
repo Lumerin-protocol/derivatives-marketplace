@@ -1,6 +1,6 @@
 # Worktree Optimisations Report
 
-**Task:** Gas optimisations for `PerpsSimple.sol`  
+**Task:** Gas optimisations for `HashPowerPerpsDEX.sol`  
 **Date:** 2026-02-20  
 **Worktrees:** 17 total (1 main + 16 agent worktrees)
 
@@ -8,7 +8,7 @@
 
 ## Overview
 
-Four of 16 agent worktrees produced substantive optimisation changes to the `createOrder` path in `PerpsSimple.sol`. All agents worked from the same baseline: rounds 1–8 (including the DLL migration from `StructuredLinkedList`). The following summarises each agent’s approach, changes, and results.
+Four of 16 agent worktrees produced substantive optimisation changes to the `createOrder` path in `HashPowerPerpsDEX.sol`. All agents worked from the same baseline: rounds 1–8 (including the DLL migration from `StructuredLinkedList`). The following summarises each agent’s approach, changes, and results.
 
 ---
 
@@ -52,7 +52,7 @@ Four of 16 agent worktrees produced substantive optimisation changes to the `cre
 - Caching `cumulativeFundingPerUnit` in `_settleFunding` (matching regressed).
 - Iterating maker queue via `getNext(currentOrderId)` (regressed vs `getNext(0)` loop).
 
-**Files touched:** `GAS_OPTIMIZATIONS.md`, `PerpsSimple.sol`, `DLL.sol`, `gas-createOrder.test.ts`
+**Files touched:** `GAS_OPTIMIZATIONS.md`, `HashPowerPerpsDEX.sol`, `DLL.sol`, `gas-createOrder.test.ts`
 
 ---
 

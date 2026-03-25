@@ -13,12 +13,12 @@ import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/O
 import { ERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
 import { AggregatorV3Interface } from "./AggregatorV3Interface.sol";
 
-/// @title Alternative implementation of PerpsSimple using DLL for linked list (untested)
+/// @title Alternative implementation of HashPowerPerpsDEX using DLL for linked list (untested)
 /// @dev Do not update this contract, it's just a reference
 contract PerpsSimpleDLL is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC20Upgradeable {
     using DLL for DLL.List;
 
-    // Couldn't clearly extend the PerpsSimple contract
+    // Couldn't clearly extend the HashPowerPerpsDEX contract
     // So just swap variables below in the contract
     DLL.List private activeBidPrices;
     DLL.List private activeAskPrices;

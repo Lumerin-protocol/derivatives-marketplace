@@ -1,14 +1,15 @@
 import fs from "node:fs";
-import { requireEnvsSet } from "../lib/env";
-import { viem } from "hardhat";
+import { requireEnvsSet } from "../lib/env.ts";
+import hre from "hardhat";
 import { encodeFunctionData } from "viem";
-import { writeAndWait } from "../lib/writeContract";
-import { verifyContract } from "../lib/verify";
-import { txUrl, addrUrl } from "../lib/explorer";
-import { logTitle, logInfo, logStep, logSuccess, logPrompt } from "../lib/log";
+import { writeAndWait } from "../lib/writeContract.ts";
+import { verifyContract } from "../lib/verify.ts";
+import { txUrl, addrUrl } from "../lib/explorer.ts";
+import { logTitle, logInfo, logStep, logSuccess, logPrompt } from "../lib/log.ts";
 
 async function main() {
-  logTitle("PerpsSimple Deployment");
+  logTitle("HashPowerPerpsDEX Deployment");
+  const { viem } = await hre.network.connect();
 
   const env = requireEnvsSet(
     "COLLATERAL_TOKEN_ADDRESS",
@@ -20,7 +21,7 @@ async function main() {
     "LIQUIDATION_FEE",
     "MINIMUM_PRICE_INCREMENT",
   );
-  const SAFE_OWNER_ADDRESS = process.env.SAFE_OWNER_ADDRESS as `0x${string}` | undefined;
+  const SAFE_OWNER_ADDRESS = process.env.SAFE_OWNER_ADDRESS;
 
   const [deployer] = await viem.getWalletClients();
   const pc = await viem.getPublicClient();
@@ -54,24 +55,26 @@ async function main() {
 
   console.log();
 
-  // Deploy PerpsSimple implementation
-  logInfo("Deploy PerpsSimple implementation", {
-    contract: "PerpsSimple",
+  // Deploy HashPowerPerpsDEX implementation
+  logInfo("Deploy HashPowerPerpsDEX implementation", {
+    contract: "HashPowerPerpsDEX",
     args: `minimumPriceIncrement=${env.MINIMUM_PRICE_INCREMENT}`,
   });
   await logPrompt("Proceed?");
-  console.log("Deploying PerpsSimple implementation...");
-  const perpsImpl = await viem.deployContract("contracts/PerpsSimple.sol:PerpsSimple", [
-    BigInt(env.MINIMUM_PRICE_INCREMENT),
-  ]);
+  console.log("Deploying HashPowerPerpsDEX implementation...");
+  const args = [BigInt(env.MINIMUM_PRICE_INCREMENT)] as const;
+  const perpsImpl = await viem.deployContract(
+    "contracts/HashPowerPerpsDEX.sol:HashPowerPerpsDEX",
+    args,
+  );
   logStep("Deployed", addrUrl(pc, perpsImpl.address));
 
-  console.log("Verifying PerpsSimple implementation...");
-  await verifyContract(perpsImpl.address, []);
+  console.log("Verifying HashPowerPerpsDEX implementation...");
+  await verifyContract(perpsImpl.address, args);
   logStep("Verified", addrUrl(pc, perpsImpl.address));
 
-  // Deploy PerpsSimple proxy
-  logInfo("Deploy PerpsSimple proxy", {
+  // Deploy HashPowerPerpsDEX proxy
+  logInfo("Deploy HashPowerPerpsDEX proxy", {
     implementation: perpsImpl.address,
     collateralToken: env.COLLATERAL_TOKEN_ADDRESS,
     priceOracle: env.PRICE_ORACLE_ADDRESS,
@@ -79,7 +82,7 @@ async function main() {
     maintenanceMarginPercent: `${env.MAINTENANCE_MARGIN_PERCENT}%`,
   });
   await logPrompt("Proceed?");
-  console.log("Deploying PerpsSimple proxy...");
+  console.log("Deploying HashPowerPerpsDEX proxy...");
   const encodedInitFn = encodeFunctionData({
     abi: perpsImpl.abi,
     functionName: "initialize",
@@ -97,7 +100,7 @@ async function main() {
   ]);
   logStep("Deployed", addrUrl(pc, perpsProxy.address));
 
-  const perps = await viem.getContractAt("PerpsSimple", perpsProxy.address);
+  const perps = await viem.getContractAt("HashPowerPerpsDEX", perpsProxy.address);
 
   // Set fees
   logInfo("Set fees", {
@@ -106,7 +109,10 @@ async function main() {
   });
   await logPrompt("Proceed?");
   console.log("Setting fee bps...");
-  const feeRes = await perps.simulate.setMatchFee([Number(env.TAKER_FEE_BPS), Number(env.MAKER_FEE_BPS)]);
+  const feeRes = await perps.simulate.setMatchFee([
+    Number(env.TAKER_FEE_BPS),
+    Number(env.MAKER_FEE_BPS),
+  ]);
   const feeReceipt = await writeAndWait(deployer, feeRes);
   logStep("Done", txUrl(pc, feeReceipt.transactionHash));
 

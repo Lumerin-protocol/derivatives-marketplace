@@ -1,6 +1,6 @@
 # Perps Indexer
 
-A Graph Protocol subgraph that indexes the `PerpsSimple` contract, turning on-chain events into a queryable GraphQL API for orders, trades, positions, collateral, and liquidation data.
+A Graph Protocol subgraph that indexes the `HashPowerPerpsDEX` contract, turning on-chain events into a queryable GraphQL API for orders, trades, positions, collateral, and liquidation data.
 
 ## Schema
 
@@ -20,7 +20,7 @@ A Graph Protocol subgraph that indexes the `PerpsSimple` contract, turning on-ch
 
 ### Event Handlers
 
-The subgraph listens to all `PerpsSimple` contract events:
+The subgraph listens to all `HashPowerPerpsDEX` contract events:
 
 - **Order events** — `OrderCreated`, `OrderFilled`, `OrderCancelled`, `OrderUpdated`, `OrderMatched`
 - **Position events** — `PositionTrade`, `PositionClosed`, `PositionLiquidated`
@@ -114,7 +114,7 @@ The subgraph manifest is generated from `subgraph.template.yaml` using `envsubst
 - `${PERPS_ADDRESS}` — deployed contract address
 - `${PERPS_START_BLOCK}` — block to start indexing from
 
-The ABI is read from `../contracts/abi/PerpsSimple.json`, so the contracts package must be built first.
+The ABI is read from `../contracts/abi/HashPowerPerpsDEX.json`, so the contracts package must be built first.
 
 ## Example Queries
 

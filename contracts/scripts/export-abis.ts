@@ -11,10 +11,9 @@ const ARTIFACTS_DIR = resolve(__dirname, "../artifacts");
 const OUT_DIR = resolve(__dirname, "../abi");
 
 const CONTRACTS = [
-  "contracts/PerpsSimple.sol/PerpsSimple.json",
+  "contracts/HashPowerPerpsDEX.sol/HashPowerPerpsDEX.json",
   "contracts/USDCMock.sol/USDCMock.json",
   "contracts/PriceOracleMock.sol/PriceOracleMock.json",
-  "contracts/BTCPriceOracleMock.sol/BTCPriceOracleMock.json",
   "contracts/Multicall3.sol/Multicall3.json",
   "contracts/AggregatorV3Interface.sol/AggregatorV3Interface.json",
   "@openzeppelin/contracts/token/ERC20/IERC20.sol/IERC20.json",

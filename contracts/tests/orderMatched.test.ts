@@ -9,7 +9,7 @@ import {
 
 const { networkHelpers } = await network.connect();
 
-describe("PerpsSimple - OrderMatched event", function () {
+describe("HashPowerPerpsDEX - OrderMatched event", function () {
   it("emits correct maker, taker, price, quantity for a full match", async function () {
     const { contracts, accounts, config } = await networkHelpers.loadFixture(
       deployPerpsWithCollateralFixture,
@@ -124,6 +124,41 @@ describe("PerpsSimple - OrderMatched event", function () {
     assert.equal(prices[0], marketPrice + tick);
     assert.equal(prices[1], marketPrice + 2n * tick);
     assert.equal(prices[2], marketPrice + 3n * tick);
+  });
+
+  it("emits correct entry price and zero net qty on full close", async function () {
+    const { contracts, accounts, config } = await networkHelpers.loadFixture(
+      deployPerpsWithOrdersFixture,
+    );
+    const { perps } = contracts;
+    const { seller, buyer2, pc } = accounts;
+    const { marketPrice, qty } = config;
+    const tick = config.minimumPriceIncrement;
+
+    // buyer2 opens long: buy 1 unit at marketPrice + tick (first sell level)
+    await perps.write.createOrder([marketPrice + tick, qty], { account: buyer2.account });
+    const positionOpen = await perps.read.getUserPosition([buyer2.account.address]);
+    assert.equal(positionOpen.netQuantity, qty);
+    const entryPrice = positionOpen.aggregatedEntryPrice;
+
+    // buyer2 fully closes: sell 1 unit (match against a resting buy)
+    await perps.write.createOrder([marketPrice - tick, qty], { account: seller.account });
+    const closeHash = await perps.write.createOrder([marketPrice - tick, -qty], {
+      account: buyer2.account,
+    });
+    const closeReceipt = await pc.waitForTransactionReceipt({ hash: closeHash });
+
+    const matched = parseEventLogs({
+      logs: closeReceipt.logs,
+      abi: perps.abi,
+      eventName: "OrderMatched",
+    });
+    assert.equal(matched.length, 1);
+
+    const e = matched[0].args;
+    assert.equal(e.taker, getAddress(buyer2.account.address));
+    assert.equal(e.takerNetQtyAfter, 0n, "taker position after close should be zero");
+    assert.equal(e.takerEntryPriceAfter, entryPrice, "event should emit closed position entry price, not 0");
   });
 
   it("emits correct makerOrderId linking to the resting order", async function () {

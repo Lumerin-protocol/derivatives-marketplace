@@ -99,7 +99,7 @@ function _clearTick(mapping(int16 => uint256) storage bitmap, uint256 tick) priv
 
 Reference: [Uniswap V3 TickBitmap.sol](https://github.com/Uniswap/v3-core/blob/main/contracts/libraries/TickBitmap.sol)
 
-## What Changes in PerpsSimple.sol
+## What Changes in HashPowerPerpsDEX.sol
 
 ### Data Structures to Replace
 

@@ -7,7 +7,7 @@ import { catchError } from "../lib/lib.ts";
 
 const { viem, networkHelpers } = await network.connect();
 
-describe("PerpsSimple - Admin Functions", function () {
+describe("HashPowerPerpsDEX - Admin Functions", function () {
   describe("setOracle", function () {
     it("should allow owner to set new oracle", async function () {
       const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);

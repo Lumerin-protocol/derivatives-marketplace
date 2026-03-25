@@ -10,7 +10,7 @@ import {
 
 const { viem, networkHelpers } = await network.connect();
 
-describe("PerpsSimple - Margin View Functions", function () {
+describe("HashPowerPerpsDEX - Margin View Functions", function () {
   describe("getMaintenanceMargin", function () {
     it("should return 0 when user has no orders or positions", async function () {
       const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);

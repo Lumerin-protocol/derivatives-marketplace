@@ -15,13 +15,19 @@ import { MulticallUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/
 import { AggregatorV3Interface } from "./AggregatorV3Interface.sol";
 import { console } from "hardhat/console.sol";
 
-/// @title PerpsSimple
-/// @notice Simple perpetual trading contract with on-chain order book
+/// @title HashPower Perps DEX
+/// @notice Perpetual trading contract with on-chain order book
 /// @dev Positions are created between two users when orders match
 /// @dev TODO: Add support for partial liquidation
 /// @dev TODO: when not enough reserve pool, the user should be able to get revenue
 /// @dev on their collateral balance and withdraw later when collateral is added
-contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC20Upgradeable, MulticallUpgradeable {
+contract HashPowerPerpsDEX is
+    Initializable,
+    UUPSUpgradeable,
+    OwnableUpgradeable,
+    ERC20Upgradeable,
+    MulticallUpgradeable
+{
     using SafeERC20 for IERC20;
     using EnumerableSet for EnumerableSet.Bytes32Set;
     using EnumerableSet for EnumerableSet.AddressSet;
@@ -168,7 +174,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
         }
 
         __ERC20_init(
-            string.concat("PerpsSimple ", _collateralToken.symbol()), string.concat("p", _collateralToken.symbol())
+            string.concat("HashPower Perps ", _collateralToken.symbol()), string.concat("hp", _collateralToken.symbol())
         );
         __Ownable_init(_msgSender());
         __UUPSUpgradeable_init();
@@ -536,7 +542,7 @@ contract PerpsSimple is Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC2
             position.aggregatedEntryPrice = _tradePrice;
             userFundingSnapshot[_user] = cumulativeFundingPerUnit;
         } else if (position.netQuantity + _quantity == 0) {
-            delete positions[_user];
+            position.netQuantity = 0;
             usersWithPositions.remove(_user);
         } else {
             position.netQuantity += _quantity;

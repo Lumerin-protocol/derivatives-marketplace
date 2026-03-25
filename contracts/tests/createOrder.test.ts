@@ -10,7 +10,7 @@ import {
 
 const { viem, networkHelpers } = await network.connect();
 
-describe("PerpsSimple - createOrder", function () {
+describe("HashPowerPerpsDEX - createOrder", function () {
   describe("Order Creation", function () {
     it("should create a buy order successfully", async function () {
       const { contracts, accounts, config } = await networkHelpers.loadFixture(

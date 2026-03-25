@@ -2,7 +2,7 @@ import { describe, test, beforeEach, clearStore } from "matchstick-as/assembly/i
 import { Address, BigInt } from "@graphprotocol/graph-ts";
 import { newTypedMockEventWithParams } from "matchstick-as/assembly/defaults";
 import { handleCollateralAdded, handleCollateralRemoved } from "../src/perps";
-import { CollateralAdded, CollateralRemoved } from "../generated/PerpsSimple/PerpsSimple";
+import { CollateralAdded, CollateralRemoved } from "../generated/HashPowerPerpsDEX/HashPowerPerpsDEX";
 import { assert } from "matchstick-as/assembly/index";
 import { userAddress, paramAddr, paramUint, setupDataSourceMock, setupPerps } from "./helpers";
 import { createEventId } from "../src/ids";

@@ -1,7 +1,7 @@
 import type { PublicClient } from "viem";
 import type { MakerConfig } from "./config.ts";
 import type pino from "pino";
-import { perpsSimpleAbi, aggregatorV3InterfaceAbi } from "./abi.ts";
+import { hashPowerPerpsDexAbi, aggregatorV3InterfaceAbi } from "./abi.ts";
 import { RollingWindow } from "./math.ts";
 
 export class GasTracker {
@@ -42,7 +42,7 @@ export class GasTracker {
     try {
       const createGas = await this.publicClient.estimateContractGas({
         address: this.config.perpsAddress,
-        abi: perpsSimpleAbi,
+        abi: hashPowerPerpsDexAbi,
         functionName: "createOrder",
         args: [1_000_000n, 1_000_000n],
         account: mmAddress,

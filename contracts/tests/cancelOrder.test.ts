@@ -6,7 +6,7 @@ import { deployPerpsWithCollateralFixture, deployPerpsWithOrdersFixture } from "
 
 const { viem, networkHelpers } = await network.connect();
 
-describe("PerpsSimple - cancelOrder", function () {
+describe("HashPowerPerpsDEX - cancelOrder", function () {
   it("should close an order successfully", async function () {
     const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsWithOrdersFixture);
     const { perps } = contracts;

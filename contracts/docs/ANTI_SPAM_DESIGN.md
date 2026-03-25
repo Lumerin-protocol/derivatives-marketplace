@@ -1,6 +1,6 @@
 # Anti-Spam Mechanism Design Decisions
 
-This document captures the decision-making process for choosing anti-spam / anti-pollution mechanisms for the PerpsSimple order book.
+This document captures the decision-making process for choosing anti-spam / anti-pollution mechanisms for the HashPowerPerpsDEX order book.
 
 ---
 
