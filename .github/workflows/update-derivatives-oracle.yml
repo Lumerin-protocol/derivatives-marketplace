@@ -6,11 +6,10 @@ on:
       - dev
       - stg
       - main
-
+      - "cicd/**"
     paths:
       - "indexer/**"
       - ".github/workflows/update-derivatives-oracle.yml"
-
   workflow_dispatch:
     inputs:
       environment:
@@ -38,7 +37,6 @@ env:
   SERVICE_NAME: derivatives-contract-oracle
 
 jobs:
-  # First job to determine environment and version (runs without environment protection)
   setup:
     name: 🔧 Setup
     runs-on: ubuntu-latest
@@ -72,10 +70,9 @@ jobs:
       version: ${{ needs.setup.outputs.version }}
       tag: ${{ needs.setup.outputs.tag }}
       environment: ${{ needs.setup.outputs.environment }}
-      subgraph_name: ${{ steps.env.outputs.subgraph_name }}
-      graph_userid: ${{ steps.env.outputs.graph_userid }}
-      aws_region: ${{ steps.env.outputs.aws_region }}
-      gns_subgraph_id: ${{ steps.env.outputs.gns_subgraph_id }}
+      goldsky_subgraph_name: ${{ steps.env.outputs.goldsky_subgraph_name }}
+      goldsky_rolling_tag: ${{ steps.env.outputs.goldsky_rolling_tag }}
+      goldsky_endpoint: ${{ steps.env.outputs.goldsky_endpoint }}
       is_cicd_branch: ${{ needs.setup.outputs.is_cicd_branch }}
 
     steps:
@@ -102,41 +99,38 @@ jobs:
         run: |
           ENV="${{ needs.setup.outputs.environment }}"
 
-          # Map to The Graph Studio subgraph names
-          # All deployments now go to The Graph Network (Studio)
+          # Goldsky subgraph name — override via vars.GOLDSKY_SUBGRAPH_NAME if needed
+          GS_NAME="${{ vars.GOLDSKY_SUBGRAPH_NAME }}"
+          if [ -z "$GS_NAME" ]; then
+            GS_NAME="lumerin-derivatives"
+          fi
+          echo "goldsky_subgraph_name=$GS_NAME" >> $GITHUB_OUTPUT
+
+          # Rolling tag and public endpoint per environment
           case $ENV in
             dev)
-              echo "aws_region=us-east-1" >> $GITHUB_OUTPUT
-              echo "subgraph_name=lumerin-dev-derivatives" >> $GITHUB_OUTPUT
+              echo "goldsky_rolling_tag=dev-latest" >> $GITHUB_OUTPUT
+              echo "goldsky_endpoint=${{ vars.DEV_GS_DERIVATIVES }}" >> $GITHUB_OUTPUT
               ;;
             stg)
-              echo "aws_region=us-east-1" >> $GITHUB_OUTPUT
-              echo "subgraph_name=lumerin-stg-derivatives" >> $GITHUB_OUTPUT
+              echo "goldsky_rolling_tag=stg-latest" >> $GITHUB_OUTPUT
+              echo "goldsky_endpoint=${{ vars.STG_GS_DERIVATIVES }}" >> $GITHUB_OUTPUT
               ;;
             main)
-              echo "aws_region=us-east-1" >> $GITHUB_OUTPUT
-              echo "subgraph_name=lumerin-lmn-derivatives" >> $GITHUB_OUTPUT
+              echo "goldsky_rolling_tag=lmn-latest" >> $GITHUB_OUTPUT
+              echo "goldsky_endpoint=${{ vars.LMN_GS_DERIVATIVES }}" >> $GITHUB_OUTPUT
               ;;
           esac
 
-          # Set Graph user ID for this environment's account
-          GRAPH_USERID="${{ needs.setup.outputs.environment == 'dev' && vars.DEV_GRAPH_USERID || needs.setup.outputs.environment == 'stg' && vars.STG_GRAPH_USERID || vars.LMN_GRAPH_USERID }}"
-          echo "graph_userid=$GRAPH_USERID" >> $GITHUB_OUTPUT
-
-          # GNS_SUBGRAPH_ID is per-repo per-environment (set in GitHub environment variables)
-          echo "gns_subgraph_id=${{ vars.GNS_SUBGRAPH_ID }}" >> $GITHUB_OUTPUT
-          echo "🎯 Deploying to The Graph Studio: subgraph=${subgraph_name}, userid=${GRAPH_USERID}"
+          echo "🎯 Deploying to Goldsky: subgraph=${GS_NAME}, env=${ENV}"
 
       - name: Install dependencies
         working-directory: ./indexer
-        run: |
-          echo "📦 Installing dependencies..."
-          pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Build contracts and generate ABIs
         working-directory: ./contracts
         run: |
-          echo "🔨 Compiling smart contracts..."
           pnpm install --frozen-lockfile
           pnpm hardhat compile
           echo "✅ Contracts compiled and ABIs generated"
@@ -155,36 +149,20 @@ jobs:
           PERPS_START_BLOCK: ${{ vars.PERPS_START_BLOCK }}
           PRICE_ORACLE_ADDRESS: ${{ vars.PRICE_ORACLE_ADDRESS }}
           ETH_NODE_ADDRESS: ${{ secrets.ETH_NODE_ADDRESS }}
-
         run: |
           echo "⚙️ Preparing subgraph for ${{ needs.setup.outputs.environment }}..."
-          echo "   Collateral Token Address: ${COLLATERAL_TOKEN_ADDRESS}"
-          echo "   Liquidation Fee: ${LIQUIDATION_FEE}"
-          echo "   Maintenance Margin Percent: ${MAINTENANCE_MARGIN_PERCENT}"
-          echo "   Margin Percent: ${MARGIN_PERCENT}"
-          echo "   Minimum Price Increment: ${MINIMUM_PRICE_INCREMENT}"
           echo "   Network: ${NETWORK}"
-          echo "   Order Fee: ${ORDER_FEE}"
           echo "   Perps Address: ${PERPS_ADDRESS}"
           echo "   Perps Start Block: ${PERPS_START_BLOCK}"
-          echo "   Price Oracle Address: ${PRICE_ORACLE_ADDRESS}"  
+          echo "   Price Oracle: ${PRICE_ORACLE_ADDRESS}"
+          echo "   Collateral Token: ${COLLATERAL_TOKEN_ADDRESS}"
           pnpm prepare:env
+          echo "✅ Configuration ready"
 
-          echo "✅ Subgraph configuration ready"
-          echo "📄 Generated subgraph.yaml:"
-          cat subgraph.yaml
-
-      - name: Generate code
+      - name: Generate code and build
         working-directory: ./indexer
         run: |
-          echo "🔨 Generating AssemblyScript types..."
           npx graph codegen
-          echo "✅ Code generation complete"
-
-      - name: Build subgraph
-        working-directory: ./indexer
-        run: |
-          echo "🔨 Building subgraph..."
           pnpm build
           echo "✅ Build complete"
 
@@ -195,7 +173,9 @@ jobs:
           path: |
             indexer/build/
             indexer/generated/
+            indexer/src/
             indexer/subgraph.yaml
+            indexer/schema.graphql
             contracts/abi/
           retention-days: 1
 
@@ -203,462 +183,132 @@ jobs:
         run: |
           echo "## 🔨 Build Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** ${{ needs.setup.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Subgraph:** Built and validated successfully" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Build verification successful" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | \`${{ needs.setup.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Subgraph | \`${{ steps.env.outputs.goldsky_subgraph_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tag | \`${{ steps.env.outputs.goldsky_rolling_tag }}\` |" >> $GITHUB_STEP_SUMMARY
 
   deploy:
-    name: 🚀 Deploy
+    name: 🚀 Deploy to Goldsky
     runs-on: ubuntu-latest
     needs: build
     if: needs.build.outputs.is_cicd_branch != 'true'
     outputs:
-      deploy_status: ${{ steps.deploy.outputs.deploy_status || steps.check_deploy.outputs.deploy_status }}
-      ipfs_hash: ${{ steps.pinata_pin.outputs.ipfs_hash }}
-      publish_status: ${{ steps.publish.outputs.publish_status || 'skipped' }}
-
-    services:
-      # Local IPFS node for graph build (needs Kubo-compatible API)
-      # Content is pinned to Pinata after build for permanent availability
-      ipfs:
-        image: ipfs/kubo:latest
-        ports:
-          - 5001:5001
-        options: >-
-          --health-cmd "ipfs id"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+      deploy_status: ${{ steps.goldsky_deploy.outputs.deploy_status }}
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
           name: subgraph-build
           path: .
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.28.1
-          run_install: false
+      - name: Install Goldsky CLI
+        run: curl -fsSL https://goldsky.com | sh -s -- -f
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "pnpm"
-          cache-dependency-path: indexer/pnpm-lock.yaml
-
-      - name: Install dependencies
+      - name: Deploy and tag
+        id: goldsky_deploy
         working-directory: ./indexer
+        env:
+          GOLDSKY_API_KEY: ${{ needs.build.outputs.environment == 'dev' && secrets.DEV_GOLDSKY_API_KEY || needs.build.outputs.environment == 'stg' && secrets.STG_GOLDSKY_API_KEY || secrets.LMN_GOLDSKY_API_KEY }}
+          GOLDSKY_SUBGRAPH_NAME: ${{ needs.build.outputs.goldsky_subgraph_name }}
+          SUBGRAPH_VERSION: ${{ needs.build.outputs.version }}
+          GOLDSKY_ROLLING_TAG: ${{ needs.build.outputs.goldsky_rolling_tag }}
+          GOLDSKY_ENDPOINT: ${{ needs.build.outputs.goldsky_endpoint }}
         run: |
-          echo "📦 Installing dependencies for deployment..."
-          pnpm install --frozen-lockfile
-
-      - name: Build and upload to local IPFS
-        id: ipfs_build
-        working-directory: ./indexer
-        run: |
-          echo "📤 Building subgraph and uploading to local IPFS node..."
+          echo "🚀 Goldsky Subgraph Deployment"
+          echo "   Subgraph:  ${GOLDSKY_SUBGRAPH_NAME}"
+          echo "   Version:   ${SUBGRAPH_VERSION}"
+          echo "   Tag:       ${GOLDSKY_ROLLING_TAG}"
           echo ""
 
+          # --- Pre-flight: check current deployment ---
+          if [ -n "${GOLDSKY_ENDPOINT}" ]; then
+            echo "📊 Current deployment:"
+            CURRENT=$(curl -s -X POST -H "Content-Type: application/json" \
+              -d '{"query":"{ _meta { deployment hasIndexingErrors block { number } } }"}' \
+              "${GOLDSKY_ENDPOINT}" 2>/dev/null || true)
+            echo "   $(echo "$CURRENT" | jq -c '.data._meta // "unavailable"' 2>/dev/null || echo 'unavailable')"
+            echo ""
+          fi
+
+          # --- Deploy new version ---
+          echo "📤 Deploying ${GOLDSKY_SUBGRAPH_NAME}/${SUBGRAPH_VERSION}..."
           set +e
-          BUILD_OUTPUT=$(npx graph build --ipfs http://localhost:5001 2>&1)
-          BUILD_EXIT=$?
+          DEPLOY_OUTPUT=$(goldsky subgraph deploy "${GOLDSKY_SUBGRAPH_NAME}/${SUBGRAPH_VERSION}" \
+            --path . \
+            --token "${GOLDSKY_API_KEY}" 2>&1)
+          DEPLOY_EXIT=$?
           set -e
 
-          echo "$BUILD_OUTPUT"
+          echo "$DEPLOY_OUTPUT"
 
-          if [ $BUILD_EXIT -ne 0 ]; then
-            echo "❌ Build failed"
-            exit 1
-          fi
-
-          # Extract all IPFS CIDs from build output (sub-files + manifest)
-          ALL_CIDS=$(echo "$BUILD_OUTPUT" | grep -oE 'Qm[a-zA-Z0-9]{44}')
-          MANIFEST_CID=$(echo "$ALL_CIDS" | tail -1)
-
-          if [ -z "$MANIFEST_CID" ]; then
-            echo "❌ Failed to extract IPFS hash from build output"
-            exit 1
-          fi
-
-          echo ""
-          echo "✅ Built and uploaded to local IPFS"
-          echo "   Manifest CID: $MANIFEST_CID"
-          echo "   All CIDs:"
-          echo "$ALL_CIDS" | while read cid; do echo "     - $cid"; done
-
-          echo "manifest_cid=$MANIFEST_CID" >> $GITHUB_OUTPUT
-          echo "all_cids<<EOF" >> $GITHUB_OUTPUT
-          echo "$ALL_CIDS" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-      # Pin all build artifacts to Pinata for permanent IPFS availability.
-      # The Graph checks Pinata before the public DHT, so content is found instantly.
-      # Each file is: fetched from local Kubo → uploaded to Pinata → verified retrievable.
-      - name: Pin to Pinata
-        id: pinata_pin
-        env:
-          PINATA_JWT: ${{ secrets.PINATA_JWT }}
-        run: |
-          MANIFEST_CID="${{ steps.ipfs_build.outputs.manifest_cid }}"
-          ALL_CIDS="${{ steps.ipfs_build.outputs.all_cids }}"
-          SUBGRAPH="${{ needs.build.outputs.subgraph_name }}"
-          VERSION="${{ needs.build.outputs.version }}"
-          PINATA_GATEWAY="https://gateway.pinata.cloud/ipfs"
-
-          echo "📌 Pinning subgraph artifacts to Pinata..."
-          echo "   Subgraph: $SUBGRAPH"
-          echo "   Version:  $VERSION"
-          echo ""
-
-          PIN_COUNT=0
-          TOTAL_COUNT=$(echo "$ALL_CIDS" | grep -c .)
-
-          for CID in $ALL_CIDS; do
-            [ -z "$CID" ] && continue
-            PIN_COUNT=$((PIN_COUNT + 1))
-            echo "[$PIN_COUNT/$TOTAL_COUNT] Pinning $CID"
-
-            # 1. Fetch content from local Kubo node
-            CONTENT_FILE="/tmp/ipfs_$CID"
-            HTTP_CODE=$(curl -s -o "$CONTENT_FILE" -w "%{http_code}" \
-              -X POST "http://localhost:5001/api/v0/cat?arg=$CID")
-
-            if [ "$HTTP_CODE" != "200" ] || [ ! -s "$CONTENT_FILE" ]; then
-              echo "   ❌ FATAL: Could not fetch $CID from local IPFS (HTTP $HTTP_CODE)"
-              exit 1
-            fi
-            FILE_SIZE=$(wc -c < "$CONTENT_FILE" | tr -d ' ')
-            echo "   Fetched from local IPFS ($FILE_SIZE bytes)"
-
-            # 2. Upload to Pinata
-            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
-              "https://api.pinata.cloud/pinning/pinFileToIPFS" \
-              -H "Authorization: Bearer $PINATA_JWT" \
-              -F "file=@$CONTENT_FILE;filename=$CID" \
-              -F "pinataMetadata={\"name\":\"$SUBGRAPH/$VERSION/$CID\"}")
-
-            PINATA_HTTP=$(echo "$RESPONSE" | tail -1)
-            PINATA_BODY=$(echo "$RESPONSE" | sed '$d')
-
-            if [ "$PINATA_HTTP" != "200" ]; then
-              echo "   ❌ FATAL: Pinata upload failed (HTTP $PINATA_HTTP)"
-              echo "   Response: $PINATA_BODY"
-              exit 1
-            fi
-
-            PINNED_CID=$(echo "$PINATA_BODY" | jq -r '.IpfsHash // empty')
-            PIN_SIZE=$(echo "$PINATA_BODY" | jq -r '.PinSize // empty')
-
-            if [ -z "$PINNED_CID" ]; then
-              echo "   ❌ FATAL: No CID in Pinata response"
-              echo "   Response: $PINATA_BODY"
-              exit 1
-            fi
-            echo "   Uploaded to Pinata (CID: $PINNED_CID, size: $PIN_SIZE)"
-
-            # 3. Verify content is retrievable from Pinata's gateway
-            VERIFY_CODE=$(curl -sL -o /dev/null -w "%{http_code}" --max-time 30 \
-              "$PINATA_GATEWAY/$PINNED_CID")
-
-            if [ "$VERIFY_CODE" = "200" ]; then
-              echo "   Verified on Pinata gateway ✅"
-            else
-              echo "   ⚠️  Gateway returned HTTP $VERIFY_CODE (may still be propagating)"
-              echo "   Content is pinned — The Graph will find it via Pinata's IPFS node"
-            fi
-
-            rm -f "$CONTENT_FILE"
-            echo ""
-          done
-
-          echo "✅ All $TOTAL_COUNT artifacts pinned and verified on Pinata"
-          echo "   Manifest CID: $MANIFEST_CID"
-          echo "ipfs_hash=$MANIFEST_CID" >> $GITHUB_OUTPUT
-
-      - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
-
-      - name: Check if deployment changed
-        id: check_deploy
-        env:
-          ARBITRUM_RPC_URL: ${{ secrets.ARBITRUM_RPC_URL_MAIN }}
-          GNS_SUBGRAPH_ID: ${{ needs.build.outputs.gns_subgraph_id }}
-        run: |
-          MANIFEST_CID="${{ steps.pinata_pin.outputs.ipfs_hash }}"
-          SUBGRAPH="${{ needs.build.outputs.subgraph_name }}"
-          USERID="${{ needs.build.outputs.graph_userid }}"
-
-          # Convert CID to bytes32 for on-chain comparison
-          DEPLOYMENT_BYTES32=$(python3 -c "
-          ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
-          def b58decode(s):
-              n = 0
-              for c in s:
-                  n = n * 58 + ALPHABET.index(c)
-              result = n.to_bytes(max(1, (n.bit_length() + 7) // 8), 'big')
-              pad = len(s) - len(s.lstrip('1'))
-              return b'\x00' * pad + result
-          raw = b58decode('$MANIFEST_CID')
-          print('0x' + raw[2:].hex())
-          ")
-
-          echo "🔍 Checking current deployment..."
-          echo "   New CID:     $MANIFEST_CID"
-          echo "   New bytes32: $DEPLOYMENT_BYTES32"
-
-          # --- Primary check: Studio API ---
-          RESPONSE=$(curl -s -X POST \
-            -H "Content-Type: application/json" \
-            -d '{"query": "{ _meta { deployment } }"}' \
-            "https://api.studio.thegraph.com/query/${USERID}/${SUBGRAPH}/version/latest" 2>/dev/null || true)
-
-          CURRENT_CID=$(echo "$RESPONSE" | jq -r '.data._meta.deployment // empty' 2>/dev/null || true)
-
-          if [ -n "$CURRENT_CID" ]; then
-            echo "   Studio CID:  $CURRENT_CID"
-            if [ "$CURRENT_CID" = "$MANIFEST_CID" ]; then
+          SKIP_DEPLOY=false
+          if [ $DEPLOY_EXIT -ne 0 ]; then
+            if echo "$DEPLOY_OUTPUT" | grep -qi "already exists"; then
               echo ""
-              echo "✅ Studio deployment matches — skipping deploy and publish"
-              echo "changed=false" >> $GITHUB_OUTPUT
-              echo "deploy_status=no_change" >> $GITHUB_OUTPUT
-              echo "## ✅ No Changes Detected" >> $GITHUB_STEP_SUMMARY
-              echo "" >> $GITHUB_STEP_SUMMARY
-              echo "Current deployment \`$CURRENT_CID\` matches new build." >> $GITHUB_STEP_SUMMARY
-              echo "No new Studio version created." >> $GITHUB_STEP_SUMMARY
-              exit 0
-            fi
-          else
-            echo "   ⚠️  Studio API did not return a deployment CID"
-            echo "   Raw response: $RESPONSE"
-          fi
-
-          # --- Fallback: query GNS contract on-chain (reliable, no rate limits) ---
-          if [ -z "$CURRENT_CID" ] && [ -n "$ARBITRUM_RPC_URL" ] && [ -n "$GNS_SUBGRAPH_ID" ]; then
-            echo ""
-            echo "   Falling back to on-chain GNS check..."
-            GNS_CONTRACT="0xec9A7fb6CbC2E41926127929c2dcE6e9c5D33Bec"
-
-            set +e
-            ONCHAIN_RESULT=$(cast call \
-              --rpc-url "$ARBITRUM_RPC_URL" \
-              "$GNS_CONTRACT" \
-              "subgraphs(uint256)(uint256,bytes32,uint256,bool,uint256)" \
-              "$GNS_SUBGRAPH_ID" 2>/dev/null)
-            CALL_EXIT=$?
-            set -e
-
-            if [ $CALL_EXIT -eq 0 ] && [ -n "$ONCHAIN_RESULT" ]; then
-              ONCHAIN_DEPLOYMENT=$(echo "$ONCHAIN_RESULT" | sed -n '2p')
-              echo "   On-chain:    $ONCHAIN_DEPLOYMENT"
-
-              if [ "$ONCHAIN_DEPLOYMENT" = "$DEPLOYMENT_BYTES32" ]; then
-                echo ""
-                echo "✅ On-chain deployment matches — skipping deploy and publish"
-                echo "changed=false" >> $GITHUB_OUTPUT
-                echo "deploy_status=no_change" >> $GITHUB_OUTPUT
-                echo "## ✅ No Changes Detected (on-chain)" >> $GITHUB_STEP_SUMMARY
-                echo "" >> $GITHUB_STEP_SUMMARY
-                echo "On-chain deployment matches new build (\`$MANIFEST_CID\`)." >> $GITHUB_STEP_SUMMARY
-                echo "No new Studio version created." >> $GITHUB_STEP_SUMMARY
-                exit 0
-              else
-                echo "   On-chain deployment differs — proceeding with deploy"
-              fi
+              echo "ℹ️  Version ${SUBGRAPH_VERSION} already exists — skipping to tag"
+              SKIP_DEPLOY=true
             else
-              echo "   ⚠️  Could not query GNS contract"
+              echo ""
+              echo "❌ Deployment failed"
+              exit 1
             fi
           fi
 
-          echo ""
-          echo "🔄 Deployment change detected"
-          echo "changed=true" >> $GITHUB_OUTPUT
-
-      - name: Authenticate with The Graph Studio
-        if: steps.check_deploy.outputs.changed == 'true'
-        working-directory: ./indexer
-        env:
-          GRAPH_DEPLOY_KEY: ${{ needs.build.outputs.environment == 'dev' && secrets.DEV_GRAPH_DPKY || needs.build.outputs.environment == 'stg' && secrets.STG_GRAPH_DPKY || secrets.LMN_GRAPH_DPKY }}
-        run: |
-          echo "🔐 Authenticating with The Graph Studio..."
-          echo "   Environment: ${{ needs.build.outputs.environment }}"
-          npx graph auth $GRAPH_DEPLOY_KEY
-          echo "✅ Authentication successful"
-
-      - name: Deploy subgraph to Studio
-        id: deploy
-        if: steps.check_deploy.outputs.changed == 'true'
-        working-directory: ./indexer
-        run: |
-          echo "🚀 Deploying subgraph to The Graph Studio..."
-          echo "   Environment: ${{ needs.build.outputs.environment }}"
-          echo "   Subgraph:    ${{ needs.build.outputs.subgraph_name }}"
-          echo "   Version:     ${{ needs.build.outputs.version }}"
-          echo "   IPFS Hash:   ${{ steps.pinata_pin.outputs.ipfs_hash }}"
-          echo "   Pinned to:   Pinata (permanent)"
-          echo ""
-
-          set +e
-          npx graph deploy ${{ needs.build.outputs.subgraph_name }} \
-            --node https://api.studio.thegraph.com/deploy/ \
-            --ipfs-hash ${{ steps.pinata_pin.outputs.ipfs_hash }} \
-            --version-label ${{ needs.build.outputs.version }} 2>&1 | tee deploy_output.txt
-          DEPLOY_EXIT_CODE=${PIPESTATUS[0]}
-          set -e
-
-          if grep -q "Version label already exists" deploy_output.txt; then
-            echo ""
-            echo "✅ Version ${{ needs.build.outputs.version }} already deployed - no update needed"
-
-            echo "## ✅ No Update Needed" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Version \`${{ needs.build.outputs.version }}\` is already deployed." >> $GITHUB_STEP_SUMMARY
-
-            echo "deploy_status=no_update" >> $GITHUB_OUTPUT
-            exit 0
+          # Brief pause for Goldsky to register the new deployment
+          if [ "$SKIP_DEPLOY" = "false" ]; then
+            sleep 5
           fi
 
-          if [ $DEPLOY_EXIT_CODE -eq 0 ]; then
-            echo ""
-            echo "✅ Subgraph deployed to The Graph Studio!"
+          # --- Roll the rolling tag ---
+          echo ""
+          echo "🏷️  Moving tag ${GOLDSKY_ROLLING_TAG} → ${GOLDSKY_SUBGRAPH_NAME}/${SUBGRAPH_VERSION}"
 
-            echo "## ✅ Deployment Successful" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
-            echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-            echo "| Environment | ${{ needs.build.outputs.environment }} |" >> $GITHUB_STEP_SUMMARY
-            echo "| Version | ${{ needs.build.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
-            echo "| Subgraph | ${{ needs.build.outputs.subgraph_name }} |" >> $GITHUB_STEP_SUMMARY
-            echo "| IPFS Hash | \`${{ steps.pinata_pin.outputs.ipfs_hash }}\` |" >> $GITHUB_STEP_SUMMARY
-            echo "| IPFS Pinned | Pinata ✅ |" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### Studio Links" >> $GITHUB_STEP_SUMMARY
-            echo "- [📊 View in Subgraph Studio](https://thegraph.com/studio/subgraph/${{ needs.build.outputs.subgraph_name }}/)" >> $GITHUB_STEP_SUMMARY
+          set +e
+          TAG_OUTPUT=$(goldsky subgraph tag create "${GOLDSKY_SUBGRAPH_NAME}/${SUBGRAPH_VERSION}" \
+            --tag "${GOLDSKY_ROLLING_TAG}" \
+            --token "${GOLDSKY_API_KEY}" 2>&1)
+          TAG_EXIT=$?
+          set -e
 
+          if [ $TAG_EXIT -ne 0 ]; then
+            echo "   Tag may exist on another version — moving it..."
+            LIST_OUTPUT=$(goldsky subgraph list --token "${GOLDSKY_API_KEY}" 2>/dev/null || true)
+            OLD_TAGGED=$(echo "$LIST_OUTPUT" \
+              | grep "${GOLDSKY_SUBGRAPH_NAME}/" \
+              | grep "${GOLDSKY_ROLLING_TAG}" \
+              | awk '{print $1}' | head -1)
+            if [ -n "$OLD_TAGGED" ]; then
+              echo "   Removing tag from ${OLD_TAGGED}..."
+              goldsky subgraph tag delete "${OLD_TAGGED}" \
+                --tag "${GOLDSKY_ROLLING_TAG}" \
+                --token "${GOLDSKY_API_KEY}" \
+                --force 2>/dev/null || true
+            fi
+            goldsky subgraph tag create "${GOLDSKY_SUBGRAPH_NAME}/${SUBGRAPH_VERSION}" \
+              --tag "${GOLDSKY_ROLLING_TAG}" \
+              --token "${GOLDSKY_API_KEY}"
+          fi
+
+          echo ""
+          echo "✅ ${GOLDSKY_SUBGRAPH_NAME}/${SUBGRAPH_VERSION} deployed and tagged as ${GOLDSKY_ROLLING_TAG}"
+
+          if [ "$SKIP_DEPLOY" = "true" ]; then
+            echo "deploy_status=already_exists" >> $GITHUB_OUTPUT
+          else
             echo "deploy_status=deployed" >> $GITHUB_OUTPUT
-            exit 0
           fi
 
-          echo "❌ Deployment failed (exit code: $DEPLOY_EXIT_CODE)"
-
-          echo "## ❌ Deployment Failed" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**IPFS Hash:** \`${{ steps.pinata_pin.outputs.ipfs_hash }}\` (pinned to Pinata)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Content is permanently pinned to Pinata. Re-run the workflow to retry deployment." >> $GITHUB_STEP_SUMMARY
-
-          exit 1
-
-      # Publish the new deployment to The Graph's decentralized network via the
-      # L2GNS contract on Arbitrum One (all environments publish here).
-      # Org secrets: {DEV,STG,LMN}_GNS_PUBLISHER_KEY, ARBITRUM_RPC_URL_MAIN
-      # Per-repo env var: GNS_SUBGRAPH_ID (numeric subgraph token ID)
-      # Gracefully skips if secrets are not configured.
-      - name: Publish to The Graph Network
-        id: publish
-        if: steps.check_deploy.outputs.changed == 'true' && steps.deploy.outputs.deploy_status == 'deployed'
-        env:
-          GNS_PUBLISHER_KEY: ${{ needs.build.outputs.environment == 'dev' && secrets.DEV_GNS_PUBLISHER_KEY || needs.build.outputs.environment == 'stg' && secrets.STG_GNS_PUBLISHER_KEY || secrets.LMN_GNS_PUBLISHER_KEY }}
-          ARBITRUM_RPC_URL: ${{ secrets.ARBITRUM_RPC_URL_MAIN }}
-          GNS_SUBGRAPH_ID: ${{ needs.build.outputs.gns_subgraph_id }}
-        run: |
-          if [ -z "$GNS_PUBLISHER_KEY" ] || [ -z "$GNS_SUBGRAPH_ID" ]; then
-            echo "⏭️  Auto-publish skipped — secrets not configured"
-            echo "   Required: {DEV,STG,LMN}_GNS_PUBLISHER_KEY (org secret)"
-            echo "   Required: GNS_SUBGRAPH_ID (environment variable per repo)"
-            echo "publish_status=skipped" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          MANIFEST_CID="${{ steps.pinata_pin.outputs.ipfs_hash }}"
-          GNS_CONTRACT="0xec9A7fb6CbC2E41926127929c2dcE6e9c5D33Bec"
-          EXPLORER="https://arbiscan.io"
-          RPC_URL="${ARBITRUM_RPC_URL}"
-
-          # CIDv0 (Qm...) = base58(0x1220 + 32-byte SHA-256 digest)
-          # The GNS contract wants just the 32-byte digest as bytes32
-          DEPLOYMENT_ID=$(python3 -c "
-          ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
-          def b58decode(s):
-              n = 0
-              for c in s:
-                  n = n * 58 + ALPHABET.index(c)
-              result = n.to_bytes(max(1, (n.bit_length() + 7) // 8), 'big')
-              pad = len(s) - len(s.lstrip('1'))
-              return b'\x00' * pad + result
-          raw = b58decode('$MANIFEST_CID')
-          print('0x' + raw[2:].hex())
-          ")
-
-          echo "📡 Publishing to The Graph Network..."
-          echo "   GNS Contract:  $GNS_CONTRACT"
-          echo "   Subgraph ID:   $GNS_SUBGRAPH_ID"
-          echo "   Deployment ID: $DEPLOYMENT_ID"
-          echo "   Manifest CID:  $MANIFEST_CID"
-          echo "   RPC:           ${RPC_URL%%/api*}..."
-          echo ""
-
-          VERSION_METADATA="0x0000000000000000000000000000000000000000000000000000000000000000"
-
-          set +e
-          RESULT=$(cast send \
-            --private-key "$GNS_PUBLISHER_KEY" \
-            --rpc-url "$RPC_URL" \
-            --json \
-            "$GNS_CONTRACT" \
-            "publishNewVersion(uint256,bytes32,bytes32)" \
-            "$GNS_SUBGRAPH_ID" \
-            "$DEPLOYMENT_ID" \
-            "$VERSION_METADATA" 2>&1)
-          SEND_EXIT=$?
-          set -e
-
-          if [ $SEND_EXIT -ne 0 ]; then
-            if echo "$RESULT" | grep -q "same subgraph deployment ID"; then
-              echo "✅ Already published to The Graph Network (same deployment ID on-chain)"
-              echo "publish_status=already_published" >> $GITHUB_OUTPUT
-              exit 0
-            fi
-            echo "❌ Publish transaction failed"
-            echo "   Error: $RESULT"
-            echo "publish_status=failed" >> $GITHUB_OUTPUT
-            exit 1
-          fi
-
-          TX_HASH=$(echo "$RESULT" | jq -r '.transactionHash')
-          TX_STATUS=$(echo "$RESULT" | jq -r '.status')
-          GAS_USED=$(echo "$RESULT" | jq -r '.gasUsed')
-
-          if [ "$TX_STATUS" != "0x1" ] && [ "$TX_STATUS" != "1" ]; then
-            echo "❌ Publish transaction reverted (status: $TX_STATUS)"
-            echo "   Tx: $EXPLORER/tx/$TX_HASH"
-            echo "publish_status=reverted" >> $GITHUB_OUTPUT
-            exit 1
-          fi
-
-          echo "✅ Published to The Graph Network!"
-          echo "   Tx Hash: $TX_HASH"
-          echo "   Gas Used: $GAS_USED"
-          echo "   Explorer: $EXPLORER/tx/$TX_HASH"
-
-          echo "publish_status=published" >> $GITHUB_OUTPUT
-          echo "tx_hash=$TX_HASH" >> $GITHUB_OUTPUT
-
-          echo "## 📡 Published to The Graph Network" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚀 Goldsky Deployment" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Transaction | [\`${TX_HASH:0:16}...\`]($EXPLORER/tx/$TX_HASH) |" >> $GITHUB_STEP_SUMMARY
-          echo "| Subgraph ID | $GNS_SUBGRAPH_ID |" >> $GITHUB_STEP_SUMMARY
-          echo "| Deployment | \`$MANIFEST_CID\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Gas Used | $GAS_USED |" >> $GITHUB_STEP_SUMMARY
+          echo "| Subgraph | \`${GOLDSKY_SUBGRAPH_NAME}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | \`${SUBGRAPH_VERSION}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tag | \`${GOLDSKY_ROLLING_TAG}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | $([ "$SKIP_DEPLOY" = "true" ] && echo "Already existed" || echo "Deployed") |" >> $GITHUB_STEP_SUMMARY
 
   verify:
     name: 🔍 Verify
@@ -667,42 +317,53 @@ jobs:
     if: needs.build.outputs.is_cicd_branch != 'true'
 
     steps:
-      - name: Verify deployment on The Graph Studio
+      - name: Verify deployment on Goldsky
+        env:
+          GOLDSKY_ENDPOINT: ${{ needs.build.outputs.goldsky_endpoint }}
         run: |
-          echo "🔍 Verifying subgraph deployment on The Graph Studio..."
-          echo "   Subgraph: ${{ needs.build.outputs.subgraph_name }}"
+          echo "🔍 Verifying subgraph on Goldsky..."
+          echo "   Subgraph: ${{ needs.build.outputs.goldsky_subgraph_name }}"
 
-          # Wait for deployment to propagate
-          sleep 15
-
-          # Query The Graph Studio API
-          RESPONSE=$(curl -s -X POST \
-            -H "Content-Type: application/json" \
-            -d '{"query": "{ _meta { block { number } deployment hasIndexingErrors } }"}' \
-            "https://api.studio.thegraph.com/query/${{ needs.build.outputs.graph_userid }}/${{ needs.build.outputs.subgraph_name }}/version/latest")
-
-          echo "Response: $RESPONSE"
-
-          # Check for errors in response
-          if echo "$RESPONSE" | jq -e '.errors' > /dev/null 2>&1; then
-            echo "⚠️ GraphQL errors in response - subgraph may still be syncing"
-            echo "   This is normal for new deployments. Check Studio for status."
-            # Don't fail - new deployments take time to sync
+          if [ -z "${GOLDSKY_ENDPOINT}" ]; then
+            echo "⚠️ No Goldsky endpoint URL configured — skipping verification"
+            echo "   Set DEV_GS_DERIVATIVES / STG_GS_DERIVATIVES / LMN_GS_DERIVATIVES org variable"
             exit 0
           fi
 
-          HAS_ERRORS=$(echo $RESPONSE | jq -r '.data._meta.hasIndexingErrors // false')
-          BLOCK_NUMBER=$(echo $RESPONSE | jq -r '.data._meta.block.number // "unknown"')
+          echo "   Endpoint: ${GOLDSKY_ENDPOINT}"
 
-          echo "   Block number: $BLOCK_NUMBER"
-          echo "   Has indexing errors: $HAS_ERRORS"
+          for i in 1 2 3 4 5 6; do
+            sleep 10
+            echo ""
+            echo "   Attempt $i/6..."
 
-          if [ "$HAS_ERRORS" == "true" ]; then
-            echo "⚠️ Subgraph has indexing errors - check Studio for details"
-            exit 1
-          fi
+            RESPONSE=$(curl -s -X POST \
+              -H "Content-Type: application/json" \
+              -d '{"query": "{ _meta { block { number } deployment hasIndexingErrors } }"}' \
+              "${GOLDSKY_ENDPOINT}")
 
-          echo "✅ Subgraph deployed and indexing on The Graph Studio"
+            if echo "$RESPONSE" | jq -e '.errors' > /dev/null 2>&1; then
+              echo "   Subgraph not ready yet..."
+              continue
+            fi
+
+            HAS_ERRORS=$(echo "$RESPONSE" | jq -r '.data._meta.hasIndexingErrors // false')
+            BLOCK_NUMBER=$(echo "$RESPONSE" | jq -r '.data._meta.block.number // "unknown"')
+
+            echo "   Block: $BLOCK_NUMBER"
+            echo "   Indexing errors: $HAS_ERRORS"
+
+            if [ "$HAS_ERRORS" == "true" ]; then
+              echo "⚠️ Subgraph has indexing errors — check Goldsky dashboard"
+              exit 1
+            fi
+
+            echo "✅ Subgraph deployed and indexing on Goldsky"
+            exit 0
+          done
+
+          echo "⚠️ Subgraph did not become ready within 60s — may still be syncing"
+          exit 0
 
   cleanup:
     name: 🧹 Cleanup
@@ -726,44 +387,30 @@ jobs:
         if: needs.verify.result == 'success'
         run: |
           TAG_NAME="${{ needs.setup.outputs.tag }}"
-          echo "🏷️ Creating tag after successful deployment: $TAG_NAME"
+          echo "🏷️ Creating tag: $TAG_NAME"
 
-          # Check if tag already exists
           if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
-            echo "⚠️ Tag $TAG_NAME already exists, skipping tag creation"
+            echo "⚠️ Tag $TAG_NAME already exists, skipping"
           else
             git tag -a "$TAG_NAME" -m "Release ${{ needs.setup.outputs.version }} - Deployed to ${{ needs.setup.outputs.environment }}"
             git push origin "$TAG_NAME"
-            echo "✅ Tag $TAG_NAME created and pushed"
+            echo "✅ Tag $TAG_NAME pushed"
           fi
 
-      - name: Deployment summary
-        if: needs.verify.result == 'success'
+      - name: Summary
         run: |
-          echo "## 🎉 Deployment Complete" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Service:** Derivatives Marketplace Subgraph" >> $GITHUB_STEP_SUMMARY
-          echo "**Environment:** ${{ needs.setup.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** ${{ needs.setup.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Subgraph:** ${{ needs.build.outputs.subgraph_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Target:** The Graph Studio" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Endpoints:**" >> $GITHUB_STEP_SUMMARY
-          echo "- Studio: \`https://thegraph.com/studio/subgraph/${{ needs.build.outputs.subgraph_name }}/\`" >> $GITHUB_STEP_SUMMARY
-          echo "- Query: \`https://api.studio.thegraph.com/query/${{ needs.build.outputs.graph_userid }}/${{ needs.build.outputs.subgraph_name }}/version/latest\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Subgraph deployed and indexing on The Graph Studio" >> $GITHUB_STEP_SUMMARY
-
-      - name: Failure summary
-        if: needs.verify.result == 'failure'
-        run: |
-          echo "## ❌ Deployment Failed" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Service:** Subgraph (Derivatives Marketplace)" >> $GITHUB_STEP_SUMMARY
-          echo "**Environment:** ${{ needs.setup.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** ${{ needs.setup.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "⚠️ Deployment or verification failed. Check logs above for details." >> $GITHUB_STEP_SUMMARY
+          if [ "${{ needs.verify.result }}" == "success" ]; then
+            echo "## 🎉 Deployment Complete" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Service:** Derivatives Marketplace Subgraph" >> $GITHUB_STEP_SUMMARY
+            echo "**Environment:** ${{ needs.setup.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+            echo "**Version:** ${{ needs.setup.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+            echo "**Target:** Goldsky" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ❌ Deployment Failed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Check logs above for details." >> $GITHUB_STEP_SUMMARY
+          fi
 
   notify:
     name: 📢 Notify
@@ -801,4 +448,4 @@ jobs:
           version: ${{ needs.setup.outputs.version }}
           slack_webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          additional_info: "${{ needs.setup.outputs.is_cicd_branch == 'true' && '*Mode:* CI/CD Test (no build/deploy)' || (needs.deploy.outputs.deploy_status == 'no_change' && format('*Status:* No changes (IPFS hash unchanged) • <https://api.studio.thegraph.com/query/{1}/{0}/version/latest|Query Playground>', needs.build.outputs.subgraph_name, needs.build.outputs.graph_userid) || (needs.deploy.outputs.deploy_status == 'no_update' && format('*Status:* Already deployed (no changes) • <https://api.studio.thegraph.com/query/{1}/{0}/version/latest|Query Playground>', needs.build.outputs.subgraph_name, needs.build.outputs.graph_userid) || format('*Subgraph:* `{0}` • *Published:* {2} • <https://api.studio.thegraph.com/query/{1}/{0}/version/latest|Query Playground>', needs.build.outputs.subgraph_name, needs.build.outputs.graph_userid, needs.deploy.outputs.publish_status))) }}"
+          additional_info: "${{ needs.setup.outputs.is_cicd_branch == 'true' && '*Mode:* CI/CD Test (no build/deploy)' || format('*Subgraph:* `{0}/{1}` → `{2}` • *Status:* {3}', needs.build.outputs.goldsky_subgraph_name, needs.build.outputs.version, needs.build.outputs.goldsky_rolling_tag, needs.deploy.outputs.deploy_status) }}"
