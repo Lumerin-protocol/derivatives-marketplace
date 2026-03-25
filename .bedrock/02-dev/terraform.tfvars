@@ -17,7 +17,7 @@ perpskeeper_service = {
   cnt_name                  = "perps-keeper"
   task_cpu                  = 256
   task_ram                  = 512
-  network                   = "arbitrum-sepolia"
+  network                   = "base-sepolia"
   keeper_log_level          = "info"
 }
 
@@ -32,7 +32,7 @@ marketmaker_service = {
   cnt_name                 = "perps-mktmkr"
   task_cpu                 = 256
   task_ram                 = 512
-  network                  = "arbitrum-sepolia"
+  network                  = "base-sepolia"
   maker_log_level          = "info"
 }
 
@@ -41,11 +41,19 @@ marketmaker_service = {
 ########################################
 # Note: ethereum_rpc_url is defined in secret.auto.tfvars (contains API key)
 # Contract addresses for the environment
-# DEV uses Arbitrum Sepolia testnet, STG/LMN use Arbitrum mainnet
-clone_factory_address   = "0x998135c509b64083cd27ed976c1bcda35ab7a40b"
-hashrate_oracle_address = "0x6f736186d2c93913721e2570c283dff2a08575e9"
-perps_address           = "0x6b87e9c19e2c8a79e068358afa8b62b087548817"
+# DEV uses Base Sepolia testnet, STG/LMN use Arbitrum mainnet
+clone_factory_address   = "0x998135c509b64083cd27ed976c1bcda35ab7a40b"  # not consumed by any TF resource; placeholder
+hashrate_oracle_address = "0xf97a1bbfb5e061ef73dad8ebf25939d93639fb7f"
+perps_address           = "0x0d412BC34a48e434144687Aac03b9C593F5237B6"
 multicall_address       = "0xcA11bde05977b3631167028862bE2a173976CA11"
+
+########################################
+# Goldsky Subgraph Endpoints (public)
+########################################
+gs_subgraphs = {
+  derivatives = "https://api.goldsky.com/api/public/project_cmmz59uoa7b5201wthnkxbuqy/subgraphs/lumerin-derivatives/dev-latest/gn"
+  oracles     = "https://api.goldsky.com/api/public/project_cmmz59uoa7b5201wthnkxbuqy/subgraphs/lumerin-oracles/dev-latest/gn"
+}
 
 ########################################
 # Monitoring Configuration

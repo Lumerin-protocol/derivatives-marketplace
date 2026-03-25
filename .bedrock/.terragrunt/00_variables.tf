@@ -48,28 +48,36 @@ variable "ethereum_rpc_url" {
 }
 
 ################################################################################
-# THE GRAPH NETWORK CONFIGURATION
-# API key and subgraph IDs for querying published subgraphs
+# GOLDSKY SUBGRAPH CONFIGURATION
+# Public Goldsky endpoints for querying deployed subgraphs
+################################################################################
+
+variable "gs_subgraphs" {
+  description = "Goldsky public GraphQL endpoints keyed by subgraph name"
+  type        = map(string)
+  default     = {}
+}
+
+################################################################################
+# LEGACY — The Graph Network (no longer used; kept for state compatibility)
 ################################################################################
 
 variable "graph_api_key" {
-  description = "The Graph API Key for accessing published subgraphs"
+  description = "(legacy) The Graph API Key — replaced by Goldsky public endpoints"
   type        = string
   sensitive   = true
   default     = ""
 }
 
 variable "derivatives_subgraph_id" {
-  description = "The Graph Subgraph ID for Derivatives (from published subgraph)"
+  description = "(legacy) The Graph Subgraph ID for Derivatives — replaced by gs_subgraphs"
   type        = string
-  sensitive   = true
   default     = ""
 }
 
 variable "oracles_subgraph_id" {
-  description = "The Graph Subgraph ID for Oracles (from published subgraph)"
+  description = "(legacy) The Graph Subgraph ID for Oracles — replaced by gs_subgraphs"
   type        = string
-  sensitive   = true
   default     = ""
 }
 

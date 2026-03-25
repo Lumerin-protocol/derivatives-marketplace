@@ -3,7 +3,7 @@
 ################################################################################
 # AWS Secrets Manager resources for sensitive variables
 
-# IAM policy to allow ECS task execution role to read the graph indexer secrets
+# IAM policy to allow ECS task execution role to read service secrets
 resource "aws_iam_policy" "derivatives_marketplace_secret_access" {
   count       = (var.create_core) ? 1 : 0
   provider    = aws.use1
@@ -65,10 +65,10 @@ resource "aws_secretsmanager_secret_version" "perps_keeper" {
   # lifecycle {ignore_changes = [secret_string]}
   secret_id = aws_secretsmanager_secret.perps_keeper.id
   secret_string = jsonencode({
-    keeper_private_key          = var.perpskeeper_private_key
-    eth_node_address         = var.ethereum_rpc_url
-    futures_subgraph_url = "https://gateway.thegraph.com/api/${var.graph_api_key}/subgraphs/id/${var.derivatives_subgraph_id}"
-    oracles_subgraph_url = "https://gateway.thegraph.com/api/${var.graph_api_key}/subgraphs/id/${var.oracles_subgraph_id}"
+    keeper_private_key   = var.perpskeeper_private_key
+    eth_node_address     = var.ethereum_rpc_url
+    derivatives_subgraph_url = lookup(var.gs_subgraphs, "derivatives", "")
+    oracles_subgraph_url     = lookup(var.gs_subgraphs, "oracles", "")
   })
 }
 
