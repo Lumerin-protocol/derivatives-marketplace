@@ -1,3 +1,15 @@
+################################################################################
+# VERSIONS
+################################################################################
+terraform {
+  required_version = ">= 1.2.7"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.37.0" # Latest version as of 2026-01-15
+    }
+  }
+}
 
 ################################################################################
 # Profiles - Interpolation is not supported for the 'version' input

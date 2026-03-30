@@ -62,19 +62,18 @@ data "aws_subnet" "middle_use1_1a" {
   }
 }
 
-# Find the xxx.Lumerin.io Certificate created in foundation-extra
+# Regional ALB: ACM for the env public zone (hashpower.exchange or dev/stg.hashpower.exchange)
 data "aws_acm_certificate" "lumerin_marketplace_ext" {
   provider    = aws.use1
-  # domain      = var.account_lifecycle == "prd" ? data.aws_route53_zone.public_lumerin_root.name : data.aws_route53_zone.public_lumerin.name
-  domain      = data.aws_route53_zone.public_lumerin.name
+  domain      = local.hp_dns["exc"].name
   types       = ["AMAZON_ISSUED"]
   most_recent = true
 }
 
-# Find the xxx.Lumerin.io Certificate created in foundation-extra
+# CloudFront / website (if used): same zone as hp_acm["exc"]
 data "aws_acm_certificate" "lumerin_marketplace_website" {
   provider    = aws.use1
-  domain      = var.account_lifecycle == "prd" ? data.aws_route53_zone.public_lumerin_root.name : data.aws_route53_zone.public_lumerin.name
+  domain      = local.hp_dns["exc"].name
   types       = ["AMAZON_ISSUED"]
   most_recent = true
 }
