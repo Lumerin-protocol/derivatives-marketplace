@@ -95,20 +95,36 @@ Move matching off-chain entirely. Only settlement goes on-chain.
 - Not applicable if you want to deploy on an existing EVM chain
 - Massive infrastructure overhead
 
+### Option E: LOBSTER (Clober style — segmented segment tree + octopus heap)
+
+Use **manual claiming** and **claim ranges** so the taker does not iterate every maker in one transaction. Per-price FIFO depth uses a **segmented segment tree** (packed leaves, shallow levels, few `sstore`s per update). Across prices, **compress price to a small index (CPI)** and use an **octopus heap** plus **leaf bitmap** to find the next active level without scanning every tick in a gap.
+
+**Pros:**
+- Bounded work for queue sums/updates (segment tree path)
+- Skips empty price gaps (heap + bitmap) instead of per-tick scans
+- Fully on-chain matching with gas costs tuned for EVM (Clober production path)
+
+**Cons:**
+- Very high implementation complexity (custom layouts, not a standard library)
+- Manual claiming changes settlement UX (makers claim separately)
+- Requires careful parameterization (queue capacity, CPI, quote unit)
+
+**Good fit when:** you want Clober-class on-chain order book engineering on a general EVM chain and can commit to the claiming model and audit surface.
+
 ---
 
 ## Comparison Matrix
 
-| Aspect | Current (Linked List) | Tick Bitmap | Hashmap+Calldata | Radix Tree | Custom L1 |
-|---|---|---|---|---|---|
-| Limit order gas | O(P) | O(1) | O(1) | O(log N) | N/A |
-| Cancel gas | O(1) | O(1) | O(1) | O(log N) | N/A |
-| Matching gas | O(P×Q) unbounded | O(W×Q) | Caller-controlled | O(log N) capped | Unlimited |
-| Price level insert | O(P) linear scan | O(1) bitmap flip | O(1) hashmap write | O(log N) | N/A |
-| Max price levels | Unbounded (DoS risk) | 2^24 (bitmap) | Unbounded (no DoS) | 2^64 | Unlimited |
-| Off-chain deps | None | None | Keeper/UI for sorting | None | Full infra |
-| Implementation complexity | Low | Medium | Medium-High | High | Very High |
-| Audited/battle-tested | No | Yes (Uni V3) | Research-stage | Production (Hanji) | Production |
+| Aspect | Current (Linked List) | Tick Bitmap | Hashmap+Calldata | Radix Tree | LOBSTER (Clober) | Custom L1 |
+|---|---|---|---|---|---|---|
+| Limit order gas | O(P) | O(1) | O(1) | O(log N) | O(log N) path, low sstore count (designed) | N/A |
+| Cancel gas | O(1) | O(1) | O(1) | O(log N) | O(log N) | N/A |
+| Matching gas | O(P×Q) unbounded | O(W×Q) | Caller-controlled | O(log N) capped | Taker not O(makers); claims separate | Unlimited |
+| Price level insert | O(P) linear scan | O(1) bitmap flip | O(1) hashmap write | O(log N) | Heap + bitmap (often cheap) | N/A |
+| Max price levels | Unbounded (DoS risk) | 2^24 (bitmap) | Unbounded (no DoS) | 2^64 | CPI + heap (bounded index) | Unlimited |
+| Off-chain deps | None | None | Keeper/UI for sorting | None | None (claim txs optional infra) | Full infra |
+| Implementation complexity | Low | Medium | Medium-High | High | Very High | Very High |
+| Audited/battle-tested | No | Yes (Uni V3) | Research-stage | Production (Hanji) | Production (Clober) | Production |
 
 ---
 
@@ -131,3 +147,5 @@ For an EVM-deployed perps contract, **Option A (tick bitmap) + quick fixes** is 
 - Well-understood pattern with audited reference code (Uniswap V3 TickBitmap.sol)
 
 If deeper changes are acceptable, **Option B (hashmap + calldata)** gives the best gas profile but requires off-chain infrastructure for price sorting and adds complexity.
+
+For **maximum** fully on-chain density without a dedicated chain, **Option E (LOBSTER)** matches production Clober-style engineering (segmented segment trees, octopus heap, manual claiming) at the cost of the highest implementation and audit burden — see `SCALING_OPTION_E_LOBSTER.md`.
