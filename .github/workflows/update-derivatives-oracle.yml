@@ -99,10 +99,10 @@ jobs:
         run: |
           ENV="${{ needs.setup.outputs.environment }}"
 
-          # Goldsky subgraph name — override via vars.GOLDSKY_SUBGRAPH_NAME if needed
+          # Goldsky subgraph name — override via vars.GOLDSKY_SUBGRAPH_NAME (default: hpow-derivatives)
           GS_NAME="${{ vars.GOLDSKY_SUBGRAPH_NAME }}"
           if [ -z "$GS_NAME" ]; then
-            GS_NAME="lumerin-derivatives"
+            GS_NAME="hpow-derivatives"
           fi
           echo "goldsky_subgraph_name=$GS_NAME" >> $GITHUB_OUTPUT
 

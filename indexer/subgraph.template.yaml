@@ -74,3 +74,6 @@ dataSources:
         - event: Initialized(uint64)
           handler: handleInitialized
       file: ./src/perps.ts
+# Required when deploying with `goldsky subgraph deploy ... --graft-from <name>/<version>`
+features:
+  - grafting

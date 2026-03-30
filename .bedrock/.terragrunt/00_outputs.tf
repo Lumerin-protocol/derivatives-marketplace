@@ -16,11 +16,11 @@ output "github_actions_role_name" {
 ################################################################################
 output "perps_keeper_endpoint" {
   description = "Perps Keeper health endpoint (internal ALB via VPN)"
-  value       = var.perpskeeper_service.create ? "https://keeper.${data.aws_route53_zone.public_lumerin.name}/health" : null
+  value       = var.perpskeeper_service.create ? "https://keeper.${local.hp_dns["exc"].name}/health" : null
 }
 
 output "perps_mktmkr_endpoint" {
   description = "Perps MktMkr health endpoint (internal ALB via VPN)"
-  value       = var.marketmaker_service.create ? "https://perpsmm.${data.aws_route53_zone.public_lumerin.name}/health" : null
+  value       = var.marketmaker_service.create ? "https://perpsmm.${local.hp_dns["exc"].name}/health" : null
 }
 

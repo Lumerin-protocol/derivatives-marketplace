@@ -163,7 +163,7 @@ resource "aws_alb_listener" "marketmaker_int_443_use1" {
   port              = "443"
   protocol          = "HTTPS"
   ssl_policy        = "ELBSecurityPolicy-FS-1-2-Res-2020-10"
-  certificate_arn   = data.aws_acm_certificate.lumerin_marketplace_ext.arn
+  certificate_arn   = local.hp_acm["exc"].arn
 
   default_action {
     type             = "forward"
@@ -184,8 +184,8 @@ resource "aws_alb_listener" "marketmaker_int_443_use1" {
 resource "aws_route53_record" "marketmaker_int_use1" {
   count    = var.marketmaker_service.create ? 1 : 0
   provider = aws.use1
-  zone_id  = data.aws_route53_zone.public_lumerin.zone_id
-  name     = "perpsmm.${data.aws_route53_zone.public_lumerin.name}"
+  zone_id  = local.hp_dns["exc"].zone_id
+  name     = "perpsmm.${local.hp_dns["exc"].name}"
   type     = "A"
 
   alias {
@@ -334,16 +334,16 @@ resource "aws_ecs_task_definition" "marketmaker_use1" {
 ################################
 
 # The Perps MktMkr service is accessible via internal ALB:
-#   DEV: https://perpsmm.dev.lumerin.io/health
-#   STG: https://perpsmm.stg.lumerin.io/health
-#   LMN: https://perpsmm.lmn.lumerin.io/health
+#   DEV: https://perpsmm.dev.hashpower.exchange/health
+#   STG: https://perpsmm.stg.hashpower.exchange/health
+#   LMN: https://perpsmm.hashpower.exchange/health
 #
 # Access is restricted by ALB security group to:
 #   - VPC CIDR: data.aws_vpc.use1_1.cidr_block
 #   - VPN CIDR: 172.18.0.0/19
 #
 # Architecture:
-#   perpsmm.{env}.lumerin.io (Route53 A record)
+#   perpsmm.{env}.hashpower.exchange (Route53 A record)
 #     -> Internal ALB (HTTPS:443)
 #       -> Target Group (health check: /health)
 #         -> ECS Task (HTTP:3001)

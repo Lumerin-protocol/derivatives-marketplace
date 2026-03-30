@@ -51,8 +51,8 @@ multicall_address       = "0xcA11bde05977b3631167028862bE2a173976CA11"
 # Goldsky Subgraph Endpoints (public)
 ########################################
 gs_subgraphs = {
-  derivatives = "https://api.goldsky.com/api/public/project_cmmz59uoa7b5201wthnkxbuqy/subgraphs/lumerin-derivatives/dev-latest/gn"
-  oracles     = "https://api.goldsky.com/api/public/project_cmmz59uoa7b5201wthnkxbuqy/subgraphs/lumerin-oracles/dev-latest/gn"
+  derivatives = "https://api.goldsky.com/api/public/project_cmmz59uoa7b5201wthnkxbuqy/subgraphs/hpow-derivatives/dev-latest/gn"
+  oracles     = "https://api.goldsky.com/api/public/project_cmmz59uoa7b5201wthnkxbuqy/subgraphs/hpow-oracles/dev-latest/gn"
 }
 
 ########################################

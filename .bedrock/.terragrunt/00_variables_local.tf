@@ -35,7 +35,6 @@ locals {
   ################################
   # DOMAIN CONSTRUCTION (from Route53 data lookups)
   ################################
-  # Get the appropriate domain zone name based on environment
-  # prd uses "lumerin.io", dev/stg use "dev.lumerin.io" or "stg.lumerin.io"
-  domain_zone_name = var.account_lifecycle == "prd" ? data.aws_route53_zone.public_lumerin_root.name : data.aws_route53_zone.public_lumerin.name
+  # Public zone for this env: hashpower.exchange (lmn) or dev/stg.hashpower.exchange
+  domain_zone_name = local.hp_dns["exc"].name
 }

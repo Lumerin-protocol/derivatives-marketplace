@@ -163,7 +163,7 @@ resource "aws_alb_listener" "perpskeeper_int_443_use1" {
   port              = "443"
   protocol          = "HTTPS"
   ssl_policy        = "ELBSecurityPolicy-FS-1-2-Res-2020-10"
-  certificate_arn   = data.aws_acm_certificate.lumerin_marketplace_ext.arn
+  certificate_arn   = local.hp_acm["exc"].arn
 
   default_action {
     type             = "forward"
@@ -184,8 +184,8 @@ resource "aws_alb_listener" "perpskeeper_int_443_use1" {
 resource "aws_route53_record" "perpskeeper_int_use1" {
   count    = var.perpskeeper_service.create ? 1 : 0
   provider = aws.use1
-  zone_id  = data.aws_route53_zone.public_lumerin.zone_id
-  name     = "keeper.${data.aws_route53_zone.public_lumerin.name}"
+  zone_id  = local.hp_dns["exc"].zone_id
+  name     = "keeper.${local.hp_dns["exc"].name}"
   type     = "A"
 
   alias {
@@ -334,16 +334,16 @@ resource "aws_ecs_task_definition" "perpskeeper_use1" {
 ################################
 
 # The PerpsKeeper service is accessible via internal ALB:
-#   DEV: https://keeper.dev.lumerin.io/health
-#   STG: https://keeper.stg.lumerin.io/health
-#   LMN: https://keeper.lmn.lumerin.io/health
+#   DEV: https://keeper.dev.hashpower.exchange/health
+#   STG: https://keeper.stg.hashpower.exchange/health
+#   LMN: https://keeper.hashpower.exchange/health
 #
 # Access is restricted by ALB security group to:
 #   - VPC CIDR: data.aws_vpc.use1_1.cidr_block
 #   - VPN CIDR: 172.18.0.0/19
 #
 # Architecture:
-#   keeper.{env}.lumerin.io (Route53 A record)
+#   keeper.{env}.hashpower.exchange (Route53 A record)
 #     -> Internal ALB (HTTPS:443)
 #       -> Target Group (health check: /health)
 #         -> ECS Task (HTTP:3000)
