@@ -11,6 +11,7 @@ import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableS
 
 import { AggregatorV3Interface } from "./AggregatorV3Interface.sol";
 import { OptionMarketRegistry } from "./OptionMarketRegistry.sol";
+import { IHashPowerPerpsDEX } from "./IHashPowerPerpsDEX.sol";
 import { Black76Lib } from "./libs/Black76Lib.sol";
 import { FixedPointMathLib } from "./libs/FixedPointMathLib.sol";
 
@@ -77,6 +78,7 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     event InsuranceFundDeposited(address indexed depositor, uint256 wadAmount, uint256 totalFund);
     event BadDebtRecorded(uint256 badDebt, uint256 coveredByInsurance);
     event PositionSettled(uint64 indexed seriesId, address indexed user, int256 pnlWad);
+    event PerpsDexUpdated(address indexed perpsDex);
 
     // ── Storage ─────────────────────────────────────────────────────────────
 
@@ -110,7 +112,10 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     uint16 public liquidationFeeBps; // packed with settlement (e.g., 500 = 5%)
     uint256 private _insuranceFund; // WAD
 
-    uint256[33] private __gap;
+    // Phase 6: Level 1 perps integration (read-only awareness)
+    IHashPowerPerpsDEX public perpsDex; // optional, address(0) if not linked
+
+    uint256[32] private __gap;
 
     // ── Modifiers ───────────────────────────────────────────────────────────
 
@@ -192,6 +197,12 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     function setLiquidationFeeBps(uint16 _feeBps) external onlyOwner {
         liquidationFeeBps = _feeBps;
         emit LiquidationConfigUpdated(_feeBps);
+    }
+
+    /// @notice Link to the perps DEX for Level 1 shared collateral awareness.
+    function setPerpsDex(address _perpsDex) external onlyOwner {
+        perpsDex = IHashPowerPerpsDEX(_perpsDex);
+        emit PerpsDexUpdated(_perpsDex);
     }
 
     /// @notice Deposit collateral into the insurance fund (anyone can contribute).
@@ -428,6 +439,57 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
 
     function getInsuranceFund() external view returns (uint256) {
         return _insuranceFund;
+    }
+
+    // ── Level 1 perps awareness (read-only) ─────────────────────────────
+
+    struct PortfolioOverview {
+        // Options
+        uint256 optionsCollateral;    // WAD
+        uint256 optionsIM;            // WAD
+        uint256 optionsMM;            // WAD
+        uint256 optionsReserved;      // WAD
+        uint256 activeSeriesCount;
+        // Perps (zero when perpsDex not linked)
+        uint256 perpCollateral;       // perp token decimals
+        int256 perpNetQuantity;       // QUANTITY_DECIMALS (6)
+        int256 perpUnrealizedPnl;     // perp token decimals
+        uint256 perpIM;               // perp token decimals
+        uint256 perpMM;               // perp token decimals
+        bool perpIsLiquidatable;
+    }
+
+    /// @notice Combined read of a user's options + perps positions and risk metrics.
+    ///         Returns zeros for perp fields if perpsDex is not linked.
+    function getPortfolioOverview(address user) external view returns (PortfolioOverview memory p) {
+        p.optionsCollateral = _collateral[user];
+        p.optionsIM = computeAccountIM(user);
+        p.optionsMM = computeAccountMM(user);
+        p.optionsReserved = _reservedMargin[user];
+        p.activeSeriesCount = _userActiveSeries[user].length();
+
+        if (address(perpsDex) != address(0)) {
+            p.perpCollateral = perpsDex.balanceOf(user);
+            IHashPowerPerpsDEX.Position memory pos = perpsDex.getUserPosition(user);
+            p.perpNetQuantity = pos.netQuantity;
+            p.perpUnrealizedPnl = perpsDex.getUnrealizedPnl(user);
+            p.perpIM = perpsDex.getInitialMargin(user);
+            p.perpMM = perpsDex.getMaintenanceMargin(user);
+            p.perpIsLiquidatable = perpsDex.isLiquidatable(user);
+        }
+    }
+
+    /// @notice Read a user's perp position (convenience wrapper).
+    function getPerpPosition(address user) external view returns (int256 netQuantity, uint256 avgEntryPrice) {
+        if (address(perpsDex) == address(0)) return (0, 0);
+        IHashPowerPerpsDEX.Position memory pos = perpsDex.getUserPosition(user);
+        return (pos.netQuantity, pos.aggregatedEntryPrice);
+    }
+
+    /// @notice Read a user's perp collateral balance.
+    function getPerpCollateral(address user) external view returns (uint256) {
+        if (address(perpsDex) == address(0)) return 0;
+        return perpsDex.balanceOf(user);
     }
 
     // ── Internal: position management ─────────────────────────────────────
