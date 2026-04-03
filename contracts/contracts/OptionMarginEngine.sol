@@ -226,6 +226,13 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
         emit MarginReleased(user, amount, _reservedMargin[user]);
     }
 
+    /// @notice Transfer premium between accounts (buyer pays seller).
+    function transferPremium(address from, address to, uint256 wadAmount) external onlyRouter {
+        if (_collateral[from] < wadAmount) revert InsufficientCollateral();
+        _collateral[from] -= wadAmount;
+        _collateral[to] += wadAmount;
+    }
+
     // ── IV management ───────────────────────────────────────────────────────
 
     /// @notice Initialize IV for a series (called once, typically at first trade).

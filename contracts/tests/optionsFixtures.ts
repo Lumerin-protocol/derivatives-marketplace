@@ -138,3 +138,41 @@ export async function deployMarginEngineFixture(conn: NetworkConnection) {
 
   return { ...data, engine, usdc, oracle, traders: { trader1, trader2 } };
 }
+
+// ── MatchingRouter fixtures ───────────────────────────────────────────────
+
+export async function deployMatchingRouterFixture(conn: NetworkConnection) {
+  const data = await deployMarginEngineFixture(conn);
+  const { registry, book, engine, accounts, traders, usdc } = data;
+  const { owner } = accounts;
+  const { viem } = conn;
+
+  const routerImpl = await viem.deployContract(
+    "contracts/OptionMatchingRouter.sol:OptionMatchingRouter",
+    [],
+  );
+  const routerProxy = await viem.deployContract("ERC1967Proxy", [
+    routerImpl.address as `0x${string}`,
+    encodeFunctionData({
+      abi: routerImpl.abi,
+      functionName: "initialize",
+      args: [registry.address, book.address, engine.address],
+    }),
+  ]);
+  const router = await viem.getContractAt("OptionMatchingRouter", routerProxy.address);
+
+  // Set router as the authorized caller on book and engine
+  await book.write.setRouter([router.address], { account: owner.account });
+  await engine.write.setRouter([router.address], { account: owner.account });
+
+  // Fund traders with collateral via engine.deposit
+  const depositAmount = 50_000_000_000n; // 50k USDC
+  for (const w of [traders.trader1, traders.trader2]) {
+    const eng = await viem.getContractAt("OptionMarginEngine", engine.address, {
+      client: { wallet: w },
+    });
+    await eng.write.deposit([depositAmount]);
+  }
+
+  return { ...data, router, depositAmount };
+}
