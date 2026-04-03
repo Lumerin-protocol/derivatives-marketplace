@@ -1,4 +1,4 @@
-import { encodeFunctionData } from "viem";
+import { encodeFunctionData, maxUint256 } from "viem";
 import type { NetworkConnection } from "hardhat/types/network";
 
 export async function deployRegistryFixture(conn: NetworkConnection) {
@@ -84,4 +84,57 @@ export async function deployBookWithSeriesFixture(conn: NetworkConnection) {
   const seriesId = 1n;
 
   return { ...data, seriesId };
+}
+
+// ── MarginEngine fixtures ─────────────────────────────────────────────────
+
+export const ORACLE_DECIMALS = 8;
+export const INITIAL_PRICE_E8 = 50000_00000000n; // $50,000
+
+export async function deployMarginEngineFixture(conn: NetworkConnection) {
+  const data = await deployBookWithSeriesFixture(conn);
+  const { registry, accounts } = data;
+  const { owner } = accounts;
+  const { viem } = conn;
+
+  const usdc = await viem.deployContract("contracts/USDCMock.sol:USDCMock", []);
+
+  const oracle = await viem.deployContract(
+    "contracts/PriceOracleMock.sol:PriceOracleMock",
+    [INITIAL_PRICE_E8, ORACLE_DECIMALS],
+  );
+
+  const engineImpl = await viem.deployContract(
+    "contracts/OptionMarginEngine.sol:OptionMarginEngine",
+    [],
+  );
+  const engineProxy = await viem.deployContract("ERC1967Proxy", [
+    engineImpl.address as `0x${string}`,
+    encodeFunctionData({
+      abi: engineImpl.abi,
+      functionName: "initialize",
+      args: [registry.address, usdc.address, oracle.address],
+    }),
+  ]);
+  const engine = await viem.getContractAt("OptionMarginEngine", engineProxy.address);
+
+  // Owner acts as router for Phase 3 tests
+  await engine.write.setRouter([owner.account.address], { account: owner.account });
+
+  // Get wallets for trader accounts
+  const wallets = await viem.getWalletClients();
+  const trader1 = wallets[3]!;
+  const trader2 = wallets[4]!;
+
+  // Transfer USDC and approve the engine
+  const topUp = 100_000_000_000n; // 100k USDC (6 decimals)
+  for (const w of [trader1, trader2]) {
+    await usdc.write.transfer([w.account.address, topUp], { account: owner.account });
+    const usdcAs = await viem.getContractAt("USDCMock", usdc.address, { client: { wallet: w } });
+    await usdcAs.write.approve([engine.address, maxUint256]);
+  }
+  // Also approve for owner
+  await usdc.write.approve([engine.address, maxUint256], { account: owner.account });
+
+  return { ...data, engine, usdc, oracle, traders: { trader1, trader2 } };
 }
