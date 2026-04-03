@@ -196,6 +196,32 @@ contract OptionMatchingRouter is Initializable, UUPSUpgradeable, OwnableUpgradea
         }
     }
 
+    // ── Post-settlement cleanup ────────────────────────────────────────────
+
+    /// @notice Cancel resting orders that belong to a settled series.
+    ///         Callable by anyone — once a series is settled, orders are void.
+    ///         Releases reserved IM for sell orders.
+    function cancelSettledOrders(uint64[] calldata orderIds) external {
+        for (uint256 i = 0; i < orderIds.length; i++) {
+            uint64 orderId = orderIds[i];
+            OptionOrderBook.Order memory o = book.getOrder(orderId);
+            if (o.remaining == 0) continue;
+
+            OptionMarketRegistry.OptionSeries memory s = registry.getSeries(o.seriesId);
+            if (s.status != OptionMarketRegistry.Status.Settled) continue;
+
+            book.cancelOrder(orderId);
+
+            if (!o.isBuy) {
+                uint256 reserved = _orderReservedIM[orderId];
+                if (reserved > 0) {
+                    engine.releaseMargin(o.trader, reserved);
+                    delete _orderReservedIM[orderId];
+                }
+            }
+        }
+    }
+
     // ── Views ───────────────────────────────────────────────────────────────
 
     function getOrderReservedIM(uint64 orderId) external view returns (uint256) {

@@ -48,6 +48,7 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     // ── Errors ──────────────────────────────────────────────────────────────
 
     error NotRouter();
+    error NotSettlement();
     error InsufficientCollateral();
     error WithdrawalWouldBreachMargin();
     error MaxSeriesExceeded(address user);
@@ -56,6 +57,9 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     error ZeroAmount();
     error SeriesNotInitialized(uint64 seriesId);
     error IVNotInitialized(uint64 seriesId);
+    error AccountHealthy(address account);
+    error NotShortPosition(address account, uint64 seriesId);
+    error ZeroLiquidation();
 
     // ── Events ──────────────────────────────────────────────────────────────
 
@@ -67,6 +71,12 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     event MarginReleased(address indexed user, uint256 amount, uint256 totalReserved);
     event MarginConfigUpdated(uint16 imSpotBps, uint16 mmSpotBps, uint128 imVolShock, uint128 mmVolShock);
     event RouterUpdated(address indexed newRouter);
+    event SettlementContractUpdated(address indexed settlement);
+    event LiquidationConfigUpdated(uint16 feeBps);
+    event Liquidated(address indexed account, address indexed liquidator, uint256 fee, uint64 indexed seriesId, uint128 amount);
+    event InsuranceFundDeposited(address indexed depositor, uint256 wadAmount, uint256 totalFund);
+    event BadDebtRecorded(uint256 badDebt, uint256 coveredByInsurance);
+    event PositionSettled(uint64 indexed seriesId, address indexed user, int256 pnlWad);
 
     // ── Storage ─────────────────────────────────────────────────────────────
 
@@ -95,12 +105,22 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     /// @dev EWMA-smoothed IV per series
     mapping(uint64 => IVState) private _ivStates;
 
-    uint256[35] private __gap;
+    // Phase 5: settlement + liquidation
+    address public settlement;
+    uint16 public liquidationFeeBps; // packed with settlement (e.g., 500 = 5%)
+    uint256 private _insuranceFund; // WAD
+
+    uint256[33] private __gap;
 
     // ── Modifiers ───────────────────────────────────────────────────────────
 
     modifier onlyRouter() {
         if (_msgSender() != router) revert NotRouter();
+        _;
+    }
+
+    modifier onlySettlement() {
+        if (_msgSender() != settlement) revert NotSettlement();
         _;
     }
 
@@ -164,6 +184,25 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
         maxSeriesPerUser = _max;
     }
 
+    function setSettlement(address _settlement) external onlyOwner {
+        settlement = _settlement;
+        emit SettlementContractUpdated(_settlement);
+    }
+
+    function setLiquidationFeeBps(uint16 _feeBps) external onlyOwner {
+        liquidationFeeBps = _feeBps;
+        emit LiquidationConfigUpdated(_feeBps);
+    }
+
+    /// @notice Deposit collateral into the insurance fund (anyone can contribute).
+    function depositToInsuranceFund(uint256 amount) external {
+        if (amount == 0) revert ZeroAmount();
+        collateralToken.safeTransferFrom(_msgSender(), address(this), amount);
+        uint256 wadAmount = _toWad(amount);
+        _insuranceFund += wadAmount;
+        emit InsuranceFundDeposited(_msgSender(), wadAmount, _insuranceFund);
+    }
+
     // ── Collateral ──────────────────────────────────────────────────────────
 
     /// @notice Deposit collateral. Caller must have approved this contract.
@@ -194,21 +233,68 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
 
     /// @notice Update a user's position after a fill.
     function updatePosition(address user, uint64 seriesId, int128 deltaQty) external onlyRouter {
-        OptionPosition storage pos = _positions[user][seriesId];
-        int128 oldQty = pos.netQuantity;
-        int128 newQty = oldQty + deltaQty;
-        pos.netQuantity = newQty;
+        _updatePosition(user, seriesId, deltaQty);
+    }
 
-        if (oldQty == 0 && newQty != 0) {
-            if (_userActiveSeries[user].length() >= maxSeriesPerUser) {
-                revert MaxSeriesExceeded(user);
+    // ── Settlement (called by OptionSettlement) ─────────────────────────────
+
+    /// @notice Settle a user's position: apply PnL, zero out position, remove from active series.
+    ///         For longs (pnlWad > 0): credit payoff to collateral.
+    ///         For shorts (pnlWad < 0): debit payoff; insurance fund covers bad debt.
+    function settlePosition(address user, uint64 seriesId, int256 pnlWad) external onlySettlement {
+        if (_positions[user][seriesId].netQuantity == 0) return;
+
+        if (pnlWad > 0) {
+            _collateral[user] += uint256(pnlWad);
+        } else if (pnlWad < 0) {
+            uint256 loss = uint256(-pnlWad);
+            if (_collateral[user] >= loss) {
+                _collateral[user] -= loss;
+            } else {
+                uint256 badDebt = loss - _collateral[user];
+                _collateral[user] = 0;
+                uint256 covered = badDebt > _insuranceFund ? _insuranceFund : badDebt;
+                _insuranceFund -= covered;
+                emit BadDebtRecorded(badDebt, covered);
             }
-            _userActiveSeries[user].add(uint256(seriesId));
-        } else if (oldQty != 0 && newQty == 0) {
-            _userActiveSeries[user].remove(uint256(seriesId));
         }
 
-        emit PositionUpdated(user, seriesId, newQty);
+        _positions[user][seriesId].netQuantity = 0;
+        _userActiveSeries[user].remove(uint256(seriesId));
+
+        emit PositionSettled(seriesId, user, pnlWad);
+    }
+
+    // ── Liquidation ────────────────────────────────────────────────────────
+
+    /// @notice Liquidate a short position from an underwater account.
+    ///         The liquidator takes on the short position and receives a fee from the account.
+    /// @param account The underwater account
+    /// @param seriesId The series to liquidate
+    /// @param amount Number of contracts to liquidate (capped at position size)
+    function liquidate(address account, uint64 seriesId, uint128 amount) external {
+        if (amount == 0) revert ZeroLiquidation();
+        if (_isHealthy(account)) revert AccountHealthy(account);
+
+        int128 pos = _positions[account][seriesId].netQuantity;
+        if (pos >= 0) revert NotShortPosition(account, seriesId);
+
+        uint128 absPos = uint128(-pos);
+        uint128 liqAmount = amount > absPos ? absPos : amount;
+
+        uint256 marginForLiquidated = _computeSeriesMargin(seriesId, liqAmount, false);
+        uint256 fee = marginForLiquidated * uint256(liquidationFeeBps) / 10000;
+        uint256 actualFee = fee > _collateral[account] ? _collateral[account] : fee;
+
+        address liquidator = _msgSender();
+
+        _updatePosition(account, seriesId, int128(liqAmount));
+        _updatePosition(liquidator, seriesId, -int128(liqAmount));
+
+        _collateral[account] -= actualFee;
+        _collateral[liquidator] += actualFee;
+
+        emit Liquidated(account, liquidator, actualFee, seriesId, liqAmount);
     }
 
     // ── Reserved margin for resting sell orders ─────────────────────────────
@@ -300,8 +386,7 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
 
     /// @notice Check if account is healthy (collateral >= MM + reserved).
     function isHealthy(address user) external view returns (bool) {
-        uint256 mm = computeAccountMM(user);
-        return _collateral[user] >= mm + _reservedMargin[user];
+        return _isHealthy(user);
     }
 
     /// @notice Check if a user can place an order requiring additionalIM.
@@ -339,6 +424,35 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
 
     function getForwardPrice() external view returns (uint256) {
         return _getForwardPriceWad();
+    }
+
+    function getInsuranceFund() external view returns (uint256) {
+        return _insuranceFund;
+    }
+
+    // ── Internal: position management ─────────────────────────────────────
+
+    function _updatePosition(address user, uint64 seriesId, int128 deltaQty) private {
+        OptionPosition storage pos = _positions[user][seriesId];
+        int128 oldQty = pos.netQuantity;
+        int128 newQty = oldQty + deltaQty;
+        pos.netQuantity = newQty;
+
+        if (oldQty == 0 && newQty != 0) {
+            if (_userActiveSeries[user].length() >= maxSeriesPerUser) {
+                revert MaxSeriesExceeded(user);
+            }
+            _userActiveSeries[user].add(uint256(seriesId));
+        } else if (oldQty != 0 && newQty == 0) {
+            _userActiveSeries[user].remove(uint256(seriesId));
+        }
+
+        emit PositionUpdated(user, seriesId, newQty);
+    }
+
+    function _isHealthy(address user) private view returns (bool) {
+        uint256 mm = computeAccountMM(user);
+        return _collateral[user] >= mm + _reservedMargin[user];
     }
 
     // ── Internal: margin computation ────────────────────────────────────────
