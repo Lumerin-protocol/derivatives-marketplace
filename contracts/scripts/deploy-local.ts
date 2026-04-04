@@ -1,44 +1,62 @@
-import { run } from "hardhat";
+import hre, { network } from "hardhat";
+import type { Hex } from "viem";
 import { parseUnits, formatUnits } from "viem";
-import { deployPerpsFixture } from "../tests/fixtures.ts";
+import { deployLocalFullStackFixture } from "../tests/fixtures.ts";
 
 async function main() {
   console.log("Starting local deployment...\n");
-  await run("compile");
-  const runPromise = run("node");
+  await hre.tasks.getTask("build").run({});
+  const runPromise = hre.tasks.getTask("node").run({});
 
-  // Deploy base contracts (USDC, oracle, Perps)
-  const data = await deployPerpsFixture();
+  const conn = await network.connect();
+  const data = await deployLocalFullStackFixture(conn);
+  const { viem } = conn;
   const { contracts, accounts, config } = data;
-  const { perps, usdcMock, priceOracle } = contracts;
+  const {
+    perps,
+    usdcMock,
+    priceOracle,
+    vault,
+    pme,
+    optionMarginEngine,
+    registry,
+    optionOrderBook,
+    optionMatchingRouter,
+    optionSettlement,
+  } = contracts;
   const { owner, seller, buyer, buyer2 } = accounts;
 
-  // Add collateral for each participant
-  const collateralPerUser = parseUnits("1000", config.tokenDecimals);
+  // Perps collateral (vault) — notionals are ~$50k/unit; keep well above IM for seeded ladder
+  const collateralPerUser = parseUnits("150000", config.tokenDecimals);
   await perps.write.addCollateral([collateralPerUser], { account: seller.account });
   await perps.write.addCollateral([collateralPerUser], { account: buyer.account });
   await perps.write.addCollateral([collateralPerUser], { account: buyer2.account });
 
-  // Get market price and add limit orders (order book)
+  // Options margin engine (same vault)
+  const optionsDeposit = parseUnits("50000", config.tokenDecimals);
+  for (const w of [seller, buyer, buyer2]) {
+    const eng = await viem.getContractAt("OptionMarginEngine", optionMarginEngine.address, {
+      client: { wallet: w },
+    });
+    await eng.write.deposit([optionsDeposit]);
+  }
+
+  // Seed perps order book
   const marketPrice = await perps.read.getMarketPrice();
   const tick = config.minimumPriceIncrement;
   const qty = parseUnits("1", config.quantityDecimals);
 
-  // Sell orders (asks) - above market
   await perps.write.createOrder([marketPrice + tick, -3n * qty], { account: seller.account });
   await perps.write.createOrder([marketPrice + 2n * tick, -2n * qty], { account: seller.account });
   await perps.write.createOrder([marketPrice + 3n * tick, -qty], { account: seller.account });
 
-  // Buy orders (bids) - below market
   await perps.write.createOrder([marketPrice - tick, 3n * qty], { account: buyer.account });
   await perps.write.createOrder([marketPrice - 2n * tick, 2n * qty], { account: buyer.account });
   await perps.write.createOrder([marketPrice - 3n * tick, qty], { account: buyer.account });
 
-  // Matching orders at market to create positions
   await perps.write.createOrder([marketPrice, -4n * qty], { account: seller.account });
   await perps.write.createOrder([marketPrice, 4n * qty], { account: buyer.account });
 
-  // --- Fetch all data ---
   const accountLabels: [string, typeof seller][] = [
     ["Seller", seller],
     ["Buyer", buyer],
@@ -46,30 +64,27 @@ async function main() {
   ];
   const maxLevels = 10n;
 
-  const [[bids, asks], positions, balances, ownerBal, reserve, fees, userOrderIds] =
-    await Promise.all([
-      perps.read.getOrderBookPrices([maxLevels]),
-      Promise.all(
-        accountLabels.map(([, account]) => perps.read.getUserPosition([account.account.address])),
-      ),
-      Promise.all(
-        accountLabels.map(([, account]) => usdcMock.read.balanceOf([account.account.address])),
-      ),
-      usdcMock.read.balanceOf([owner.account.address]),
-      perps.read.reservePoolBalance(),
-      perps.read.collectedFeesBalance(),
-      Promise.all(
-        accountLabels.map(([, account]) => perps.read.getUserOrders([account.account.address])),
-      ),
-    ]);
+  const [[bids, asks], positions, balances, ownerBal, reserve, userOrderIds] = await Promise.all([
+    perps.read.getOrderBookPrices([maxLevels]),
+    Promise.all(
+      accountLabels.map(([, account]) => perps.read.getUserPosition([account.account.address])),
+    ),
+    Promise.all(
+      accountLabels.map(([, account]) => usdcMock.read.balanceOf([account.account.address])),
+    ),
+    usdcMock.read.balanceOf([owner.account.address]),
+    perps.read.balanceOf([perps.address]),
+    Promise.all(
+      accountLabels.map(([, account]) => perps.read.getUserOrders([account.account.address])),
+    ),
+  ]);
 
   const userOrders = await Promise.all(
-    userOrderIds.map((orderIds) =>
-      Promise.all(orderIds.map((orderId) => perps.read.getOrder([orderId]))),
+    userOrderIds.map((orderIds: readonly Hex[]) =>
+      Promise.all(orderIds.map((orderId: Hex) => perps.read.getOrder([orderId]))),
     ),
   );
 
-  // --- Print all information ---
   console.log("Deployment completed successfully!\n");
   console.log("=== ACCOUNTS ===");
   console.log("Owner:    ", owner.account.address);
@@ -79,9 +94,21 @@ async function main() {
   console.log();
 
   console.log("=== CONTRACT ADDRESSES ===");
-  console.log("USDC Mock:     ", usdcMock.address);
-  console.log("Price Oracle:  ", priceOracle.address);
-  console.log("Perps:         ", perps.address);
+  console.log("USDC Mock:           ", usdcMock.address);
+  console.log("Price Oracle:        ", priceOracle.address);
+  console.log("Collateral Vault:    ", vault.address);
+  console.log("Portfolio Margin:    ", pme.address);
+  console.log("Perps DEX:           ", perps.address);
+  console.log("Option Registry:     ", registry.address);
+  console.log("Option Margin Engine:", optionMarginEngine.address);
+  console.log("Option Order Book:   ", optionOrderBook.address);
+  console.log("Option Router:       ", optionMatchingRouter.address);
+  console.log("Option Settlement:   ", optionSettlement.address);
+  console.log();
+
+  console.log("=== OPTIONS SERIES ===");
+  console.log("Series ID:  ", config.seriesId.toString());
+  console.log("Expiry:     ", config.seriesExpiry.toString(), "(unix seconds)");
   console.log();
 
   console.log("=== CONFIG ===");
@@ -110,14 +137,14 @@ async function main() {
     "USDC",
   );
   console.log(
-    "Oracle hashprice:      ",
+    "Oracle (raw):          ",
     formatUnits(config.oracle.price, config.oracle.decimals),
-    "USDC",
+    "(oracle decimals)",
   );
   console.log();
 
   console.log("=== MARKET ===");
-  console.log("Market price:  ", formatUnits(marketPrice, config.tokenDecimals), "USDC");
+  console.log("Perps mark (oracle→6dp):", formatUnits(marketPrice, config.tokenDecimals), "USDC");
   console.log("Best ask:      ", formatUnits(marketPrice + tick, config.tokenDecimals), "USDC");
   console.log("Best bid:      ", formatUnits(marketPrice - tick, config.tokenDecimals), "USDC");
   console.log();
@@ -168,16 +195,15 @@ async function main() {
   }
   console.log();
 
-  console.log("=== USDC BALANCES ===");
+  console.log("=== USDC BALANCES (wallets, not vault) ===");
   for (const [idx, [label]] of accountLabels.entries()) {
     console.log(`${label}: ${formatUnits(balances[idx], config.tokenDecimals)} USDC`);
   }
   console.log(`Owner: ${formatUnits(ownerBal, config.tokenDecimals)} USDC`);
   console.log();
 
-  console.log("=== RESERVE & FEES ===");
-  console.log("Reserve pool: ", formatUnits(reserve, config.tokenDecimals), "USDC");
-  console.log("Collected fees:", formatUnits(fees, config.tokenDecimals), "USDC");
+  console.log("=== RESERVE POOL (DEX vault balance) ===");
+  console.log("Reserve: ", formatUnits(reserve, config.tokenDecimals), "USDC");
   console.log();
 
   await runPromise;

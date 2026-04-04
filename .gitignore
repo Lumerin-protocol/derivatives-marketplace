@@ -57,6 +57,3 @@ indexer/tests/.latest.json
 node_modules/
 .pnp/
 .pnp.js
-
-# Scripts
-scripts/
