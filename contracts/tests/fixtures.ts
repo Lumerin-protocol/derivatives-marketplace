@@ -4,6 +4,41 @@ import { computeExpectedFunding as _computeExpectedFunding } from "./utils.ts";
 
 type Conn = NetworkConnection;
 
+async function deployVaultAndPME(conn: Conn, usdcAddress: `0x${string}`, perpsAddress: `0x${string}`) {
+  const { viem } = conn;
+
+  const vaultImpl = await viem.deployContract("contracts/CollateralVault.sol:CollateralVault", []);
+  const vaultProxy = await viem.deployContract("ERC1967Proxy", [
+    vaultImpl.address as `0x${string}`,
+    encodeFunctionData({ abi: vaultImpl.abi, functionName: "initialize", args: [usdcAddress] }),
+  ]);
+  const vault = await viem.getContractAt("CollateralVault", vaultProxy.address);
+
+  const optionsMock = await viem.deployContract(
+    "contracts/test/OptionsEngineMock.sol:OptionsEngineMock",
+    [],
+  );
+
+  const pmeImpl = await viem.deployContract(
+    "contracts/PortfolioMarginEngine.sol:PortfolioMarginEngine",
+    [],
+  );
+  const pmeProxy = await viem.deployContract("ERC1967Proxy", [
+    pmeImpl.address as `0x${string}`,
+    encodeFunctionData({
+      abi: pmeImpl.abi,
+      functionName: "initialize",
+      args: [vault.address, perpsAddress, optionsMock.address],
+    }),
+  ]);
+  const pme = await viem.getContractAt("PortfolioMarginEngine", pmeProxy.address);
+
+  await vault.write.setMarginEngine([pme.address]);
+  await vault.write.setAuthorizedCaller([perpsAddress, true]);
+
+  return { vault, pme, optionsMock };
+}
+
 export async function deployPerpsFixture(conn: Conn) {
   const { viem } = conn;
 
@@ -36,6 +71,19 @@ export async function deployPerpsFixture(conn: Conn) {
   const makerFeeBps = 0n;
   const collateralAmount = parseUnits("100000", tokenDecimals);
 
+  // Deploy vault first (need address for perps initialize)
+  const vaultImpl = await viem.deployContract("contracts/CollateralVault.sol:CollateralVault", []);
+  const vaultProxy = await viem.deployContract("ERC1967Proxy", [
+    vaultImpl.address as `0x${string}`,
+    encodeFunctionData({
+      abi: vaultImpl.abi,
+      functionName: "initialize",
+      args: [usdcMock.address],
+    }),
+  ]);
+  const vault = await viem.getContractAt("CollateralVault", vaultProxy.address);
+
+  // Deploy perps with vault
   const perpsImpl = await viem.deployContract("contracts/HashPowerPerpsDEX.sol:HashPowerPerpsDEX", [
     minimumPriceIncrement,
   ]);
@@ -47,8 +95,7 @@ export async function deployPerpsFixture(conn: Conn) {
       args: [
         usdcMock.address,
         priceOracle.address,
-        Number(marginPercent),
-        Number(maintenanceMarginPercent),
+        vault.address,
       ],
     }),
   ]);
@@ -56,16 +103,39 @@ export async function deployPerpsFixture(conn: Conn) {
   const quantityDecimals = await perps.read.QUANTITY_DECIMALS();
   const fundingDecimals = await perps.read.FUNDING_DECIMALS();
 
+  // Deploy PME with options mock
+  const optionsMock = await viem.deployContract(
+    "contracts/test/OptionsEngineMock.sol:OptionsEngineMock",
+    [],
+  );
+  const pmeImpl = await viem.deployContract(
+    "contracts/PortfolioMarginEngine.sol:PortfolioMarginEngine",
+    [],
+  );
+  const pmeProxy = await viem.deployContract("ERC1967Proxy", [
+    pmeImpl.address as `0x${string}`,
+    encodeFunctionData({
+      abi: pmeImpl.abi,
+      functionName: "initialize",
+      args: [vault.address, perps.address, optionsMock.address],
+    }),
+  ]);
+  const pme = await viem.getContractAt("PortfolioMarginEngine", pmeProxy.address);
+
+  // Wire vault ↔ perps ↔ PME
+  await vault.write.setMarginEngine([pme.address]);
+  await vault.write.setAuthorizedCaller([perps.address, true]);
+  await perps.write.setPortfolioMargin([pme.address], { account: owner.account });
+
   await perps.write.setMatchFee([Number(takerFeeBps), Number(makerFeeBps)], {
     account: owner.account,
   });
   await perps.write.setLiquidationFee([liquidationFee], { account: owner.account });
 
-  await usdcMock.write.approve([perps.address, maxUint256], { account: seller.account });
-  await usdcMock.write.approve([perps.address, maxUint256], { account: buyer.account });
-  await usdcMock.write.approve([perps.address, maxUint256], { account: buyer2.account });
-  await usdcMock.write.approve([perps.address, maxUint256], { account: seller2.account });
-  await usdcMock.write.approve([perps.address, maxUint256], { account: owner.account });
+  // Users approve the vault (not the perps contract)
+  for (const w of [seller, buyer, buyer2, seller2, owner]) {
+    await usdcMock.write.approve([vault.address, maxUint256], { account: w.account });
+  }
 
   await perps.write.depositReservePool([collateralAmount], { account: owner.account });
 
@@ -83,7 +153,7 @@ export async function deployPerpsFixture(conn: Conn) {
       fundingDecimals,
       tokenDecimals,
     },
-    contracts: { usdcMock, priceOracle, perps },
+    contracts: { usdcMock, priceOracle, perps, vault, pme, optionsMock },
     accounts: { owner, seller, seller2, buyer, buyer2, pc, tc },
     utils: {
       getMinimumCollateral: (price: bigint, absQuantity: bigint) => {

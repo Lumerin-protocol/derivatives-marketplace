@@ -12,9 +12,20 @@ contract PerpsDEXMock is IHashPowerPerpsDEX {
     mapping(address => int256) private _unrealizedPnl;
     mapping(address => uint256) private _initialMargin;
     mapping(address => uint256) private _maintenanceMargin;
+    mapping(address => uint256) private _orderMargin;
+    mapping(address => int256) private _pendingFunding;
+    uint256 private _marketPrice;
 
     function decimals() external pure returns (uint8) {
         return 6; // USDC
+    }
+
+    function setMarketPrice(uint256 price) external {
+        _marketPrice = price;
+    }
+
+    function getMarketPrice() external view returns (uint256) {
+        return _marketPrice;
     }
 
     function setUserPosition(address user, int256 qty, uint256 entryPrice) external {
@@ -38,10 +49,6 @@ contract PerpsDEXMock is IHashPowerPerpsDEX {
         return _positions[user];
     }
 
-    function balanceOf(address user) external view returns (uint256) {
-        return _balances[user];
-    }
-
     function getUnrealizedPnl(address user) external view returns (int256) {
         return _unrealizedPnl[user];
     }
@@ -52,6 +59,22 @@ contract PerpsDEXMock is IHashPowerPerpsDEX {
 
     function getMaintenanceMargin(address user) external view returns (uint256) {
         return _maintenanceMargin[user];
+    }
+
+    function getOrderMargin(address user) external view returns (uint256) {
+        return _orderMargin[user];
+    }
+
+    function getPendingFunding(address user) external view returns (int256) {
+        return _pendingFunding[user];
+    }
+
+    function setOrderMargin(address user, uint256 om) external {
+        _orderMargin[user] = om;
+    }
+
+    function setPendingFunding(address user, int256 pf) external {
+        _pendingFunding[user] = pf;
     }
 
     function isLiquidatable(address user) external view returns (bool) {

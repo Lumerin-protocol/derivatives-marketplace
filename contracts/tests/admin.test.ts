@@ -51,114 +51,33 @@ describe("HashPowerPerpsDEX - Admin Functions", function () {
     });
   });
 
-  describe("setMarginPercent", function () {
-    it("should allow owner to set margin percent", async function () {
+  describe("setShocks (PME risk params)", function () {
+    it("should allow owner to update portfolio margin shocks", async function () {
       const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
-      const { perps } = contracts;
+      const { pme } = contracts;
       const { owner } = accounts;
 
-      await perps.write.setMarginPercent([20], { account: owner.account });
+      await pme.write.setShocks(
+        [BigInt(0.20e18), BigInt(0.10e18), BigInt(0.15e18), BigInt(0.08e18)],
+        { account: owner.account },
+      );
 
-      const marginPercent = await perps.read.marginPercent();
-      assert.equal(marginPercent, 20);
+      assert.equal(await pme.read.imSpotShock(), BigInt(0.20e18));
+      assert.equal(await pme.read.mmSpotShock(), BigInt(0.10e18));
     });
 
-    it("should revert when non-owner tries to set margin percent", async function () {
+    it("should revert when non-owner tries to set shocks", async function () {
       const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
-      const { perps } = contracts;
+      const { pme } = contracts;
       const { buyer } = accounts;
 
       await viem.assertions.revertWithCustomError(
-        perps.write.setMarginPercent([20], { account: buyer.account }),
-        perps,
+        pme.write.setShocks(
+          [BigInt(0.20e18), BigInt(0.10e18), BigInt(0.15e18), BigInt(0.08e18)],
+          { account: buyer.account },
+        ),
+        pme,
         "OwnableUnauthorizedAccount",
-      );
-    });
-
-    it("should revert when margin percent is 0", async function () {
-      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
-      const { perps } = contracts;
-      const { owner } = accounts;
-
-      await viem.assertions.revertWithCustomError(
-        perps.write.setMarginPercent([0], { account: owner.account }),
-        perps,
-        "InvalidMarginPercent",
-      );
-    });
-
-    it("should revert when margin percent is greater than 100", async function () {
-      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
-      const { perps } = contracts;
-      const { owner } = accounts;
-
-      await viem.assertions.revertWithCustomError(
-        perps.write.setMarginPercent([101], { account: owner.account }),
-        perps,
-        "InvalidMarginPercent",
-      );
-    });
-
-    it("should revert when margin percent is less than maintenance margin", async function () {
-      const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsFixture);
-      const { perps } = contracts;
-      const { owner } = accounts;
-
-      await viem.assertions.revertWithCustomError(
-        perps.write.setMarginPercent([config.maintenanceMarginPercent], { account: owner.account }),
-        perps,
-        "InvalidMarginPercent",
-      );
-    });
-  });
-
-  describe("setMaintenanceMarginPercent", function () {
-    it("should allow owner to set maintenance margin percent", async function () {
-      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
-      const { perps } = contracts;
-      const { owner } = accounts;
-
-      const margin = 3;
-
-      await perps.write.setMaintenanceMarginPercent([margin], { account: owner.account });
-
-      const maintenanceMarginPercent = await perps.read.maintenanceMarginPercent();
-      assert.equal(maintenanceMarginPercent, margin);
-    });
-
-    it("should revert when non-owner tries to set", async function () {
-      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
-      const { perps } = contracts;
-      const { buyer } = accounts;
-
-      await viem.assertions.revertWithCustomError(
-        perps.write.setMaintenanceMarginPercent([3], { account: buyer.account }),
-        perps,
-        "OwnableUnauthorizedAccount",
-      );
-    });
-
-    it("should revert when maintenance margin is 0", async function () {
-      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
-      const { perps } = contracts;
-      const { owner } = accounts;
-
-      await viem.assertions.revertWithCustomError(
-        perps.write.setMaintenanceMarginPercent([0], { account: owner.account }),
-        perps,
-        "InvalidMarginPercent",
-      );
-    });
-
-    it("should revert when maintenance margin >= margin percent", async function () {
-      const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsFixture);
-      const { perps } = contracts;
-      const { owner } = accounts;
-
-      await viem.assertions.revertWithCustomError(
-        perps.write.setMaintenanceMarginPercent([config.marginPercent], { account: owner.account }),
-        perps,
-        "InvalidMarginPercent",
       );
     });
   });
@@ -242,22 +161,22 @@ describe("HashPowerPerpsDEX - Admin Functions", function () {
       assert.equal(reserveAfter - reserveBefore, amount);
     });
 
-    it("should transfer tokens from depositor to contract", async function () {
+    it("should transfer tokens from depositor to vault", async function () {
       const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
-      const { perps, usdcMock } = contracts;
+      const { perps, usdcMock, vault } = contracts;
       const { buyer } = accounts;
 
       const amount = parseUnits("500", 6);
       const buyerBalanceBefore = await usdcMock.read.balanceOf([buyer.account.address]);
-      const contractBalanceBefore = await usdcMock.read.balanceOf([perps.address]);
+      const vaultBalanceBefore = await usdcMock.read.balanceOf([vault.address]);
 
       await perps.write.depositReservePool([amount], { account: buyer.account });
 
       const buyerBalanceAfter = await usdcMock.read.balanceOf([buyer.account.address]);
-      const contractBalanceAfter = await usdcMock.read.balanceOf([perps.address]);
+      const vaultBalanceAfter = await usdcMock.read.balanceOf([vault.address]);
 
       assert.equal(buyerBalanceBefore - buyerBalanceAfter, amount);
-      assert.equal(contractBalanceAfter - contractBalanceBefore, amount);
+      assert.equal(vaultBalanceAfter - vaultBalanceBefore, amount);
     });
   });
 

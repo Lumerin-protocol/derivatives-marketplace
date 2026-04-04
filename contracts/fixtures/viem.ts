@@ -99,7 +99,7 @@ export async function deployPerpsFixture() {
   const initData = encodeFunctionData({
     abi: hashPowerPerpsDexAbi,
     functionName: "initialize",
-    args: [usdcAddress, oracleAddress, marginPercent, maintenanceMarginPercent],
+    args: [usdcAddress, oracleAddress],
   });
 
   const perpsProxyAddress = await deploy(ownerWallet, publicClient, proxyArtifact, [

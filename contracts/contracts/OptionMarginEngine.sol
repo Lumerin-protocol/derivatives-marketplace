@@ -12,6 +12,8 @@ import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableS
 import { AggregatorV3Interface } from "./AggregatorV3Interface.sol";
 import { OptionMarketRegistry } from "./OptionMarketRegistry.sol";
 import { IHashPowerPerpsDEX } from "./IHashPowerPerpsDEX.sol";
+import { ICollateralVault } from "./ICollateralVault.sol";
+import { IPortfolioMarginEngine } from "./IPortfolioMarginEngine.sol";
 import { Black76Lib } from "./libs/Black76Lib.sol";
 import { FixedPointMathLib } from "./libs/FixedPointMathLib.sol";
 
@@ -55,6 +57,7 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     error MaxSeriesExceeded(address user);
     error OracleStale();
     error InvalidOracle();
+    error ZeroAddress();
     error ZeroAmount();
     error SeriesNotInitialized(uint64 seriesId);
     error IVNotInitialized(uint64 seriesId);
@@ -115,7 +118,11 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     // Phase 6: Level 1 perps integration (read-only awareness)
     IHashPowerPerpsDEX public perpsDex; // optional, address(0) if not linked
 
-    uint256[32] private __gap;
+    // Level 2: Unified collateral vault
+    ICollateralVault public vault;
+    IPortfolioMarginEngine public portfolioMargin;
+
+    uint256[30] private __gap;
 
     // ── Modifiers ───────────────────────────────────────────────────────────
 
@@ -139,14 +146,18 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     function initialize(
         address _registry,
         address _collateralToken,
-        address _oracle
+        address _oracle,
+        address _vault
     ) external initializer {
+        if (_vault == address(0)) revert ZeroAddress();
+
         __Ownable_init(_msgSender());
         __UUPSUpgradeable_init();
 
         registry = OptionMarketRegistry(_registry);
         collateralToken = IERC20(_collateralToken);
         oracle = AggregatorV3Interface(_oracle);
+        vault = ICollateralVault(_vault);
 
         tokenDecimals = IERC20Metadata(_collateralToken).decimals();
         oracleDecimals = oracle.decimals();
@@ -205,10 +216,16 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
         emit PerpsDexUpdated(_perpsDex);
     }
 
+    /// @notice Set the portfolio margin engine for cross-product margin checks.
+    function setPortfolioMargin(address _pm) external onlyOwner {
+        portfolioMargin = IPortfolioMarginEngine(_pm);
+    }
+
     /// @notice Deposit collateral into the insurance fund (anyone can contribute).
+    ///         Caller must have approved the vault.
     function depositToInsuranceFund(uint256 amount) external {
         if (amount == 0) revert ZeroAmount();
-        collateralToken.safeTransferFrom(_msgSender(), address(this), amount);
+        vault.depositFor(_msgSender(), address(this), amount);
         uint256 wadAmount = _toWad(amount);
         _insuranceFund += wadAmount;
         emit InsuranceFundDeposited(_msgSender(), wadAmount, _insuranceFund);
@@ -216,28 +233,23 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
 
     // ── Collateral ──────────────────────────────────────────────────────────
 
-    /// @notice Deposit collateral. Caller must have approved this contract.
+    /// @notice Deposit collateral. Caller must have approved the vault.
     function deposit(uint256 amount) external {
         if (amount == 0) revert ZeroAmount();
-        collateralToken.safeTransferFrom(_msgSender(), address(this), amount);
-        uint256 wadAmount = _toWad(amount);
-        _collateral[_msgSender()] += wadAmount;
-        emit CollateralDeposited(_msgSender(), amount, _collateral[_msgSender()]);
+        vault.depositFor(_msgSender(), _msgSender(), amount);
+        emit CollateralDeposited(_msgSender(), amount, _userBalance(_msgSender()));
     }
 
     /// @notice Withdraw collateral. Reverts if withdrawal would breach IM + reserved.
     function withdraw(uint256 amount) external {
         if (amount == 0) revert ZeroAmount();
-        uint256 wadAmount = _toWad(amount);
-        if (_collateral[_msgSender()] < wadAmount) revert InsufficientCollateral();
-
-        uint256 newBalance = _collateral[_msgSender()] - wadAmount;
-        uint256 required = computeAccountIM(_msgSender()) + _reservedMargin[_msgSender()];
-        if (newBalance < required) revert WithdrawalWouldBreachMargin();
-
-        _collateral[_msgSender()] = newBalance;
-        collateralToken.safeTransfer(_msgSender(), amount);
-        emit CollateralWithdrawn(_msgSender(), amount, newBalance);
+        uint256 bal = vault.getBalance(_msgSender());
+        if (bal < amount) revert InsufficientCollateral();
+        uint256 newBalance = bal - amount;
+        uint256 requiredTokens = _fromWad(computeAccountIM(_msgSender()) + _reservedMargin[_msgSender()]);
+        if (newBalance < requiredTokens) revert WithdrawalWouldBreachMargin();
+        vault.withdrawTo(_msgSender(), _msgSender(), amount);
+        emit CollateralWithdrawn(_msgSender(), amount, _userBalance(_msgSender()));
     }
 
     // ── Position updates (called by router on fill) ─────────────────────────
@@ -255,18 +267,19 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     function settlePosition(address user, uint64 seriesId, int256 pnlWad) external onlySettlement {
         if (_positions[user][seriesId].netQuantity == 0) return;
 
+        uint256 pnlTokens = _fromWad(pnlWad > 0 ? uint256(pnlWad) : uint256(-pnlWad));
         if (pnlWad > 0) {
-            _collateral[user] += uint256(pnlWad);
+            vault.credit(user, pnlTokens);
         } else if (pnlWad < 0) {
-            uint256 loss = uint256(-pnlWad);
-            if (_collateral[user] >= loss) {
-                _collateral[user] -= loss;
+            uint256 bal = vault.getBalance(user);
+            if (bal >= pnlTokens) {
+                vault.debit(user, pnlTokens);
             } else {
-                uint256 badDebt = loss - _collateral[user];
-                _collateral[user] = 0;
+                if (bal > 0) vault.debit(user, bal);
+                uint256 badDebt = pnlTokens - bal;
                 uint256 covered = badDebt > _insuranceFund ? _insuranceFund : badDebt;
                 _insuranceFund -= covered;
-                emit BadDebtRecorded(badDebt, covered);
+                emit BadDebtRecorded(uint256(-pnlWad), _toWad(covered));
             }
         }
 
@@ -295,15 +308,16 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
 
         uint256 marginForLiquidated = _computeSeriesMargin(seriesId, liqAmount, false);
         uint256 fee = marginForLiquidated * uint256(liquidationFeeBps) / 10000;
-        uint256 actualFee = fee > _collateral[account] ? _collateral[account] : fee;
 
         address liquidator = _msgSender();
+        uint256 bal = vault.getBalance(account);
+        uint256 feeTokens = _fromWad(fee);
+        uint256 actualFee = feeTokens > bal ? bal : feeTokens;
+        if (actualFee > 0) vault.transfer(account, liquidator, actualFee);
+        actualFee = _toWad(actualFee);
 
         _updatePosition(account, seriesId, int128(liqAmount));
         _updatePosition(liquidator, seriesId, -int128(liqAmount));
-
-        _collateral[account] -= actualFee;
-        _collateral[liquidator] += actualFee;
 
         emit Liquidated(account, liquidator, actualFee, seriesId, liqAmount);
     }
@@ -325,9 +339,9 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
 
     /// @notice Transfer premium between accounts (buyer pays seller).
     function transferPremium(address from, address to, uint256 wadAmount) external onlyRouter {
-        if (_collateral[from] < wadAmount) revert InsufficientCollateral();
-        _collateral[from] -= wadAmount;
-        _collateral[to] += wadAmount;
+        uint256 tokenAmount = _fromWad(wadAmount);
+        if (vault.getBalance(from) < tokenAmount) revert InsufficientCollateral();
+        vault.transfer(from, to, tokenAmount);
     }
 
     // ── IV management ───────────────────────────────────────────────────────
@@ -400,16 +414,17 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
         return _isHealthy(user);
     }
 
-    /// @notice Check if a user can place an order requiring additionalIM.
+    /// @notice Check if a user can place an order requiring additionalIM (WAD).
+    ///         When portfolioMargin is set, delegates to cross-product PME.
     function canPlaceOrder(address user, uint256 additionalIM) external view returns (bool) {
-        uint256 im = computeAccountIM(user);
-        return _collateral[user] >= im + _reservedMargin[user] + additionalIM;
+        uint256 additionalTokens = _fromWad(additionalIM);
+        return vault.getBalance(user) >= portfolioMargin.computePortfolioIM(user) + additionalTokens;
     }
 
     // ── Views ───────────────────────────────────────────────────────────────
 
     function getCollateral(address user) external view returns (uint256) {
-        return _collateral[user];
+        return _userBalance(user);
     }
 
     function getReservedMargin(address user) external view returns (uint256) {
@@ -441,6 +456,43 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
         return _insuranceFund;
     }
 
+    /// @notice Aggregate signed net Greeks across all active option positions.
+    ///         Used by PortfolioMarginEngine for cross-product stress margin.
+    ///         Returned values are WAD-scaled.
+    /// @return netDelta Signed net delta (long = positive, short = negative)
+    /// @return netGamma Total gamma (always non-negative)
+    /// @return netVega Total vega (always non-negative)
+    function getNetGreeks(address user) external view returns (int256 netDelta, uint256 netGamma, uint256 netVega) {
+        uint256 count = _userActiveSeries[user].length();
+        if (count == 0) return (0, 0, 0);
+
+        uint256 F = _getForwardPriceWad();
+
+        for (uint256 i = 0; i < count; i++) {
+            uint64 seriesId = uint64(_userActiveSeries[user].at(i));
+            int128 qty = _positions[user][seriesId].netQuantity;
+            if (qty == 0) continue;
+
+            IVState memory iv = _ivStates[seriesId];
+            if (iv.ewmaIV == 0) continue;
+
+            (uint256 K, uint256 tSec, bool isCall) = _seriesParams(seriesId);
+            Black76Lib.Greeks memory g = Black76Lib.greeks(F, K, iv.ewmaIV, tSec, isCall);
+
+            OptionMarketRegistry.OptionSeries memory s = registry.getSeries(seriesId);
+            int256 signedQty = int256(qty) * int256(WAD) / int256(uint256(s.lotSize));
+
+            netDelta += int256(g.delta) * signedQty / int256(WAD);
+            netGamma += g.gamma * _abs128(qty) / uint256(s.lotSize);
+            netVega += g.vega * _abs128(qty) / uint256(s.lotSize);
+        }
+    }
+
+    /// @notice Reserved margin for resting sell orders (WAD).
+    function getOptionsReservedMargin(address user) external view returns (uint256) {
+        return _reservedMargin[user];
+    }
+
     // ── Level 1 perps awareness (read-only) ─────────────────────────────
 
     struct PortfolioOverview {
@@ -451,7 +503,6 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
         uint256 optionsReserved;      // WAD
         uint256 activeSeriesCount;
         // Perps (zero when perpsDex not linked)
-        uint256 perpCollateral;       // perp token decimals
         int256 perpNetQuantity;       // QUANTITY_DECIMALS (6)
         int256 perpUnrealizedPnl;     // perp token decimals
         uint256 perpIM;               // perp token decimals
@@ -462,14 +513,13 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     /// @notice Combined read of a user's options + perps positions and risk metrics.
     ///         Returns zeros for perp fields if perpsDex is not linked.
     function getPortfolioOverview(address user) external view returns (PortfolioOverview memory p) {
-        p.optionsCollateral = _collateral[user];
+        p.optionsCollateral = _userBalance(user);
         p.optionsIM = computeAccountIM(user);
         p.optionsMM = computeAccountMM(user);
         p.optionsReserved = _reservedMargin[user];
         p.activeSeriesCount = _userActiveSeries[user].length();
 
         if (address(perpsDex) != address(0)) {
-            p.perpCollateral = perpsDex.balanceOf(user);
             IHashPowerPerpsDEX.Position memory pos = perpsDex.getUserPosition(user);
             p.perpNetQuantity = pos.netQuantity;
             p.perpUnrealizedPnl = perpsDex.getUnrealizedPnl(user);
@@ -486,10 +536,10 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
         return (pos.netQuantity, pos.aggregatedEntryPrice);
     }
 
-    /// @notice Read a user's perp collateral balance.
-    function getPerpCollateral(address user) external view returns (uint256) {
-        if (address(perpsDex) == address(0)) return 0;
-        return perpsDex.balanceOf(user);
+    /// @notice Read a user's perp collateral balance from the vault.
+    ///         Returns 0 when vault is not available (Level 1 fallback).
+    function getPerpCollateral(address) external pure returns (uint256) {
+        return 0;
     }
 
     // ── Internal: position management ─────────────────────────────────────
@@ -513,8 +563,12 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     }
 
     function _isHealthy(address user) private view returns (bool) {
-        uint256 mm = computeAccountMM(user);
-        return _collateral[user] >= mm + _reservedMargin[user];
+        return vault.getBalance(user) >= portfolioMargin.computePortfolioMM(user);
+    }
+
+    /// @dev User's collateral balance in WAD (read from vault, convert to WAD).
+    function _userBalance(address user) private view returns (uint256) {
+        return _toWad(vault.getBalance(user));
     }
 
     // ── Internal: margin computation ────────────────────────────────────────
@@ -619,6 +673,10 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
 
     function _fromWad(uint256 wadAmount) private view returns (uint256) {
         return wadAmount / 10 ** (18 - uint256(tokenDecimals));
+    }
+
+    function _abs128(int128 x) private pure returns (uint256) {
+        return x >= 0 ? uint256(int256(x)) : uint256(-int256(x));
     }
 
     // ── Upgrade ─────────────────────────────────────────────────────────────

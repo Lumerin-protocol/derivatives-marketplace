@@ -59,19 +59,19 @@ describe("HashPowerPerpsDEX - addCollateral", function () {
     assert.equal(collateralAddedEvent.args.amount, amount);
   });
 
-  it("should transfer tokens from user to contract", async function () {
+  it("should transfer tokens from user to vault", async function () {
     const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
-    const { perps, usdcMock } = contracts;
+    const { perps, usdcMock, vault } = contracts;
     const { buyer } = accounts;
 
     const amount = parseUnits("500", 6);
 
-    const contractBalanceBefore = await usdcMock.read.balanceOf([perps.address]);
+    const vaultBalanceBefore = await usdcMock.read.balanceOf([vault.address]);
 
     await perps.write.addCollateral([amount], { account: buyer.account });
 
-    const contractBalanceAfter = await usdcMock.read.balanceOf([perps.address]);
-    assert.equal(contractBalanceAfter - contractBalanceBefore, amount);
+    const vaultBalanceAfter = await usdcMock.read.balanceOf([vault.address]);
+    assert.equal(vaultBalanceAfter - vaultBalanceBefore, amount);
   });
 
   it("should allow multiple collateral deposits", async function () {

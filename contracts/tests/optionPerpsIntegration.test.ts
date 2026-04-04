@@ -42,7 +42,15 @@ async function deployPerpsIntegrationFixture(conn: NetworkConnection) {
     [INITIAL_PRICE_E8, ORACLE_DECIMALS],
   );
 
-  // ── MarginEngine ──────────────────────────────────────────────────────
+  // ── Vault ─────────────────────────────────────────────────────────────
+  const vaultImpl = await v.deployContract("contracts/CollateralVault.sol:CollateralVault", []);
+  const vaultProxy = await v.deployContract("ERC1967Proxy", [
+    vaultImpl.address as `0x${string}`,
+    encodeFunctionData({ abi: vaultImpl.abi, functionName: "initialize", args: [usdc.address] }),
+  ]);
+  const vault = await v.getContractAt("CollateralVault", vaultProxy.address);
+
+  // ── MarginEngine (with vault) ─────────────────────────────────────────
   const engineImpl = await v.deployContract(
     "contracts/OptionMarginEngine.sol:OptionMarginEngine",
     [],
@@ -52,18 +60,38 @@ async function deployPerpsIntegrationFixture(conn: NetworkConnection) {
     encodeFunctionData({
       abi: engineImpl.abi,
       functionName: "initialize",
-      args: [registry.address, usdc.address, oracle.address],
+      args: [registry.address, usdc.address, oracle.address, vault.address],
     }),
   ]);
   const engine = await v.getContractAt("OptionMarginEngine", engineProxy.address);
 
   // ── PerpsDEXMock ──────────────────────────────────────────────────────
   const perpsMock = await v.deployContract("contracts/PerpsDEXMock.sol:PerpsDEXMock", []);
+  // PME reads spot from perpsDex.getMarketPrice() — set to match oracle
+  await perpsMock.write.setMarketPrice([50_000_000_000n]);
 
-  // Link perps to engine
+  // ── PME ───────────────────────────────────────────────────────────────
+  const pmeImpl = await v.deployContract(
+    "contracts/PortfolioMarginEngine.sol:PortfolioMarginEngine",
+    [],
+  );
+  const pmeProxy = await v.deployContract("ERC1967Proxy", [
+    pmeImpl.address as `0x${string}`,
+    encodeFunctionData({
+      abi: pmeImpl.abi,
+      functionName: "initialize",
+      args: [vault.address, perpsMock.address, engine.address],
+    }),
+  ]);
+  const pme = await v.getContractAt("PortfolioMarginEngine", pmeProxy.address);
+
+  // ── Wiring ────────────────────────────────────────────────────────────
+  await vault.write.setMarginEngine([pme.address]);
+  await vault.write.setAuthorizedCaller([engine.address, true]);
+  await engine.write.setPortfolioMargin([pme.address], { account: owner.account });
   await engine.write.setPerpsDex([perpsMock.address], { account: owner.account });
 
-  // ── OrderBook + Router (for creating option positions) ────────────────
+  // ── OrderBook + Router ────────────────────────────────────────────────
   const bookImpl = await v.deployContract(
     "contracts/OptionOrderBook.sol:OptionOrderBook",
     [],
@@ -112,7 +140,7 @@ async function deployPerpsIntegrationFixture(conn: NetworkConnection) {
   );
   const seriesId = 1n;
 
-  // ── Fund traders ──────────────────────────────────────────────────────
+  // ── Fund traders (approve vault) ──────────────────────────────────────
   const wallets = await v.getWalletClients();
   const trader1 = wallets[3]!;
   const trader2 = wallets[4]!;
@@ -121,7 +149,7 @@ async function deployPerpsIntegrationFixture(conn: NetworkConnection) {
   for (const w of [trader1, trader2]) {
     await usdc.write.transfer([w.account.address, depositAmount * 2n], { account: owner.account });
     const usdcAs = await v.getContractAt("USDCMock", usdc.address, { client: { wallet: w } });
-    await usdcAs.write.approve([engine.address, maxUint256]);
+    await usdcAs.write.approve([vault.address, maxUint256]);
     const eng = await v.getContractAt("OptionMarginEngine", engine.address, {
       client: { wallet: w },
     });
@@ -136,6 +164,8 @@ async function deployPerpsIntegrationFixture(conn: NetworkConnection) {
     perpsMock,
     oracle,
     usdc,
+    vault,
+    pme,
     seriesId,
     traders: { trader1, trader2 },
     accounts: { owner },
@@ -168,6 +198,14 @@ async function deployNoPerpsFixture(conn: NetworkConnection) {
     [INITIAL_PRICE_E8, ORACLE_DECIMALS],
   );
 
+  // Vault
+  const vaultImpl = await v.deployContract("contracts/CollateralVault.sol:CollateralVault", []);
+  const vaultProxy = await v.deployContract("ERC1967Proxy", [
+    vaultImpl.address as `0x${string}`,
+    encodeFunctionData({ abi: vaultImpl.abi, functionName: "initialize", args: [usdc.address] }),
+  ]);
+  const vault = await v.getContractAt("CollateralVault", vaultProxy.address);
+
   const engineImpl = await v.deployContract(
     "contracts/OptionMarginEngine.sol:OptionMarginEngine",
     [],
@@ -177,10 +215,32 @@ async function deployNoPerpsFixture(conn: NetworkConnection) {
     encodeFunctionData({
       abi: engineImpl.abi,
       functionName: "initialize",
-      args: [registry.address, usdc.address, oracle.address],
+      args: [registry.address, usdc.address, oracle.address, vault.address],
     }),
   ]);
   const engine = await v.getContractAt("OptionMarginEngine", engineProxy.address);
+
+  // PME with a perps mock (no perps linked to engine, but PME is mandatory)
+  const perpsMock = await v.deployContract("contracts/PerpsDEXMock.sol:PerpsDEXMock", []);
+  await perpsMock.write.setMarketPrice([50_000_000_000n]);
+
+  const pmeImpl = await v.deployContract(
+    "contracts/PortfolioMarginEngine.sol:PortfolioMarginEngine",
+    [],
+  );
+  const pmeProxy = await v.deployContract("ERC1967Proxy", [
+    pmeImpl.address as `0x${string}`,
+    encodeFunctionData({
+      abi: pmeImpl.abi,
+      functionName: "initialize",
+      args: [vault.address, perpsMock.address, engine.address],
+    }),
+  ]);
+  const pme = await v.getContractAt("PortfolioMarginEngine", pmeProxy.address);
+
+  await vault.write.setMarginEngine([pme.address]);
+  await vault.write.setAuthorizedCaller([engine.address, true]);
+  await engine.write.setPortfolioMargin([pme.address], { account: owner.account });
 
   return { engine, traders: { trader1 } };
 }
@@ -215,11 +275,10 @@ describe("Level 1 Perps Integration", () => {
         deployPerpsIntegrationFixture,
       );
 
-      // Simulate a 2-lot long perp position at $50,000 entry
       await perpsMock.write.setUserPosition([
         traders.trader1.account.address,
-        2_000_000n, // 2 lots (QUANTITY_DECIMALS=6)
-        50000_000_000n, // $50,000 entry (token decimals)
+        2_000_000n,
+        50000_000_000n,
       ]);
 
       const [qty, entry] = await engine.read.getPerpPosition([traders.trader1.account.address]);
@@ -233,23 +292,16 @@ describe("Level 1 Perps Integration", () => {
       const { engine, traders } = await networkHelpers.loadFixture(
         deployPerpsIntegrationFixture,
       );
-
       const col = await engine.read.getPerpCollateral([traders.trader1.account.address]);
       assert.equal(col, 0n);
     });
 
-    it("reads perps collateral from mock DEX", async () => {
-      const { engine, perpsMock, traders } = await networkHelpers.loadFixture(
+    it("returns 0 in Level 2 (collateral is in shared vault)", async () => {
+      const { engine, traders } = await networkHelpers.loadFixture(
         deployPerpsIntegrationFixture,
       );
-
-      await perpsMock.write.setBalance([
-        traders.trader1.account.address,
-        10_000_000_000n, // 10k USDC
-      ]);
-
       const col = await engine.read.getPerpCollateral([traders.trader1.account.address]);
-      assert.equal(col, 10_000_000_000n);
+      assert.equal(col, 0n);
     });
   });
 
@@ -261,7 +313,6 @@ describe("Level 1 Perps Integration", () => {
 
       const p = await engine.read.getPortfolioOverview([traders.trader1.account.address]);
 
-      // Options collateral = deposit amount in WAD
       const expectedWad = 50_000_000_000n * 10n ** 12n;
       assert.equal(p.optionsCollateral, expectedWad);
       assert.equal(p.optionsIM, 0n, "no options positions → IM = 0");
@@ -269,8 +320,6 @@ describe("Level 1 Perps Integration", () => {
       assert.equal(p.optionsReserved, 0n);
       assert.equal(p.activeSeriesCount, 0n);
 
-      // Perps fields are zero (mock has no state set)
-      assert.equal(p.perpCollateral, 0n);
       assert.equal(p.perpNetQuantity, 0n);
       assert.equal(p.perpUnrealizedPnl, 0n);
       assert.equal(p.perpIM, 0n);
@@ -283,7 +332,6 @@ describe("Level 1 Perps Integration", () => {
         deployPerpsIntegrationFixture,
       );
 
-      // Create an option position: trader2 sells, trader1 buys
       await router.write.submitOrder(
         [{ seriesId, isBuy: false, priceTicks: 100n, size: LOT, orderType: LIMIT, postOnly: false, reduceOnly: false }],
         { account: traders.trader2.account },
@@ -293,28 +341,24 @@ describe("Level 1 Perps Integration", () => {
         { account: traders.trader1.account },
       );
 
-      // Simulate perps exposure on the mock
       await perpsMock.write.setUserPosition([
         traders.trader1.account.address,
-        -1_000_000n, // 1 lot short perp
-        52000_000_000n, // entry at $52,000
+        -1_000_000n,
+        52000_000_000n,
       ]);
       await perpsMock.write.setBalance([traders.trader1.account.address, 20_000_000_000n]);
-      await perpsMock.write.setUnrealizedPnl([traders.trader1.account.address, 1_500_000_000n]); // +$1,500
+      await perpsMock.write.setUnrealizedPnl([traders.trader1.account.address, 1_500_000_000n]);
       await perpsMock.write.setMargins([
         traders.trader1.account.address,
-        5_000_000_000n, // perp IM
-        3_000_000_000n, // perp MM
+        5_000_000_000n,
+        3_000_000_000n,
       ]);
 
       const p = await engine.read.getPortfolioOverview([traders.trader1.account.address]);
 
-      // Options: trader1 is long, so IM = 0 (longs need no margin)
       assert.equal(p.optionsIM, 0n, "long option position has no ongoing margin");
       assert.equal(p.activeSeriesCount, 1n);
 
-      // Perps
-      assert.equal(p.perpCollateral, 20_000_000_000n);
       assert.equal(p.perpNetQuantity, -1_000_000n);
       assert.equal(p.perpUnrealizedPnl, 1_500_000_000n);
       assert.equal(p.perpIM, 5_000_000_000n);
@@ -327,17 +371,15 @@ describe("Level 1 Perps Integration", () => {
         deployPerpsIntegrationFixture,
       );
 
-      // Simulate underwater perps position
       await perpsMock.write.setUserPosition([
         traders.trader1.account.address,
-        -5_000_000n, // 5 lots short
+        -5_000_000n,
         50000_000_000n,
       ]);
-      await perpsMock.write.setBalance([traders.trader1.account.address, 1_000_000n]); // $1 left
       await perpsMock.write.setMargins([
         traders.trader1.account.address,
         10_000_000_000n,
-        8_000_000_000n, // MM = $8k, balance = $1 → liquidatable
+        8_000_000_000n,
       ]);
 
       const p = await engine.read.getPortfolioOverview([traders.trader1.account.address]);
@@ -347,14 +389,10 @@ describe("Level 1 Perps Integration", () => {
 
   describe("margin isolation", () => {
     it("options margin does not affect perps collateral", async () => {
-      const { engine, router, perpsMock, traders, seriesId } = await networkHelpers.loadFixture(
+      const { engine, router, traders, seriesId } = await networkHelpers.loadFixture(
         deployPerpsIntegrationFixture,
       );
 
-      // Set perps collateral before any option trading
-      await perpsMock.write.setBalance([traders.trader1.account.address, 30_000_000_000n]);
-
-      // Trade options — this only affects _collateral[user] in the engine, not perps
       await router.write.submitOrder(
         [{ seriesId, isBuy: false, priceTicks: 100n, size: LOT, orderType: LIMIT, postOnly: false, reduceOnly: false }],
         { account: traders.trader2.account },
@@ -364,13 +402,11 @@ describe("Level 1 Perps Integration", () => {
         { account: traders.trader1.account },
       );
 
-      // Perps collateral unchanged
       const perpCol = await engine.read.getPerpCollateral([traders.trader1.account.address]);
-      assert.equal(perpCol, 30_000_000_000n, "perps collateral should not be touched by options trading");
+      assert.equal(perpCol, 0n, "getPerpCollateral returns 0 in Level 2");
 
-      // Options collateral decreased by premium
       const optCol = await engine.read.getCollateral([traders.trader1.account.address]);
-      const expectedOptCol = 50_000_000_000n * 10n ** 12n; // initial deposit in WAD
+      const expectedOptCol = 50_000_000_000n * 10n ** 12n;
       assert.ok(optCol < expectedOptCol, "options collateral should decrease from premium paid");
     });
 
@@ -379,7 +415,6 @@ describe("Level 1 Perps Integration", () => {
         deployPerpsIntegrationFixture,
       );
 
-      // Create a short option position for trader1
       await router.write.submitOrder(
         [{ seriesId, isBuy: true, priceTicks: 100n, size: LOT, orderType: LIMIT, postOnly: false, reduceOnly: false }],
         { account: traders.trader2.account },
@@ -391,18 +426,15 @@ describe("Level 1 Perps Integration", () => {
 
       const imBefore = await engine.read.computeAccountIM([traders.trader1.account.address]);
 
-      // Add a huge perp position — should NOT change options IM
       await perpsMock.write.setUserPosition([
         traders.trader1.account.address,
-        100_000_000n, // 100 lots long
+        100_000_000n,
         50000_000_000n,
       ]);
-      await perpsMock.write.setBalance([traders.trader1.account.address, 500_000_000_000n]);
 
       const imAfter = await engine.read.computeAccountIM([traders.trader1.account.address]);
-      // Allow tiny drift from block.timestamp advancing between calls (changes tSec in Greeks)
       const drift = imAfter > imBefore ? imAfter - imBefore : imBefore - imAfter;
-      const tolerance = imBefore / 10000n; // 0.01%
+      const tolerance = imBefore / 10000n;
       assert.ok(drift <= tolerance, `options IM drift ${drift} exceeds tolerance ${tolerance}`);
     });
   });
@@ -421,7 +453,6 @@ describe("Level 1 Perps Integration", () => {
       assert.equal(col, 0n);
 
       const p = await engine.read.getPortfolioOverview([traders.trader1.account.address]);
-      assert.equal(p.perpCollateral, 0n);
       assert.equal(p.perpNetQuantity, 0n);
       assert.equal(p.perpIsLiquidatable, false);
     });
