@@ -1,4 +1,5 @@
 import type { PublicClient, WalletClient, Account, Chain } from "viem";
+import { erc20Abi } from "viem";
 import type pino from "pino";
 import { ierc20PermitAbi, ierc5267Abi, hashPowerPerpsDexAbi } from "./abi.ts";
 import type { InventoryManager } from "./inventoryManager.ts";
@@ -34,33 +35,70 @@ export async function topUpCollateral(opts: {
   const owner = account.address;
   logger.info({ amount: amount.toString() }, "topping up collateral");
 
-  const [domain, nonce] = await publicClient.multicall({
-    allowFailure: false,
-    contracts: [
-      {
-        address: tokenAddr,
-        abi: ierc5267Abi,
-        functionName: "eip712Domain",
-      },
-      {
-        address: tokenAddr,
-        abi: ierc20PermitAbi,
-        functionName: "nonces",
-        args: [owner],
-      },
-    ],
-  });
+  const [nameResult, versionResult, nonceResult, eip712DomainResult] = await publicClient.multicall(
+    {
+      allowFailure: true,
+      contracts: [
+        {
+          address: tokenAddr,
+          abi: erc20Abi,
+          functionName: "name",
+        },
+        {
+          address: tokenAddr,
+          abi: [
+            {
+              inputs: [],
+              name: "version",
+              outputs: [{ internalType: "string", name: "", type: "string" }],
+              stateMutability: "view",
+              type: "function",
+            },
+          ],
+          functionName: "version",
+        },
+        {
+          address: tokenAddr,
+          abi: ierc20PermitAbi,
+          functionName: "nonces",
+          args: [owner],
+        },
+        {
+          address: tokenAddr,
+          abi: ierc5267Abi,
+          functionName: "eip712Domain",
+        },
+      ],
+    },
+  );
+
+  let domain: { name: string; version: string; chainId: number; verifyingContract: `0x${string}` };
+  if (eip712DomainResult.status === "success") {
+    const [, name, version, chainId, verifyingContract] = eip712DomainResult.result;
+    domain = {
+      name: name,
+      version: version,
+      chainId: Number(chainId),
+      verifyingContract: verifyingContract,
+    };
+  } else {
+    if (nameResult.status === "failure") throw nameResult.error;
+    domain = {
+      name: nameResult.result,
+      version: versionResult.result || "1",
+      chainId: chain.id,
+      verifyingContract: tokenAddr,
+    };
+  }
+
+  if (nonceResult.status === "failure") throw nonceResult.error;
+  const nonce = nonceResult.result;
 
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 300);
 
   const signature = await walletClient.signTypedData({
     account,
-    domain: {
-      name: domain[1],
-      version: domain[2],
-      chainId: domain[3],
-      verifyingContract: domain[4],
-    },
+    domain,
     types: permitTypes,
     primaryType: "Permit",
     message: { owner, spender: perpsAddress, value: amount, nonce, deadline },
@@ -80,5 +118,8 @@ export async function topUpCollateral(opts: {
   });
   await publicClient.waitForTransactionReceipt({ hash });
   await inventory.update();
-  logger.info({ collateralBalance: inventory.collateralBalance.toString() }, "collateral topped up");
+  logger.info(
+    { collateralBalance: inventory.collateralBalance.toString() },
+    "collateral topped up",
+  );
 }
