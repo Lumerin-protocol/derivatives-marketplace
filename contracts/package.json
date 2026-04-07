@@ -6,14 +6,14 @@
   "author": "Oleksandr Shevchuk <shev@titan.io>",
   "license": "MIT",
   "engines": {
-    "node": "22.x"
+    "node": "24.x"
   },
   "scripts": {
     "format:sol": "forge fmt ./contracts/**/*.sol",
     "test": "hardhat test",
     "test-coverage": "hardhat test --coverage",
-    "build": "hardhat build && node scripts/export-abis.ts && wagmi generate",
-    "compile": "hardhat build && node scripts/export-abis.ts && wagmi generate",
+    "build": "hardhat build && node scripts/export-abis.ts",
+    "compile": "pnpm build",
     "clean": "rm -rf abi artifacts cache",
     "aderyn": "aderyn",
     "deploy-local": "hardhat run scripts/deploy-local.ts",
@@ -27,7 +27,6 @@
     "@openzeppelin/contracts": "npm:@openzeppelin/contracts@5.1.0",
     "@openzeppelin/contracts-upgradeable": "npm:@openzeppelin/contracts-upgradeable@5.1.0",
     "@types/node": "^22.0.0",
-    "@wagmi/cli": "^2.1.22",
     "hardhat": "^3.2",
     "typescript": "^5.8.0"
   },

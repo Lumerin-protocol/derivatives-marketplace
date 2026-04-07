@@ -1,5 +1,5 @@
 import type { Address, PublicClient } from "viem";
-import { optionOrderBookAbi } from "./abis.ts";
+import { OptionOrderBookAbi } from "./abi/OptionOrderBook";
 
 export type OrderBookLevel = { priceTicks: bigint; totalRemaining: bigint };
 
@@ -22,7 +22,7 @@ async function sumRemainingAtLevel(
   const orderIds: bigint[] = [];
   let cur = await publicClient.readContract({
     address: book,
-    abi: optionOrderBookAbi,
+    abi: OptionOrderBookAbi,
     functionName: "nextOrderInQueue",
     args: [seriesId, isBuy, priceTicks, 0n],
   });
@@ -30,7 +30,7 @@ async function sumRemainingAtLevel(
     orderIds.push(cur);
     cur = await publicClient.readContract({
       address: book,
-      abi: optionOrderBookAbi,
+      abi: OptionOrderBookAbi,
       functionName: "nextOrderInQueue",
       args: [seriesId, isBuy, priceTicks, cur],
     });
@@ -44,24 +44,14 @@ async function sumRemainingAtLevel(
     const res = await publicClient.multicall({
       contracts: slice.map((orderId) => ({
         address: book,
-        abi: optionOrderBookAbi,
+        abi: OptionOrderBookAbi,
         functionName: "getOrder" as const,
         args: [orderId],
       })),
     });
     for (const row of res) {
       if (row.status === "success") {
-        const r = row.result as readonly [
-          Address,
-          bigint,
-          boolean,
-          boolean,
-          boolean,
-          bigint,
-          bigint,
-          bigint,
-        ];
-        total += r[6];
+        total += row.result.size;
       }
     }
   }
@@ -79,7 +69,7 @@ async function walkSide(
   const bestFn = isBuy ? ("bestBid" as const) : ("bestAsk" as const);
   const [, firstTick] = await publicClient.readContract({
     address: book,
-    abi: optionOrderBookAbi,
+    abi: OptionOrderBookAbi,
     functionName: bestFn,
     args: [seriesId],
   });
@@ -91,7 +81,7 @@ async function walkSide(
     }
     const [nextTick, found] = await publicClient.readContract({
       address: book,
-      abi: optionOrderBookAbi,
+      abi: OptionOrderBookAbi,
       functionName: "nextLevel",
       args: [seriesId, isBuy, tick],
     });
@@ -114,13 +104,13 @@ export async function fetchOrderBookSnapshot(
     walkSide(publicClient, book, seriesId, false, maxLevels),
     publicClient.readContract({
       address: book,
-      abi: optionOrderBookAbi,
+      abi: OptionOrderBookAbi,
       functionName: "bestBid",
       args: [seriesId],
     }),
     publicClient.readContract({
       address: book,
-      abi: optionOrderBookAbi,
+      abi: OptionOrderBookAbi,
       functionName: "bestAsk",
       args: [seriesId],
     }),

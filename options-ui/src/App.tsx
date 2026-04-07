@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { formatUnits, isAddress, maxUint256, parseUnits } from "viem";
+import { erc20Abi, formatUnits, isAddress, maxUint256, parseUnits } from "viem";
 import {
   useAccount,
   useChainId,
@@ -13,14 +13,9 @@ import {
   useWriteContract,
 } from "wagmi";
 import { injected } from "wagmi/connectors";
-import {
-  erc20Abi,
-  optionMarginEngineAbi,
-  optionMatchingRouterAbi,
-  optionOrderBookAbi,
-  registryAbi,
-} from "./abis.ts";
+
 import { fetchOrderBookSnapshot, type OrderBookSnapshot } from "./orderbook.ts";
+import { simulateThenWriteContract } from "./simulateWrite.ts";
 import {
   buildChainRows,
   formatStrikeUsd,
@@ -33,6 +28,10 @@ import {
   uniqueExpiriesSorted,
 } from "./seriesCatalog.ts";
 import { targetChain } from "./wagmi.ts";
+import { OptionMatchingRouterAbi } from "./abi/OptionMatchingRouter.ts";
+import { OptionOrderBookAbi } from "./abi/OptionOrderBook.ts";
+import { OptionMarginEngineAbi } from "./abi/OptionMarginEngine.ts";
+import { OptionMarketRegistryAbi } from "./abi/OptionMarketRegistry.ts";
 
 const BOOK_MAX_LEVELS = 12;
 const POLL_MS = 4_000;
@@ -62,12 +61,9 @@ export function App() {
   /** Reads use the wallet’s chain; block when connected on a non-Hardhat network. */
   const rpcOk = addrsOk && !wrongNetwork;
 
-  const {
-    data: nextSeriesIdBn,
-    isPending: nextSeriesIdPending,
-  } = useReadContract({
+  const { data: nextSeriesIdBn, isPending: nextSeriesIdPending } = useReadContract({
     address: registryAddr,
-    abi: registryAbi,
+    abi: OptionMarketRegistryAbi,
     functionName: "nextSeriesId",
     query: { enabled: rpcOk },
   });
@@ -89,7 +85,7 @@ export function App() {
   const { data: seriesReads, isPending: seriesReadsPending } = useReadContracts({
     contracts: idList.map((seriesId) => ({
       address: registryAddr,
-      abi: registryAbi,
+      abi: OptionMarketRegistryAbi,
       functionName: "getSeries" as const,
       args: [seriesId],
     })),
@@ -112,12 +108,12 @@ export function App() {
       const t = r.result;
       out.push({
         seriesId: idList[i],
-        strikeE8: t[0],
-        expiryTs: t[1],
-        isCall: t[2],
-        tickSizeE8: t[3],
-        lotSize: t[4],
-        status: t[5],
+        strikeE8: t.strikeE8,
+        expiryTs: t.expiryTs,
+        isCall: t.isCall,
+        tickSizeE8: t.tickSizeE8,
+        lotSize: t.lotSize,
+        status: t.status,
       });
     }
     return out;
@@ -187,13 +183,14 @@ export function App() {
   }, [catalog, chainRows, selectedExpiry, selectedSeriesId]);
 
   const selectedMeta = useMemo(
-    () => (selectedSeriesId === null ? undefined : catalog.find((c) => c.seriesId === selectedSeriesId)),
+    () =>
+      selectedSeriesId === null ? undefined : catalog.find((c) => c.seriesId === selectedSeriesId),
     [catalog, selectedSeriesId],
   );
 
   const { data: bookAddr_ } = useReadContract({
     address: routerAddr,
-    abi: optionMatchingRouterAbi,
+    abi: OptionMatchingRouterAbi,
     functionName: "book",
     query: { enabled: rpcOk },
   });
@@ -219,13 +216,13 @@ export function App() {
     return seriesIdsForQuotes.flatMap((seriesId) => [
       {
         address: bookAddr,
-        abi: optionOrderBookAbi,
+        abi: OptionOrderBookAbi,
         functionName: "bestBid" as const,
         args: [seriesId],
       },
       {
         address: bookAddr,
-        abi: optionOrderBookAbi,
+        abi: OptionOrderBookAbi,
         functionName: "bestAsk" as const,
         args: [seriesId],
       },
@@ -262,7 +259,7 @@ export function App() {
 
   const { data: tokenFromEngine } = useReadContract({
     address: engineAddr,
-    abi: optionMarginEngineAbi,
+    abi: OptionMarginEngineAbi,
     functionName: "collateralToken",
     query: { enabled: rpcOk && isAddress(engineAddr) },
   });
@@ -298,13 +295,13 @@ export function App() {
             },
             {
               address: engineAddr,
-              abi: optionMarginEngineAbi,
+              abi: OptionMarginEngineAbi,
               functionName: "getCollateral",
               args: [address],
             },
             {
               address: engineAddr,
-              abi: optionMarginEngineAbi,
+              abi: OptionMarginEngineAbi,
               functionName: "getPosition",
               args: [address, selectedSeriesId],
             },
@@ -319,7 +316,7 @@ export function App() {
               },
               {
                 address: engineAddr,
-                abi: optionMarginEngineAbi,
+                abi: OptionMarginEngineAbi,
                 functionName: "getCollateral",
                 args: [address],
               },
@@ -331,14 +328,10 @@ export function App() {
     },
   });
 
-  const walletUsdc =
-    liveReads?.[0]?.status === "success" ? liveReads[0].result : undefined;
-  const collateralWad =
-    liveReads?.[1]?.status === "success" ? liveReads[1].result : undefined;
+  const walletUsdc = liveReads?.[0]?.status === "success" ? liveReads[0].result : undefined;
+  const collateralWad = liveReads?.[1]?.status === "success" ? liveReads[1].result : undefined;
   const positionQty =
-    liveReads?.length === 3 && liveReads[2]?.status === "success"
-      ? liveReads[2].result
-      : undefined;
+    liveReads?.length === 3 && liveReads[2]?.status === "success" ? liveReads[2].result : undefined;
 
   const [bookSnap, setBookSnap] = useState<OrderBookSnapshot | null>(null);
   const [bookErr, setBookErr] = useState<string | null>(null);
@@ -381,9 +374,11 @@ export function App() {
   const [sizeContractsStr, setSizeContractsStr] = useState("1");
   const [orderSideBuy, setOrderSideBuy] = useState(true);
   const [postOnly, setPostOnly] = useState(false);
+  /** Simulation failures (or other throws before/at write) — hook `writeError` only covers the wallet send. */
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const {
-    writeContract,
+    writeContractAsync,
     data: txHash,
     isPending: writePending,
     error: writeError,
@@ -401,56 +396,85 @@ export function App() {
 
   useEffect(() => {
     if (txSuccess) {
+      setActionError(null);
       bumpQueries();
     }
   }, [txSuccess, bumpQueries]);
 
-  const approveUsdc = () => {
-    if (!address || !isAddress(usdcEffective)) {
+  useEffect(() => {
+    if (writeError) {
+      console.error("[options-ui] writeContract failed:", writeError);
+    }
+  }, [writeError]);
+
+  const runSimulatedTx = useCallback(
+    async (fn: () => ReturnType<typeof simulateThenWriteContract>) => {
+      setActionError(null);
+      try {
+        await fn();
+      } catch (e) {
+        console.error("[options-ui] simulated tx failed:", e);
+        setActionError(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [],
+  );
+
+  const approveUsdc = async () => {
+    if (!address || !isAddress(usdcEffective) || !publicClient) {
       return;
     }
-    writeContract({
-      address: usdcEffective,
-      abi: erc20Abi,
-      functionName: "approve",
-      args: [vaultAddr, maxUint256],
-    });
+    await runSimulatedTx(() =>
+      simulateThenWriteContract(publicClient, writeContractAsync, {
+        account: address,
+        address: usdcEffective,
+        abi: erc20Abi,
+        functionName: "approve",
+        args: [vaultAddr, maxUint256],
+      }),
+    );
   };
 
-  const deposit = () => {
-    if (!address) {
+  const deposit = async () => {
+    if (!address || !publicClient) {
       return;
     }
     const amt = parseUnits(depositStr || "0", tokenDecimals);
     if (amt === 0n) {
       return;
     }
-    writeContract({
-      address: engineAddr,
-      abi: optionMarginEngineAbi,
-      functionName: "deposit",
-      args: [amt],
-    });
+    await runSimulatedTx(() =>
+      simulateThenWriteContract(publicClient, writeContractAsync, {
+        account: address,
+        address: engineAddr,
+        abi: OptionMarginEngineAbi,
+        functionName: "deposit",
+        args: [amt],
+      }),
+    );
   };
 
-  const withdraw = () => {
-    if (!address) {
+  const withdraw = async () => {
+    if (!address || !publicClient) {
       return;
     }
     const amt = parseUnits(withdrawStr || "0", tokenDecimals);
     if (amt === 0n) {
       return;
     }
-    writeContract({
-      address: engineAddr,
-      abi: optionMarginEngineAbi,
-      functionName: "withdraw",
-      args: [amt],
-    });
+    await runSimulatedTx(() =>
+      simulateThenWriteContract(publicClient, writeContractAsync, {
+        account: address,
+        address: engineAddr,
+        abi: OptionMarginEngineAbi,
+        functionName: "withdraw",
+        args: [amt],
+      }),
+    );
   };
 
-  const submitOrder = () => {
-    if (selectedSeriesId === null || selectedMeta === undefined) {
+  const submitOrder = async () => {
+    if (selectedSeriesId === null || selectedMeta === undefined || !address || !publicClient) {
       return;
     }
     const priceTicks = priceTicksFromPremiumInput(pricePremiumStr, selectedMeta.tickSizeE8);
@@ -463,22 +487,25 @@ export function App() {
     if (size === 0n) {
       return;
     }
-    writeContract({
-      address: routerAddr,
-      abi: optionMatchingRouterAbi,
-      functionName: "submitOrder",
-      args: [
-        {
-          seriesId: selectedSeriesId,
-          isBuy: orderSideBuy,
-          priceTicks,
-          size,
-          orderType: 0,
-          postOnly,
-          reduceOnly: false,
-        },
-      ],
-    });
+    await runSimulatedTx(() =>
+      simulateThenWriteContract(publicClient, writeContractAsync, {
+        account: address,
+        address: routerAddr,
+        abi: OptionMatchingRouterAbi,
+        functionName: "submitOrder",
+        args: [
+          {
+            seriesId: selectedSeriesId,
+            isBuy: orderSideBuy,
+            priceTicks,
+            size,
+            orderType: 0,
+            postOnly,
+            reduceOnly: false,
+          },
+        ],
+      }),
+    );
   };
 
   const selectInstrument = (row: ChainRow, side: "call" | "put") => {
@@ -553,10 +580,7 @@ export function App() {
   const lotSize = selectedMeta?.lotSize ?? 0;
 
   const registryHasNoSeries =
-    rpcOk &&
-    !nextSeriesIdPending &&
-    nextSeriesIdBn !== undefined &&
-    nextSeriesIdBn <= 1n;
+    rpcOk && !nextSeriesIdPending && nextSeriesIdBn !== undefined && nextSeriesIdBn <= 1n;
 
   const catalogBootloading =
     rpcOk &&
@@ -581,7 +605,9 @@ export function App() {
             </button>
           ) : (
             <>
-              <span className="max-w-[200px] truncate font-mono text-xs text-zinc-400">{address}</span>
+              <span className="max-w-[200px] truncate font-mono text-xs text-zinc-400">
+                {address}
+              </span>
               <button
                 type="button"
                 className="rounded border border-zinc-600 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
@@ -615,6 +641,25 @@ export function App() {
         </div>
       </header>
 
+      {actionError || writeError ? (
+        <div
+          role="alert"
+          className="mb-6 rounded-lg border border-red-600 bg-red-950/50 px-4 py-3 text-sm"
+        >
+          <p className="font-medium text-red-200">Transaction error</p>
+          {actionError ? (
+            <p className="mt-2 whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-red-100/95">
+              {actionError}
+            </p>
+          ) : null}
+          {writeError ? (
+            <p className="mt-2 whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-red-100/95">
+              {writeError.message}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
       {wrongNetwork ? (
         <div
           role="alert"
@@ -623,8 +668,8 @@ export function App() {
           <p className="font-medium text-amber-100">Wrong network</p>
           <p className="mt-1 text-amber-200/90">
             This app uses <span className="font-mono">{targetChain.name}</span> only (chain ID{" "}
-            <span className="font-mono">{targetChain.id}</span>). Add the network in your wallet if needed,
-            then switch.
+            <span className="font-mono">{targetChain.id}</span>). Add the network in your wallet if
+            needed, then switch.
           </p>
           <button
             type="button"
@@ -652,9 +697,7 @@ export function App() {
         <p className="text-sm text-zinc-500">No option series on registry yet.</p>
       ) : null}
 
-      {catalogBootloading ? (
-        <p className="text-sm text-zinc-500">Loading option series…</p>
-      ) : null}
+      {catalogBootloading ? <p className="text-sm text-zinc-500">Loading option series…</p> : null}
 
       {catalog.length > 0 ? (
         <section className="mb-8 overflow-x-auto rounded-lg border border-zinc-800 bg-zinc-900/40">
@@ -664,7 +707,9 @@ export function App() {
                 key={e.toString()}
                 type="button"
                 className={`rounded px-3 py-1 text-xs ${
-                  selectedExpiry === e ? "bg-zinc-700 text-white" : "text-zinc-400 hover:bg-zinc-800"
+                  selectedExpiry === e
+                    ? "bg-zinc-700 text-white"
+                    : "text-zinc-400 hover:bg-zinc-800"
                 }`}
                 onClick={() => setSelectedExpiry(e)}
               >
@@ -697,9 +742,13 @@ export function App() {
                 const callActive = callMeta?.status === 1;
                 const putActive = putMeta?.status === 1;
                 const callSel =
-                  selectedSeriesId !== null && row.callSeriesId === selectedSeriesId && selectedSide === "call";
+                  selectedSeriesId !== null &&
+                  row.callSeriesId === selectedSeriesId &&
+                  selectedSide === "call";
                 const putSel =
-                  selectedSeriesId !== null && row.putSeriesId === selectedSeriesId && selectedSide === "put";
+                  selectedSeriesId !== null &&
+                  row.putSeriesId === selectedSeriesId &&
+                  selectedSide === "put";
                 return (
                   <tr key={row.key} className="border-b border-zinc-800/80">
                     <td className="min-w-0 p-2 align-top">
@@ -716,7 +765,9 @@ export function App() {
                           } disabled:cursor-not-allowed disabled:opacity-40`}
                           onClick={() => selectInstrument(row, "call")}
                         >
-                          <div className="font-mono text-zinc-500">#{row.callSeriesId.toString()}</div>
+                          <div className="font-mono text-zinc-500">
+                            #{row.callSeriesId.toString()}
+                          </div>
                           {quoteCell(row.callSeriesId, callTs)}
                           {callMeta ? (
                             <div className="mt-1 text-[10px] text-zinc-500">
@@ -743,7 +794,9 @@ export function App() {
                           } disabled:cursor-not-allowed disabled:opacity-40`}
                           onClick={() => selectInstrument(row, "put")}
                         >
-                          <div className="font-mono text-zinc-500">#{row.putSeriesId.toString()}</div>
+                          <div className="font-mono text-zinc-500">
+                            #{row.putSeriesId.toString()}
+                          </div>
                           {quoteCell(row.putSeriesId, putTs)}
                           {putMeta ? (
                             <div className="mt-1 text-[10px] text-zinc-500">
@@ -814,7 +867,9 @@ export function App() {
               <button
                 type="button"
                 className={`flex-1 rounded py-2 text-sm font-medium ${
-                  orderSideBuy ? "bg-emerald-700 text-white" : "border border-zinc-600 text-zinc-300"
+                  orderSideBuy
+                    ? "bg-emerald-700 text-white"
+                    : "border border-zinc-600 text-zinc-300"
                 }`}
                 onClick={() => setOrderSideBuy(true)}
               >
@@ -863,7 +918,9 @@ export function App() {
               <p className="mt-2 text-xs text-zinc-500">
                 Tick size {premiumParse.tickSizeLabel} USDC · lot {lotSize.toString()} raw ·{" "}
                 {premiumParse.ticks !== null ? (
-                  <span className="font-mono text-zinc-400">{premiumParse.ticks.toString()} ticks</span>
+                  <span className="font-mono text-zinc-400">
+                    {premiumParse.ticks.toString()} ticks
+                  </span>
                 ) : pricePremiumStr.trim() !== "" ? (
                   <span className="text-amber-400">
                     multiple of {premiumParse.tickSizeLabel} required
@@ -877,7 +934,7 @@ export function App() {
               type="button"
               className="mt-3 w-full rounded-lg bg-sky-700 py-2 text-sm font-medium hover:bg-sky-600 disabled:opacity-40"
               disabled={tradeDisabled}
-              onClick={() => submitOrder()}
+              onClick={() => void submitOrder()}
             >
               Submit limit
             </button>
@@ -907,7 +964,9 @@ export function App() {
                 {selectedSeriesId !== null ? (
                   <li>
                     Position (#{selectedSeriesId.toString()}):{" "}
-                    <span className="font-mono text-zinc-200">{positionQty?.toString() ?? "—"}</span>
+                    <span className="font-mono text-zinc-200">
+                      {positionQty?.toString() ?? "—"}
+                    </span>
                   </li>
                 ) : null}
                 <li>
@@ -924,7 +983,7 @@ export function App() {
               type="button"
               className="mb-3 rounded border border-zinc-600 px-3 py-1.5 text-sm hover:bg-zinc-800 disabled:opacity-40"
               disabled={!isConnected || wrongNetwork || !addrsOk || writePending}
-              onClick={() => approveUsdc()}
+              onClick={() => void approveUsdc()}
             >
               Approve USDC (max)
             </button>
@@ -941,7 +1000,7 @@ export function App() {
                 type="button"
                 className="rounded bg-emerald-800 px-3 py-1.5 text-sm hover:bg-emerald-700 disabled:opacity-40"
                 disabled={!isConnected || wrongNetwork || !addrsOk || writePending}
-                onClick={() => deposit()}
+                onClick={() => void deposit()}
               >
                 Deposit
               </button>
@@ -957,7 +1016,7 @@ export function App() {
                 type="button"
                 className="rounded border border-zinc-600 px-3 py-1.5 text-sm hover:bg-zinc-800 disabled:opacity-40"
                 disabled={!isConnected || wrongNetwork || !addrsOk || writePending}
-                onClick={() => withdraw()}
+                onClick={() => void withdraw()}
               >
                 Withdraw
               </button>
@@ -967,11 +1026,8 @@ export function App() {
       </div>
 
       <footer className="mt-8 border-t border-zinc-800 pt-3 text-xs text-zinc-600">
-        {writePending || txConfirming ? (
-          <p>Transaction… {txHash ? String(txHash) : ""}</p>
-        ) : null}
+        {writePending || txConfirming ? <p>Transaction… {txHash ? String(txHash) : ""}</p> : null}
         {txSuccess ? <p className="text-emerald-500">Confirmed.</p> : null}
-        {writeError ? <p className="text-red-400">{writeError.message}</p> : null}
       </footer>
     </div>
   );

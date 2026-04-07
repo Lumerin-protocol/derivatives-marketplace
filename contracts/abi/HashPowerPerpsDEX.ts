@@ -1,4 +1,4 @@
-[
+export const HashPowerPerpsDEXAbi = [
   {
     "inputs": [
       {
@@ -228,17 +228,6 @@
       }
     ],
     "name": "OwnableUnauthorizedAccount",
-    "type": "error"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "token",
-        "type": "address"
-      }
-    ],
-    "name": "SafeERC20FailedOperation",
     "type": "error"
   },
   {
@@ -1160,6 +1149,25 @@
         "type": "address"
       }
     ],
+    "name": "getOrderMargin",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      }
+    ],
     "name": "getPendingFunding",
     "outputs": [
       {
@@ -1309,14 +1317,9 @@
         "type": "address"
       },
       {
-        "internalType": "uint8",
-        "name": "_marginPercent",
-        "type": "uint8"
-      },
-      {
-        "internalType": "uint8",
-        "name": "_maintenanceMarginPercent",
-        "type": "uint8"
+        "internalType": "contract ICollateralVault",
+        "name": "_vault",
+        "type": "address"
       }
     ],
     "name": "initialize",
@@ -1494,6 +1497,19 @@
   },
   {
     "inputs": [],
+    "name": "portfolioMargin",
+    "outputs": [
+      {
+        "internalType": "contract IPortfolioMarginEngine",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "priceOracle",
     "outputs": [
       {
@@ -1579,32 +1595,6 @@
   {
     "inputs": [
       {
-        "internalType": "uint8",
-        "name": "_maintenanceMarginPercent",
-        "type": "uint8"
-      }
-    ],
-    "name": "setMaintenanceMarginPercent",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint8",
-        "name": "_marginPercent",
-        "type": "uint8"
-      }
-    ],
-    "name": "setMarginPercent",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
         "internalType": "int16",
         "name": "_takerFeeBps",
         "type": "int16"
@@ -1642,6 +1632,19 @@
       }
     ],
     "name": "setOracle",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "contract IPortfolioMarginEngine",
+        "name": "_pm",
+        "type": "address"
+      }
+    ],
+    "name": "setPortfolioMargin",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -1811,6 +1814,19 @@
     "type": "function"
   },
   {
+    "inputs": [],
+    "name": "vault",
+    "outputs": [
+      {
+        "internalType": "contract ICollateralVault",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [
       {
         "internalType": "uint256",
@@ -1823,4 +1839,4 @@
     "stateMutability": "nonpayable",
     "type": "function"
   }
-]
+] as const;

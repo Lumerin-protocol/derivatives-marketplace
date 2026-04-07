@@ -1,4 +1,4 @@
-[
+export const PriceOracleMockAbi = [
   {
     "inputs": [
       {
@@ -158,4 +158,4 @@
     "stateMutability": "pure",
     "type": "function"
   }
-]
+] as const;

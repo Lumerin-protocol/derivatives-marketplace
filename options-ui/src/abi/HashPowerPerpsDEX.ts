@@ -1,4 +1,4 @@
-[
+export const HashPowerPerpsDEXAbi = [
   {
     "inputs": [
       {
@@ -228,17 +228,6 @@
       }
     ],
     "name": "OwnableUnauthorizedAccount",
-    "type": "error"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "token",
-        "type": "address"
-      }
-    ],
-    "name": "SafeERC20FailedOperation",
     "type": "error"
   },
   {
@@ -542,50 +531,67 @@
       {
         "indexed": true,
         "internalType": "bytes32",
-        "name": "orderId",
-        "type": "bytes32"
-      },
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "participant",
-        "type": "address"
-      }
-    ],
-    "name": "OrderFilled",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "bytes32",
         "name": "makerOrderId",
         "type": "bytes32"
       },
       {
         "indexed": true,
         "internalType": "address",
-        "name": "buyer",
+        "name": "maker",
         "type": "address"
       },
       {
         "indexed": true,
         "internalType": "address",
-        "name": "seller",
+        "name": "taker",
         "type": "address"
       },
       {
         "indexed": false,
         "internalType": "uint256",
-        "name": "price",
+        "name": "tradePrice",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "int256",
+        "name": "takerQuantity",
+        "type": "int256"
+      },
+      {
+        "indexed": false,
+        "internalType": "int256",
+        "name": "makerFee",
+        "type": "int256"
+      },
+      {
+        "indexed": false,
+        "internalType": "int256",
+        "name": "takerFee",
+        "type": "int256"
+      },
+      {
+        "indexed": false,
+        "internalType": "int256",
+        "name": "makerNetQtyAfter",
+        "type": "int256"
+      },
+      {
+        "indexed": false,
+        "internalType": "int256",
+        "name": "takerNetQtyAfter",
+        "type": "int256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "makerEntryPriceAfter",
         "type": "uint256"
       },
       {
         "indexed": false,
         "internalType": "uint256",
-        "name": "quantity",
+        "name": "takerEntryPriceAfter",
         "type": "uint256"
       }
     ],
@@ -671,49 +677,6 @@
       }
     ],
     "name": "PositionLiquidated",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "user",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "tradePrice",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "int256",
-        "name": "quantity",
-        "type": "int256"
-      },
-      {
-        "indexed": false,
-        "internalType": "int256",
-        "name": "netQuantityAfter",
-        "type": "int256"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "aggregatedEntryPriceAfter",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "int256",
-        "name": "realizedPnl",
-        "type": "int256"
-      }
-    ],
-    "name": "PositionTrade",
     "type": "event"
   },
   {
@@ -1075,6 +1038,25 @@
         "type": "address"
       }
     ],
+    "name": "getInitialMargin",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      }
+    ],
     "name": "getMaintenanceMargin",
     "outputs": [
       {
@@ -1127,7 +1109,7 @@
             "type": "int256"
           }
         ],
-        "internalType": "struct PerpsSimpleDLL.Order",
+        "internalType": "struct HashPowerPerpsDEX.Order",
         "name": "",
         "type": "tuple"
       }
@@ -1154,6 +1136,25 @@
         "internalType": "uint256[]",
         "name": "askPrices",
         "type": "uint256[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      }
+    ],
+    "name": "getOrderMargin",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
       }
     ],
     "stateMutability": "view",
@@ -1196,6 +1197,25 @@
       {
         "internalType": "uint256",
         "name": "totalQuantity",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      }
+    ],
+    "name": "getRequiredMargin",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
         "type": "uint256"
       }
     ],
@@ -1263,7 +1283,7 @@
             "type": "uint256"
           }
         ],
-        "internalType": "struct PerpsSimpleDLL.Position",
+        "internalType": "struct HashPowerPerpsDEX.Position",
         "name": "",
         "type": "tuple"
       }
@@ -1297,14 +1317,9 @@
         "type": "address"
       },
       {
-        "internalType": "uint8",
-        "name": "_marginPercent",
-        "type": "uint8"
-      },
-      {
-        "internalType": "uint8",
-        "name": "_maintenanceMarginPercent",
-        "type": "uint8"
+        "internalType": "contract ICollateralVault",
+        "name": "_vault",
+        "type": "address"
       }
     ],
     "name": "initialize",
@@ -1347,12 +1362,12 @@
   {
     "inputs": [
       {
-        "internalType": "address",
-        "name": "_user",
-        "type": "address"
+        "internalType": "address[]",
+        "name": "_users",
+        "type": "address[]"
       }
     ],
-    "name": "liquidate",
+    "name": "liquidateBatch",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -1436,6 +1451,25 @@
     "type": "function"
   },
   {
+    "inputs": [
+      {
+        "internalType": "bytes[]",
+        "name": "data",
+        "type": "bytes[]"
+      }
+    ],
+    "name": "multicall",
+    "outputs": [
+      {
+        "internalType": "bytes[]",
+        "name": "results",
+        "type": "bytes[]"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
     "inputs": [],
     "name": "name",
     "outputs": [
@@ -1454,6 +1488,19 @@
     "outputs": [
       {
         "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "portfolioMargin",
+    "outputs": [
+      {
+        "internalType": "contract IPortfolioMarginEngine",
         "name": "",
         "type": "address"
       }
@@ -1508,6 +1555,13 @@
     "type": "function"
   },
   {
+    "inputs": [],
+    "name": "resetState",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
     "inputs": [
       {
         "internalType": "uint256",
@@ -1534,32 +1588,6 @@
       }
     ],
     "name": "setLiquidationFee",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint8",
-        "name": "_maintenanceMarginPercent",
-        "type": "uint8"
-      }
-    ],
-    "name": "setMaintenanceMarginPercent",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint8",
-        "name": "_marginPercent",
-        "type": "uint8"
-      }
-    ],
-    "name": "setMarginPercent",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -1604,6 +1632,19 @@
       }
     ],
     "name": "setOracle",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "contract IPortfolioMarginEngine",
+        "name": "_pm",
+        "type": "address"
+      }
+    ],
+    "name": "setPortfolioMargin",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -1773,6 +1814,19 @@
     "type": "function"
   },
   {
+    "inputs": [],
+    "name": "vault",
+    "outputs": [
+      {
+        "internalType": "contract ICollateralVault",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [
       {
         "internalType": "uint256",
@@ -1785,4 +1839,4 @@
     "stateMutability": "nonpayable",
     "type": "function"
   }
-]
+] as const;

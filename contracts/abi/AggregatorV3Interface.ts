@@ -1,4 +1,4 @@
-[
+export const AggregatorV3InterfaceAbi = [
   {
     "inputs": [],
     "name": "decimals",
@@ -110,4 +110,4 @@
     "stateMutability": "view",
     "type": "function"
   }
-]
+] as const;

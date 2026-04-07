@@ -1,4 +1,20 @@
-[
+export const PriceOracleMockAbi = [
+  {
+    "inputs": [
+      {
+        "internalType": "int256",
+        "name": "initialPrice",
+        "type": "int256"
+      },
+      {
+        "internalType": "uint8",
+        "name": "decimals_",
+        "type": "uint8"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "constructor"
+  },
   {
     "inputs": [],
     "name": "decimals",
@@ -23,6 +39,13 @@
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "freezeTimestamp",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -106,11 +129,18 @@
       },
       {
         "internalType": "uint8",
-        "name": "ndecimals",
+        "name": "decimals_",
         "type": "uint8"
       }
     ],
     "name": "setPrice",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "unfreezeTimestamp",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -125,7 +155,7 @@
         "type": "uint256"
       }
     ],
-    "stateMutability": "view",
+    "stateMutability": "pure",
     "type": "function"
   }
-]
+] as const;

@@ -1,4 +1,4 @@
-[
+export const Multicall3Abi = [
   {
     "inputs": [
       {
@@ -437,4 +437,4 @@
     "stateMutability": "payable",
     "type": "function"
   }
-]
+] as const;
