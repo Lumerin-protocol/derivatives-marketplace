@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { parseUnits, maxUint256, encodeFunctionData } from "viem";
 import type { NetworkConnection } from "hardhat/types/network";
 import {
@@ -12,6 +14,14 @@ import {
 import { computeExpectedFunding as _computeExpectedFunding } from "./utils.ts";
 
 type Conn = NetworkConnection;
+
+const MULTICALL3_ADDRESS = "0xcA11bde05977b3631167028862bE2a173976CA11" as const;
+
+function loadMulticall3DeployedBytecode(): `0x${string}` {
+  const path = resolve(import.meta.dirname, "../artifacts/contracts/Multicall3.sol/Multicall3.json");
+  const json = JSON.parse(readFileSync(path, "utf-8")) as { deployedBytecode: `0x${string}` };
+  return json.deployedBytecode;
+}
 
 export async function deployPerpsFixture(conn: Conn) {
   const { viem } = conn;
@@ -306,7 +316,13 @@ export async function deployLocalFullStackFixture(conn: Conn) {
   const pc = await viem.getPublicClient();
   const tc = await viem.getTestClient();
 
+  await tc.setCode({
+    address: MULTICALL3_ADDRESS,
+    bytecode: loadMulticall3DeployedBytecode(),
+  });
+
   const usdcMock = await viem.deployContract("contracts/USDCMock.sol:USDCMock", []);
+  console.log("usdcMock address", usdcMock.address);
   const tokenDecimals = await usdcMock.read.decimals();
 
   // Leave owner ~120k USDC for reserve pool + insurance after 4× trader top-ups (1M mint)
@@ -474,20 +490,49 @@ export async function deployLocalFullStackFixture(conn: Conn) {
   });
 
   const latest = BigInt(await networkHelpers.time.latest());
-  const seriesExpiry = latest + 604800n;
 
-  await registry.write.createSeries(
-    [
-      defaultSeries.strikeE8,
-      seriesExpiry,
-      defaultSeries.isCall,
-      Number(defaultSeries.tickSizeE8),
-      defaultSeries.lotSize,
-      defaultSeries.initialIV,
-    ],
-    { account: owner.account },
-  );
+  /// Unix-second offsets from `latest` for each listed expiry (local dev chain only).
+  const LOCAL_OPTIONS_EXPIRY_OFFSETS_SEC = [604800n, 1209600n, 1814400n] as const; // +1w, +2w, +3w
+  /// Strike prices in 1e8 USD (Chainlink-style), paired with CALL + PUT per expiry.
+  const LOCAL_OPTIONS_STRIKES_E8 = [
+    45_000n * 10n ** 8n,
+    50_000n * 10n ** 8n,
+    55_000n * 10n ** 8n,
+  ] as const;
+
+  for (const offset of LOCAL_OPTIONS_EXPIRY_OFFSETS_SEC) {
+    const expiryTs = latest + offset;
+    for (const strikeE8 of LOCAL_OPTIONS_STRIKES_E8) {
+      await registry.write.createSeries(
+        [
+          strikeE8,
+          expiryTs,
+          true,
+          Number(defaultSeries.tickSizeE8),
+          defaultSeries.lotSize,
+          defaultSeries.initialIV,
+        ],
+        { account: owner.account },
+      );
+      await registry.write.createSeries(
+        [
+          strikeE8,
+          expiryTs,
+          false,
+          Number(defaultSeries.tickSizeE8),
+          defaultSeries.lotSize,
+          defaultSeries.initialIV,
+        ],
+        { account: owner.account },
+      );
+    }
+  }
+
   const seriesId = 1n;
+  const putSeriesId = 2n;
+  const seriesExpiry = latest + LOCAL_OPTIONS_EXPIRY_OFFSETS_SEC[0];
+  const optionSeriesCount =
+    LOCAL_OPTIONS_EXPIRY_OFFSETS_SEC.length * LOCAL_OPTIONS_STRIKES_E8.length * 2;
 
   for (const w of [seller, buyer, buyer2, seller2, owner]) {
     await usdcMock.write.approve([vault.address, maxUint256], { account: w.account });
@@ -513,7 +558,9 @@ export async function deployLocalFullStackFixture(conn: Conn) {
       fundingDecimals,
       tokenDecimals,
       seriesId,
+      putSeriesId,
       seriesExpiry,
+      optionSeriesCount,
     },
     contracts: {
       usdcMock,

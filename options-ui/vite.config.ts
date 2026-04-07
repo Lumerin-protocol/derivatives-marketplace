@@ -11,9 +11,6 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
  * Non-strings are JSON-serialized; use explicit expressions when `import.meta.env.*` should not be a string literal.
  */
 function importMetaEnvDefineLiteral(value: unknown): string {
-  if (value instanceof URL) {
-    return `new URL(${JSON.stringify(value.href)})`;
-  }
   if (typeof value === "bigint") {
     return `BigInt(${JSON.stringify(value.toString())})`;
   }
@@ -29,6 +26,7 @@ export default defineConfig(({ mode }) => {
   for (const [key, value] of Object.entries(validated)) {
     define[`import.meta.env.${key}`] = importMetaEnvDefineLiteral(value);
   }
+
   return {
     plugins: [react()],
     envDir: repoRoot,

@@ -16,8 +16,17 @@ export const optionMarginEngineAbi = parseAbi([
 ]);
 
 export const optionMatchingRouterAbi = parseAbi([
+  "function book() view returns (address)",
   "function submitOrder((uint64 seriesId, bool isBuy, uint64 priceTicks, uint128 size, uint8 orderType, bool postOnly, bool reduceOnly)) returns (uint64 orderId, uint128 filledSize, uint128 restedSize)",
   "function cancelOrder(uint64 orderId)",
+]);
+
+export const optionOrderBookAbi = parseAbi([
+  "function bestBid(uint64 seriesId) view returns (uint64 orderId, uint64 priceTicks)",
+  "function bestAsk(uint64 seriesId) view returns (uint64 orderId, uint64 priceTicks)",
+  "function nextLevel(uint64 seriesId, bool isBuy, uint64 afterTick) view returns (uint64 nextTick, bool found)",
+  "function nextOrderInQueue(uint64 seriesId, bool isBuy, uint64 priceTicks, uint64 afterOrderId) view returns (uint64)",
+  "function getOrder(uint64 orderId) view returns (address trader, uint64 seriesId, bool isBuy, bool postOnly, bool reduceOnly, uint128 size, uint128 remaining, uint64 priceTicks)",
 ]);
 
 export const collateralVaultAbi = parseAbi([

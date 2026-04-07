@@ -8,6 +8,7 @@ import { deployLocalFullStackFixture } from "../tests/fixtures.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "../..");
+const rpc = "http://127.0.0.1:8545";
 
 function writeRootEnvLocal(params: {
   collateralToken: `0x${string}`;
@@ -33,9 +34,7 @@ function writeRootEnvLocal(params: {
   liquidationFee: bigint;
   minimumPriceIncrement: bigint;
 }) {
-  const rpc = "http://127.0.0.1:8545";
-  const hardhatKey0 =
-    "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as const;
+  const hardhatKey0 = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as const;
   const feeStr = params.liquidationFee.toString();
   const minIncStr = params.minimumPriceIncrement.toString();
 
@@ -88,8 +87,9 @@ async function main() {
   console.log("Starting local deployment...\n");
   await hre.tasks.getTask("build").run({});
   const runPromise = hre.tasks.getTask("node").run({});
+  await new Promise((resolve) => setTimeout(resolve, 5000));
 
-  const conn = await network.connect();
+  const conn = await network.connect("localhost");
   const data = await deployLocalFullStackFixture(conn);
   const { viem } = conn;
   const { contracts, accounts, config } = data;
@@ -216,8 +216,22 @@ async function main() {
   console.log();
 
   console.log("=== OPTIONS SERIES ===");
-  console.log("Series ID:  ", config.seriesId.toString());
-  console.log("Expiry:     ", config.seriesExpiry.toString(), "(unix seconds)");
+  console.log(
+    "Listed:     ",
+    config.optionSeriesCount.toString(),
+    "contracts (CALL+PUT × strikes × expiries); IDs 1…" + config.optionSeriesCount.toString(),
+  );
+  console.log(
+    "Reference:  call seriesId",
+    config.seriesId.toString(),
+    ", put",
+    config.putSeriesId.toString(),
+  );
+  console.log(
+    "Nearest exp:",
+    config.seriesExpiry.toString(),
+    "(unix seconds, first listed expiry)",
+  );
   console.log();
 
   console.log("=== CONFIG ===");

@@ -3,13 +3,13 @@ import { getAddress } from "viem";
 /** Inlined into the client bundle via vite.config `define`; must match `ImportMetaEnv`. */
 
 const ENV = {
-  ETH_NODE_ADDRESS: validateUrl,
+  /** Normalized RPC URL string (not `URL`) so Vite `define` can inline a JSON string in production builds. */
+  ETH_NODE_ADDRESS: validateRpcUrlString,
   COLLATERAL_TOKEN_ADDRESS: validateAddress,
   VAULT_ADDRESS: validateAddress,
   OPTION_REGISTRY_ADDRESS: validateAddress,
   OPTION_MARGIN_ENGINE_ADDRESS: validateAddress,
   OPTION_MATCHING_ROUTER_ADDRESS: validateAddress,
-  DEFAULT_OPTIONS_SERIES_ID: validateSeriesId,
 } as const;
 
 export type ClientEnvKey = keyof typeof ENV;
@@ -28,6 +28,11 @@ export function validateEnv(raw: Record<string, string>): ClientEnv {
       }
     }
   }
+  for (const key of Object.keys(ENV) as ClientEnvKey[]) {
+    if (!(key in result)) {
+      errors.push(`Missing required env: ${key}`);
+    }
+  }
   if (errors.length > 0) {
     throw new Error(`Invalid environment: ${errors.join(", ")}`);
   }
@@ -38,13 +43,6 @@ function validateAddress(v: string): `0x${string}` {
   return getAddress(v);
 }
 
-function validateUrl(v: string): URL {
-  return new URL(v);
-}
-
-function validateSeriesId(v: string): bigint {
-  if (!/^[0-9]+$/.test(v)) {
-    throw new Error("Expected a numeric integer string for series id");
-  }
-  return BigInt(v);
+function validateRpcUrlString(v: string): string {
+  return new URL(v).href;
 }
