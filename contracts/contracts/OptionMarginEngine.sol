@@ -9,11 +9,11 @@ import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/I
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
-import { AggregatorV3Interface } from "./AggregatorV3Interface.sol";
+import { AggregatorV3Interface } from "./interfaces/AggregatorV3Interface.sol";
 import { OptionMarketRegistry } from "./OptionMarketRegistry.sol";
-import { IHashPowerPerpsDEX } from "./IHashPowerPerpsDEX.sol";
-import { ICollateralVault } from "./ICollateralVault.sol";
-import { IPortfolioMarginEngine } from "./IPortfolioMarginEngine.sol";
+import { IHashPowerPerpsDEX } from "./interfaces/IHashPowerPerpsDEX.sol";
+import { ICollateralVault } from "./interfaces/ICollateralVault.sol";
+import { IPortfolioMarginEngine } from "./interfaces/IPortfolioMarginEngine.sol";
 import { Black76Lib } from "./libs/Black76Lib.sol";
 import { FixedPointMathLib } from "./libs/FixedPointMathLib.sol";
 
@@ -77,7 +77,9 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     event RouterUpdated(address indexed newRouter);
     event SettlementContractUpdated(address indexed settlement);
     event LiquidationConfigUpdated(uint16 feeBps);
-    event Liquidated(address indexed account, address indexed liquidator, uint256 fee, uint64 indexed seriesId, uint128 amount);
+    event Liquidated(
+        address indexed account, address indexed liquidator, uint256 fee, uint64 indexed seriesId, uint128 amount
+    );
     event InsuranceFundDeposited(address indexed depositor, uint256 wadAmount, uint256 totalFund);
     event BadDebtRecorded(uint256 badDebt, uint256 coveredByInsurance);
     event PositionSettled(uint64 indexed seriesId, address indexed user, int256 pnlWad);
@@ -143,12 +145,10 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
         _disableInitializers();
     }
 
-    function initialize(
-        address _registry,
-        address _collateralToken,
-        address _oracle,
-        address _vault
-    ) external initializer {
+    function initialize(address _registry, address _collateralToken, address _oracle, address _vault)
+        external
+        initializer
+    {
         if (_vault == address(0)) revert ZeroAddress();
 
         __Ownable_init(_msgSender());
@@ -169,9 +169,9 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
         marginConfig = MarginConfig({
             imSpotShockBps: 1500, // 15%
             mmSpotShockBps: 1000, // 10%
-            imVolShock: 0.10e18, // 10 vol points
+            imVolShock: 0.1e18, // 10 vol points
             mmVolShock: 0.05e18 // 5 vol points
-        });
+         });
     }
 
     // ── Admin ───────────────────────────────────────────────────────────────
@@ -181,12 +181,10 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
         emit RouterUpdated(_router);
     }
 
-    function setMarginConfig(
-        uint16 imSpotBps,
-        uint16 mmSpotBps,
-        uint128 imVolShock,
-        uint128 mmVolShock
-    ) external onlyOwner {
+    function setMarginConfig(uint16 imSpotBps, uint16 mmSpotBps, uint128 imVolShock, uint128 mmVolShock)
+        external
+        onlyOwner
+    {
         marginConfig = MarginConfig(imSpotBps, mmSpotBps, imVolShock, mmVolShock);
         emit MarginConfigUpdated(imSpotBps, mmSpotBps, imVolShock, mmVolShock);
     }
@@ -307,7 +305,7 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
         uint128 liqAmount = amount > absPos ? absPos : amount;
 
         uint256 marginForLiquidated = _computeSeriesMargin(seriesId, liqAmount, false);
-        uint256 fee = marginForLiquidated * uint256(liquidationFeeBps) / 10000;
+        uint256 fee = marginForLiquidated * uint256(liquidationFeeBps) / 10_000;
 
         address liquidator = _msgSender();
         uint256 bal = vault.getBalance(account);
@@ -350,10 +348,7 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     function initializeIV(uint64 seriesId) external {
         if (_ivStates[seriesId].ewmaIV != 0) return; // already initialized
         OptionMarketRegistry.OptionSeries memory s = registry.getSeries(seriesId);
-        _ivStates[seriesId] = IVState({
-            ewmaIV: uint128(s.initialIV),
-            lastTradeBlock: uint64(block.number)
-        });
+        _ivStates[seriesId] = IVState({ ewmaIV: uint128(s.initialIV), lastTradeBlock: uint64(block.number) });
     }
 
     /// @notice Update EWMA IV after a fill. Router passes the traded premium.
@@ -375,7 +370,7 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
         uint256 rawNew = (uint256(ewmaAlpha) * tradeIV + (WAD - ewmaAlpha) * oldIV) / WAD;
 
         // Per-update clamp
-        uint256 maxChange = oldIV * maxIVChangeBps / 10000;
+        uint256 maxChange = oldIV * maxIVChangeBps / 10_000;
         if (rawNew > oldIV + maxChange) rawNew = oldIV + maxChange;
         if (rawNew + maxChange < oldIV) rawNew = oldIV - maxChange;
 
@@ -497,16 +492,16 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
 
     struct PortfolioOverview {
         // Options
-        uint256 optionsCollateral;    // WAD
-        uint256 optionsIM;            // WAD
-        uint256 optionsMM;            // WAD
-        uint256 optionsReserved;      // WAD
+        uint256 optionsCollateral; // WAD
+        uint256 optionsIM; // WAD
+        uint256 optionsMM; // WAD
+        uint256 optionsReserved; // WAD
         uint256 activeSeriesCount;
         // Perps (zero when perpsDex not linked)
-        int256 perpNetQuantity;       // QUANTITY_DECIMALS (6)
-        int256 perpUnrealizedPnl;     // perp token decimals
-        uint256 perpIM;               // perp token decimals
-        uint256 perpMM;               // perp token decimals
+        int256 perpNetQuantity; // QUANTITY_DECIMALS (6)
+        int256 perpUnrealizedPnl; // perp token decimals
+        uint256 perpIM; // perp token decimals
+        uint256 perpMM; // perp token decimals
         bool perpIsLiquidatable;
     }
 
@@ -590,11 +585,7 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
         }
     }
 
-    function _computeSeriesMargin(uint64 seriesId, uint128 absQty, bool isIM)
-        private
-        view
-        returns (uint256)
-    {
+    function _computeSeriesMargin(uint64 seriesId, uint128 absQty, bool isIM) private view returns (uint256) {
         uint256 F = _getForwardPriceWad();
         return _computeSeriesMarginWithF(seriesId, absQty, isIM, F);
     }
@@ -613,22 +604,14 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     }
 
     /// @dev Compute per-contract stress margin for a series.
-    function _stressMargin(uint64 seriesId, bool isIM, uint256 F, uint256 sigma)
-        private
-        view
-        returns (uint256)
-    {
+    function _stressMargin(uint64 seriesId, bool isIM, uint256 F, uint256 sigma) private view returns (uint256) {
         (uint256 K, uint256 tSec, bool isCall) = _seriesParams(seriesId);
         Black76Lib.Greeks memory g = Black76Lib.greeks(F, K, sigma, tSec, isCall);
         return _applyShocks(g, F, isIM);
     }
 
     /// @dev Load series params, converting strike to WAD.
-    function _seriesParams(uint64 seriesId)
-        private
-        view
-        returns (uint256 K, uint256 tSec, bool isCall)
-    {
+    function _seriesParams(uint64 seriesId) private view returns (uint256 K, uint256 tSec, bool isCall) {
         OptionMarketRegistry.OptionSeries memory s = registry.getSeries(seriesId);
         K = uint256(s.strikeE8) * _oracleToWadFactor();
         tSec = s.expiryTs > block.timestamp ? s.expiryTs - block.timestamp : 1;
@@ -636,13 +619,9 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     }
 
     /// @dev Apply spot+vol shocks to greeks to get per-contract margin.
-    function _applyShocks(Black76Lib.Greeks memory g, uint256 F, bool isIM)
-        private
-        view
-        returns (uint256)
-    {
+    function _applyShocks(Black76Lib.Greeks memory g, uint256 F, bool isIM) private view returns (uint256) {
         MarginConfig memory cfg = marginConfig;
-        uint256 spotShock = F * (isIM ? cfg.imSpotShockBps : cfg.mmSpotShockBps) / 10000;
+        uint256 spotShock = F * (isIM ? cfg.imSpotShockBps : cfg.mmSpotShockBps) / 10_000;
         uint256 volShock = isIM ? cfg.imVolShock : cfg.mmVolShock;
 
         uint256 deltaLoss = FixedPointMathLib.abs(g.delta) * spotShock / WAD;
@@ -681,5 +660,5 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
 
     // ── Upgrade ─────────────────────────────────────────────────────────────
 
-    function _authorizeUpgrade(address) internal override onlyOwner {}
+    function _authorizeUpgrade(address) internal override onlyOwner { }
 }

@@ -40,7 +40,7 @@ async function main() {
   });
   await logPrompt("Proceed?");
   console.log("Deploying new implementation...");
-  const newImpl = await viem.deployContract("contracts/HashPowerPerpsDEX.sol:HashPowerPerpsDEX", [
+  const newImpl = await viem.deployContract("HashPowerPerpsDEX", [
     BigInt(env.MINIMUM_PRICE_INCREMENT),
   ]);
   logStep("Deployed", addrUrl(pc, newImpl.address));

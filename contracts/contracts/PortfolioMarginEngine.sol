@@ -5,9 +5,9 @@ import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/I
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
-import { ICollateralVault } from "./ICollateralVault.sol";
-import { IHashPowerPerpsDEX } from "./IHashPowerPerpsDEX.sol";
-import { IPortfolioMarginEngine } from "./IPortfolioMarginEngine.sol";
+import { ICollateralVault } from "./interfaces/ICollateralVault.sol";
+import { IHashPowerPerpsDEX } from "./interfaces/IHashPowerPerpsDEX.sol";
+import { IPortfolioMarginEngine } from "./interfaces/IPortfolioMarginEngine.sol";
 import { OptionMarginEngine } from "./OptionMarginEngine.sol";
 
 /// @title PortfolioMarginEngine — Cross-product portfolio margin
@@ -53,11 +53,7 @@ contract PortfolioMarginEngine is IPortfolioMarginEngine, Initializable, UUPSUpg
         _disableInitializers();
     }
 
-    function initialize(
-        address _vault,
-        address _perpsDex,
-        address _optionsEngine
-    ) external initializer {
+    function initialize(address _vault, address _perpsDex, address _optionsEngine) external initializer {
         __Ownable_init(_msgSender());
         __UUPSUpgradeable_init();
 
@@ -69,20 +65,18 @@ contract PortfolioMarginEngine is IPortfolioMarginEngine, Initializable, UUPSUpg
         perpsDex = IHashPowerPerpsDEX(_perpsDex);
         optionsEngine = OptionMarginEngine(_optionsEngine);
 
-        imSpotShock = 0.10e18; // 10% — matches DEX marginPercent
+        imSpotShock = 0.1e18; // 10% — matches DEX marginPercent
         mmSpotShock = 0.05e18; // 5%  — matches DEX maintenanceMarginPercent
-        imVolShock = 0.10e18;  // 10 vol points
-        mmVolShock = 0.05e18;  // 5 vol points
+        imVolShock = 0.1e18; // 10 vol points
+        mmVolShock = 0.05e18; // 5 vol points
     }
 
     // ── Admin ───────────────────────────────────────────────────────────────
 
-    function setShocks(
-        uint256 _imSpotShock,
-        uint256 _mmSpotShock,
-        uint256 _imVolShock,
-        uint256 _mmVolShock
-    ) external onlyOwner {
+    function setShocks(uint256 _imSpotShock, uint256 _mmSpotShock, uint256 _imVolShock, uint256 _mmVolShock)
+        external
+        onlyOwner
+    {
         imSpotShock = _imSpotShock;
         mmSpotShock = _mmSpotShock;
         imVolShock = _imVolShock;
@@ -156,11 +150,7 @@ contract PortfolioMarginEngine is IPortfolioMarginEngine, Initializable, UUPSUpg
     }
 
     /// @dev Aggregate net Greeks across perps (linear delta) and options (delta/gamma/vega).
-    function _aggregateGreeks(address user)
-        private
-        view
-        returns (int256 netDelta, uint256 netGamma, uint256 netVega)
-    {
+    function _aggregateGreeks(address user) private view returns (int256 netDelta, uint256 netGamma, uint256 netVega) {
         // Perps delta: qty * WAD / PERP_QTY_DECIMALS
         IHashPowerPerpsDEX.Position memory pos = perpsDex.getUserPosition(user);
         int256 perpDelta = pos.netQuantity * int256(WAD) / int256(PERP_QTY_DECIMALS);
@@ -176,12 +166,11 @@ contract PortfolioMarginEngine is IPortfolioMarginEngine, Initializable, UUPSUpg
     /// @dev Evaluate 4 stress scenarios and return the worst-case loss (WAD).
     ///      Scenarios: (±Δs, ±Δσ) where Δs = spotShock * spotPrice (dollar move)
     ///      PnL ≈ delta·Δs + ½·gamma·Δs² + vega·Δσ
-    function _worstStressLoss(
-        int256 netDelta,
-        uint256 netGamma,
-        uint256 netVega,
-        bool isIM
-    ) private view returns (uint256 worst) {
+    function _worstStressLoss(int256 netDelta, uint256 netGamma, uint256 netVega, bool isIM)
+        private
+        view
+        returns (uint256 worst)
+    {
         uint256 spotShockFrac = isIM ? imSpotShock : mmSpotShock;
         uint256 volShock = isIM ? imVolShock : mmVolShock;
 
@@ -212,13 +201,11 @@ contract PortfolioMarginEngine is IPortfolioMarginEngine, Initializable, UUPSUpg
     ///      PnL = delta·Δs/WAD + gammaTerm + vega·Δσ/WAD
     ///      Note: gammaTerm is pre-computed and always the same magnitude across ±spotShock
     ///      (quadratic in |Δs|), so we always ADD it regardless of direction.
-    function _scenarioLoss(
-        int256 netDelta,
-        uint256 gammaTerm,
-        uint256 netVega,
-        int256 deltaS,
-        int256 deltaVol
-    ) private pure returns (uint256) {
+    function _scenarioLoss(int256 netDelta, uint256 gammaTerm, uint256 netVega, int256 deltaS, int256 deltaVol)
+        private
+        pure
+        returns (uint256)
+    {
         int256 deltaPnl = netDelta * deltaS / int256(WAD);
         int256 vegaPnl = int256(netVega) * deltaVol / int256(WAD);
         // Gamma term is ½γ(Δs)² — always non-negative, always adds to P&L
@@ -239,5 +226,5 @@ contract PortfolioMarginEngine is IPortfolioMarginEngine, Initializable, UUPSUpg
 
     // ── Upgrade ─────────────────────────────────────────────────────────────
 
-    function _authorizeUpgrade(address) internal override onlyOwner {}
+    function _authorizeUpgrade(address) internal override onlyOwner { }
 }

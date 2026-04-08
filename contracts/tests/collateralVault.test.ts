@@ -10,12 +10,8 @@ async function deployVaultFixture(conn: NetworkConnection) {
   const { viem } = conn;
   const [owner, alice, bob, engine] = await viem.getWalletClients();
 
-  const usdc = await viem.deployContract("contracts/USDCMock.sol:USDCMock", []);
-
-  const vaultImpl = await viem.deployContract(
-    "contracts/CollateralVault.sol:CollateralVault",
-    [],
-  );
+  const usdc = await viem.deployContract("USDCMock", []);
+  const vaultImpl = await viem.deployContract("CollateralVault", []);
   const vaultProxy = await viem.deployContract("ERC1967Proxy", [
     vaultImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -46,7 +42,8 @@ describe("CollateralVault", () => {
   let engine: Awaited<ReturnType<typeof deployVaultFixture>>["engine"];
 
   beforeEach(async () => {
-    ({ vault, usdc, owner, alice, bob, engine } = await networkHelpers.loadFixture(deployVaultFixture));
+    ({ vault, usdc, owner, alice, bob, engine } =
+      await networkHelpers.loadFixture(deployVaultFixture));
   });
 
   // ── Initialization ──────────────────────────────────────────────────────
@@ -167,10 +164,7 @@ describe("CollateralVault", () => {
       await aliceVault.write.deposit([10_000_000n]);
 
       // Deploy a mock margin engine that always requires 8M
-      const mock = await viem.deployContract(
-        "contracts/test/MarginEngineMock.sol:MarginEngineMock",
-        [],
-      );
+      const mock = await viem.deployContract("MarginEngineMock", []);
       await vault.write.setMarginEngine([mock.address], { account: owner.account });
       await mock.write.setIM([alice.account.address, 8_000_000n]);
 
@@ -337,18 +331,14 @@ describe("CollateralVault", () => {
       const aliceVault = await viem.getContractAt("CollateralVault", vault.address, {
         client: { wallet: alice },
       });
-      await assert.rejects(
-        aliceVault.write.setAuthorizedCaller([bob.account.address, true]),
-      );
+      await assert.rejects(aliceVault.write.setAuthorizedCaller([bob.account.address, true]));
     });
 
     it("only owner can set margin engine", async () => {
       const aliceVault = await viem.getContractAt("CollateralVault", vault.address, {
         client: { wallet: alice },
       });
-      await assert.rejects(
-        aliceVault.write.setMarginEngine([bob.account.address]),
-      );
+      await assert.rejects(aliceVault.write.setMarginEngine([bob.account.address]));
     });
 
     it("cannot set zero address as authorized caller", async () => {

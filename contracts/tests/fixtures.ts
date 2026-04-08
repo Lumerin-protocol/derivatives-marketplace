@@ -4,7 +4,9 @@ import { parseUnits, maxUint256, encodeFunctionData } from "viem";
 import type { NetworkConnection } from "hardhat/types/network";
 import {
   defaultSeries,
-  INITIAL_PRICE_E8,
+  HASHRATE_INDEX_PRICE_E8,
+  HASHRATE_LOCAL_OPTIONS_STRIKES_E8,
+  HASHRATE_USD_PER_100TH_DAY,
   LIQUIDATION_FEE_BPS,
   INSURANCE_DEPOSIT,
   MIN_OBSERVATIONS,
@@ -18,7 +20,10 @@ type Conn = NetworkConnection;
 const MULTICALL3_ADDRESS = "0xcA11bde05977b3631167028862bE2a173976CA11" as const;
 
 function loadMulticall3DeployedBytecode(): `0x${string}` {
-  const path = resolve(import.meta.dirname, "../artifacts/contracts/Multicall3.sol/Multicall3.json");
+  const path = resolve(
+    import.meta.dirname,
+    "../artifacts/contracts/Multicall3.sol/Multicall3.json",
+  );
   const json = JSON.parse(readFileSync(path, "utf-8")) as { deployedBytecode: `0x${string}` };
   return json.deployedBytecode;
 }
@@ -30,17 +35,14 @@ export async function deployPerpsFixture(conn: Conn) {
   const pc = await viem.getPublicClient();
   const tc = await viem.getTestClient();
 
-  const usdcMock = await viem.deployContract("contracts/USDCMock.sol:USDCMock", []);
+  const usdcMock = await viem.deployContract("USDCMock", []);
   const tokenDecimals = await usdcMock.read.decimals();
 
   const topUpBalanceUSDC = parseUnits("1000", tokenDecimals);
 
   const oracleDecimals = 6;
-  const initialPrice = parseUnits("2.9976357", oracleDecimals);
-  const priceOracle = await viem.deployContract("contracts/PriceOracleMock.sol:PriceOracleMock", [
-    initialPrice,
-    oracleDecimals,
-  ]);
+  const initialPrice = parseUnits(HASHRATE_USD_PER_100TH_DAY, oracleDecimals);
+  const priceOracle = await viem.deployContract("PriceOracleMock", [initialPrice, oracleDecimals]);
 
   await usdcMock.write.transfer([buyer.account.address, topUpBalanceUSDC]);
   await usdcMock.write.transfer([buyer2.account.address, topUpBalanceUSDC]);
@@ -56,7 +58,7 @@ export async function deployPerpsFixture(conn: Conn) {
   const collateralAmount = parseUnits("100000", tokenDecimals);
 
   // Deploy vault first (need address for perps initialize)
-  const vaultImpl = await viem.deployContract("contracts/CollateralVault.sol:CollateralVault", []);
+  const vaultImpl = await viem.deployContract("CollateralVault", []);
   const vaultProxy = await viem.deployContract("ERC1967Proxy", [
     vaultImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -68,9 +70,7 @@ export async function deployPerpsFixture(conn: Conn) {
   const vault = await viem.getContractAt("CollateralVault", vaultProxy.address);
 
   // Deploy perps with vault
-  const perpsImpl = await viem.deployContract("contracts/HashPowerPerpsDEX.sol:HashPowerPerpsDEX", [
-    minimumPriceIncrement,
-  ]);
+  const perpsImpl = await viem.deployContract("HashPowerPerpsDEX", [minimumPriceIncrement]);
   const perpsProxy = await viem.deployContract("ERC1967Proxy", [
     perpsImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -84,14 +84,8 @@ export async function deployPerpsFixture(conn: Conn) {
   const fundingDecimals = await perps.read.FUNDING_DECIMALS();
 
   // Deploy PME with options mock
-  const optionsMock = await viem.deployContract(
-    "contracts/test/OptionsEngineMock.sol:OptionsEngineMock",
-    [],
-  );
-  const pmeImpl = await viem.deployContract(
-    "contracts/PortfolioMarginEngine.sol:PortfolioMarginEngine",
-    [],
-  );
+  const optionsMock = await viem.deployContract("OptionsEngineMock", []);
+  const pmeImpl = await viem.deployContract("PortfolioMarginEngine", []);
   const pmeProxy = await viem.deployContract("ERC1967Proxy", [
     pmeImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -308,7 +302,7 @@ export async function deployPerpsWithFundingAndPositionsFixture(conn: Conn) {
 /**
  * Full local stack: HashPowerPerpsDEX + CollateralVault + PortfolioMarginEngine with real
  * OptionMarginEngine, OptionOrderBook, OptionMatchingRouter, and OptionSettlement (same wiring as prod tests).
- * Oracle uses {@link ORACLE_DECIMALS} / {@link INITIAL_PRICE_E8} so perps index and options pricing align.
+ * Oracle / index: hashrate USD per 100 TH/s per day (`HASHRATE_INDEX_PRICE_E8`, 8-dec oracle).
  */
 export async function deployLocalFullStackFixture(conn: Conn) {
   const { viem, networkHelpers } = conn;
@@ -321,15 +315,15 @@ export async function deployLocalFullStackFixture(conn: Conn) {
     bytecode: loadMulticall3DeployedBytecode(),
   });
 
-  const usdcMock = await viem.deployContract("contracts/USDCMock.sol:USDCMock", []);
+  const usdcMock = await viem.deployContract("USDCMock", []);
   console.log("usdcMock address", usdcMock.address);
   const tokenDecimals = await usdcMock.read.decimals();
 
   // Leave owner ~120k USDC for reserve pool + insurance after 4× trader top-ups (1M mint)
   const topUpBalanceUSDC = parseUnits("220000", tokenDecimals);
 
-  const priceOracle = await viem.deployContract("contracts/PriceOracleMock.sol:PriceOracleMock", [
-    INITIAL_PRICE_E8,
+  const priceOracle = await viem.deployContract("PriceOracleMock", [
+    HASHRATE_INDEX_PRICE_E8,
     ORACLE_DECIMALS,
   ]);
 
@@ -346,10 +340,7 @@ export async function deployLocalFullStackFixture(conn: Conn) {
   const makerFeeBps = 0n;
   const collateralAmount = parseUnits("100000", tokenDecimals);
 
-  const registryImpl = await viem.deployContract(
-    "contracts/OptionMarketRegistry.sol:OptionMarketRegistry",
-    [],
-  );
+  const registryImpl = await viem.deployContract("OptionMarketRegistry", []);
   const registryProxy = await viem.deployContract("ERC1967Proxy", [
     registryImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -360,7 +351,7 @@ export async function deployLocalFullStackFixture(conn: Conn) {
   ]);
   const registry = await viem.getContractAt("OptionMarketRegistry", registryProxy.address);
 
-  const vaultImpl = await viem.deployContract("contracts/CollateralVault.sol:CollateralVault", []);
+  const vaultImpl = await viem.deployContract("CollateralVault", []);
   const vaultProxy = await viem.deployContract("ERC1967Proxy", [
     vaultImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -371,9 +362,7 @@ export async function deployLocalFullStackFixture(conn: Conn) {
   ]);
   const vault = await viem.getContractAt("CollateralVault", vaultProxy.address);
 
-  const perpsImpl = await viem.deployContract("contracts/HashPowerPerpsDEX.sol:HashPowerPerpsDEX", [
-    minimumPriceIncrement,
-  ]);
+  const perpsImpl = await viem.deployContract("HashPowerPerpsDEX", [minimumPriceIncrement]);
   const perpsProxy = await viem.deployContract("ERC1967Proxy", [
     perpsImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -386,10 +375,7 @@ export async function deployLocalFullStackFixture(conn: Conn) {
   const quantityDecimals = await perps.read.QUANTITY_DECIMALS();
   const fundingDecimals = await perps.read.FUNDING_DECIMALS();
 
-  const engineImpl = await viem.deployContract(
-    "contracts/OptionMarginEngine.sol:OptionMarginEngine",
-    [],
-  );
+  const engineImpl = await viem.deployContract("OptionMarginEngine", []);
   const engineProxy = await viem.deployContract("ERC1967Proxy", [
     engineImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -400,10 +386,7 @@ export async function deployLocalFullStackFixture(conn: Conn) {
   ]);
   const optionMarginEngine = await viem.getContractAt("OptionMarginEngine", engineProxy.address);
 
-  const pmeImpl = await viem.deployContract(
-    "contracts/PortfolioMarginEngine.sol:PortfolioMarginEngine",
-    [],
-  );
+  const pmeImpl = await viem.deployContract("PortfolioMarginEngine", []);
   const pmeProxy = await viem.deployContract("ERC1967Proxy", [
     pmeImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -427,7 +410,7 @@ export async function deployLocalFullStackFixture(conn: Conn) {
   });
   await perps.write.setLiquidationFee([liquidationFee], { account: owner.account });
 
-  const bookImpl = await viem.deployContract("contracts/OptionOrderBook.sol:OptionOrderBook", []);
+  const bookImpl = await viem.deployContract("OptionOrderBook", []);
   const bookProxy = await viem.deployContract("ERC1967Proxy", [
     bookImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -438,10 +421,7 @@ export async function deployLocalFullStackFixture(conn: Conn) {
   ]);
   const optionOrderBook = await viem.getContractAt("OptionOrderBook", bookProxy.address);
 
-  const routerImpl = await viem.deployContract(
-    "contracts/OptionMatchingRouter.sol:OptionMatchingRouter",
-    [],
-  );
+  const routerImpl = await viem.deployContract("OptionMatchingRouter", []);
   const routerProxy = await viem.deployContract("ERC1967Proxy", [
     routerImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -455,10 +435,7 @@ export async function deployLocalFullStackFixture(conn: Conn) {
     routerProxy.address,
   );
 
-  const settlementImpl = await viem.deployContract(
-    "contracts/OptionSettlement.sol:OptionSettlement",
-    [],
-  );
+  const settlementImpl = await viem.deployContract("OptionSettlement", []);
   const settlementProxy = await viem.deployContract("ERC1967Proxy", [
     settlementImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -493,16 +470,10 @@ export async function deployLocalFullStackFixture(conn: Conn) {
 
   /// Unix-second offsets from `latest` for each listed expiry (local dev chain only).
   const LOCAL_OPTIONS_EXPIRY_OFFSETS_SEC = [604800n, 1209600n, 1814400n] as const; // +1w, +2w, +3w
-  /// Strike prices in 1e8 USD (Chainlink-style), paired with CALL + PUT per expiry.
-  const LOCAL_OPTIONS_STRIKES_E8 = [
-    45_000n * 10n ** 8n,
-    50_000n * 10n ** 8n,
-    55_000n * 10n ** 8n,
-  ] as const;
 
   for (const offset of LOCAL_OPTIONS_EXPIRY_OFFSETS_SEC) {
     const expiryTs = latest + offset;
-    for (const strikeE8 of LOCAL_OPTIONS_STRIKES_E8) {
+    for (const strikeE8 of HASHRATE_LOCAL_OPTIONS_STRIKES_E8) {
       await registry.write.createSeries(
         [
           strikeE8,
@@ -532,7 +503,7 @@ export async function deployLocalFullStackFixture(conn: Conn) {
   const putSeriesId = 2n;
   const seriesExpiry = latest + LOCAL_OPTIONS_EXPIRY_OFFSETS_SEC[0];
   const optionSeriesCount =
-    LOCAL_OPTIONS_EXPIRY_OFFSETS_SEC.length * LOCAL_OPTIONS_STRIKES_E8.length * 2;
+    LOCAL_OPTIONS_EXPIRY_OFFSETS_SEC.length * HASHRATE_LOCAL_OPTIONS_STRIKES_E8.length * 2;
 
   for (const w of [seller, buyer, buyer2, seller2, owner]) {
     await usdcMock.write.approve([vault.address, maxUint256], { account: w.account });
@@ -546,7 +517,7 @@ export async function deployLocalFullStackFixture(conn: Conn) {
 
   return {
     config: {
-      oracle: { price: INITIAL_PRICE_E8, decimals: ORACLE_DECIMALS },
+      oracle: { price: HASHRATE_INDEX_PRICE_E8, decimals: ORACLE_DECIMALS },
       marginPercent,
       maintenanceMarginPercent,
       liquidationFee,

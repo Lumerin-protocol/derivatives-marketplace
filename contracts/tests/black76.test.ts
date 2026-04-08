@@ -6,10 +6,7 @@ import type { NetworkConnection } from "hardhat/types/network";
 const { viem, networkHelpers } = await network.connect();
 
 async function deployHarness(conn: NetworkConnection) {
-  const harness = await conn.viem.deployContract(
-    "contracts/test/Black76Harness.sol:Black76Harness",
-    [],
-  );
+  const harness = await conn.viem.deployContract("Black76Harness", []);
   return { harness };
 }
 
@@ -207,9 +204,7 @@ describe("Black76Lib", () => {
 
     it("reverts if premium < intrinsic", async () => {
       const { harness } = await networkHelpers.loadFixture(deployHarness);
-      await assert.rejects(
-        harness.read.impliedVol([100n * WAD, 90n * WAD, YEAR, 5n * WAD, true]),
-      );
+      await assert.rejects(harness.read.impliedVol([100n * WAD, 90n * WAD, YEAR, 5n * WAD, true]));
     });
   });
 });

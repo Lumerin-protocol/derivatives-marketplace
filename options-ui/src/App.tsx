@@ -196,6 +196,13 @@ export function App() {
   });
   const bookAddr = bookAddr_ && isAddress(bookAddr_) ? bookAddr_ : undefined;
 
+  const { data: forwardPriceWad, isPending: forwardPricePending } = useReadContract({
+    address: engineAddr,
+    abi: OptionMarginEngineAbi,
+    functionName: "getForwardPrice",
+    query: { enabled: rpcOk, refetchInterval: POLL_MS },
+  });
+
   const seriesIdsForQuotes = useMemo(() => {
     const ids: bigint[] = [];
     for (const r of rowsForExpiry) {
@@ -589,10 +596,30 @@ export function App() {
     seriesReadsPending &&
     catalog.length === 0;
 
+  const underlyingPriceLabel =
+    forwardPriceWad === undefined
+      ? forwardPricePending
+        ? "…"
+        : "—"
+      : new Intl.NumberFormat("en-US", {
+          style: "currency",
+          currency: "USD",
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        }).format(Number(formatUnits(forwardPriceWad, 18)));
+
   return (
     <div className="mx-auto max-w-6xl p-6 text-zinc-100">
       <header className="mb-6 flex flex-wrap items-center justify-between gap-4 border-b border-zinc-800 pb-4">
-        <h1 className="text-lg font-semibold tracking-tight">Options</h1>
+        <div className="flex flex-wrap items-baseline gap-3">
+          <h1 className="text-lg font-semibold tracking-tight">Options</h1>
+          {rpcOk ? (
+            <p className="text-sm text-zinc-500" title="Oracle forward / spot used for margin (18-dec WAD on-chain)">
+              Market{" "}
+              <span className="font-mono font-medium text-zinc-200">{underlyingPriceLabel}</span>
+            </p>
+          ) : null}
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           {!isConnected ? (
             <button

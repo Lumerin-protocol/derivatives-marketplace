@@ -1,4 +1,4 @@
-import { encodeFunctionData, maxUint256 } from "viem";
+import { encodeFunctionData, maxUint256, parseUnits } from "viem";
 import type { NetworkConnection } from "hardhat/types/network";
 
 export async function deployRegistryFixture(conn: NetworkConnection) {
@@ -6,10 +6,7 @@ export async function deployRegistryFixture(conn: NetworkConnection) {
   const [owner, admin, settler] = await viem.getWalletClients();
   const pc = await viem.getPublicClient();
 
-  const registryImpl = await viem.deployContract(
-    "contracts/OptionMarketRegistry.sol:OptionMarketRegistry",
-    [],
-  );
+  const registryImpl = await viem.deployContract("OptionMarketRegistry", []);
   const registryProxy = await viem.deployContract("ERC1967Proxy", [
     registryImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -33,10 +30,7 @@ export async function deployOrderBookFixture(conn: NetworkConnection) {
   const { owner } = accounts;
   const { viem } = conn;
 
-  const bookImpl = await viem.deployContract(
-    "contracts/OptionOrderBook.sol:OptionOrderBook",
-    [],
-  );
+  const bookImpl = await viem.deployContract("OptionOrderBook", []);
   const bookProxy = await viem.deployContract("ERC1967Proxy", [
     bookImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -95,7 +89,7 @@ async function deployVaultAndPME(
 ) {
   const { viem } = conn;
 
-  const vaultImpl = await viem.deployContract("contracts/CollateralVault.sol:CollateralVault", []);
+  const vaultImpl = await viem.deployContract("CollateralVault", []);
   const vaultProxy = await viem.deployContract("ERC1967Proxy", [
     vaultImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -106,12 +100,9 @@ async function deployVaultAndPME(
   ]);
   const vault = await viem.getContractAt("CollateralVault", vaultProxy.address);
 
-  const perpsMock = await viem.deployContract("contracts/PerpsDEXMock.sol:PerpsDEXMock", []);
+  const perpsMock = await viem.deployContract("PerpsDEXMock", []);
 
-  const pmeImpl = await viem.deployContract(
-    "contracts/PortfolioMarginEngine.sol:PortfolioMarginEngine",
-    [],
-  );
+  const pmeImpl = await viem.deployContract("PortfolioMarginEngine", []);
   const pmeProxy = await viem.deployContract("ERC1967Proxy", [
     pmeImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -133,21 +124,32 @@ async function deployVaultAndPME(
 export const ORACLE_DECIMALS = 8;
 export const INITIAL_PRICE_E8 = 50000_00000000n; // $50,000
 
+/** Spot index for Hashpower / hashrate instruments: USD per 100 TH/s per day (index scale 1e8). */
+export const HASHRATE_USD_PER_100TH_DAY = "4.21" as const;
+
+/** On-chain oracle answer for {@link HASHRATE_USD_PER_100TH_DAY} with {@link ORACLE_DECIMALS} = 8. */
+export const HASHRATE_INDEX_PRICE_E8 = parseUnits(HASHRATE_USD_PER_100TH_DAY, 8);
+
+/** Option strikes (1e8 index units) seeded by `deployLocalFullStackFixture` in fixtures.ts. */
+export const HASHRATE_LOCAL_OPTIONS_STRIKES_E8 = [
+  parseUnits("3.50", 8),
+  parseUnits("4.00", 8),
+  HASHRATE_INDEX_PRICE_E8,
+  parseUnits("4.50", 8),
+] as const;
+
 export async function deployMarginEngineFixture(conn: NetworkConnection) {
   const data = await deployBookWithSeriesFixture(conn);
   const { registry, accounts } = data;
   const { owner } = accounts;
   const { viem } = conn;
 
-  const usdc = await viem.deployContract("contracts/USDCMock.sol:USDCMock", []);
+  const usdc = await viem.deployContract("USDCMock", []);
 
-  const oracle = await viem.deployContract(
-    "contracts/PriceOracleMock.sol:PriceOracleMock",
-    [INITIAL_PRICE_E8, ORACLE_DECIMALS],
-  );
+  const oracle = await viem.deployContract("PriceOracleMock", [INITIAL_PRICE_E8, ORACLE_DECIMALS]);
 
   // Deploy vault first (engine needs it for initialize)
-  const vaultImpl = await viem.deployContract("contracts/CollateralVault.sol:CollateralVault", []);
+  const vaultImpl = await viem.deployContract("CollateralVault", []);
   const vaultProxy = await viem.deployContract("ERC1967Proxy", [
     vaultImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -159,10 +161,7 @@ export async function deployMarginEngineFixture(conn: NetworkConnection) {
   const vault = await viem.getContractAt("CollateralVault", vaultProxy.address);
 
   // Deploy engine with vault
-  const engineImpl = await viem.deployContract(
-    "contracts/OptionMarginEngine.sol:OptionMarginEngine",
-    [],
-  );
+  const engineImpl = await viem.deployContract("OptionMarginEngine", []);
   const engineProxy = await viem.deployContract("ERC1967Proxy", [
     engineImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -174,15 +173,12 @@ export async function deployMarginEngineFixture(conn: NetworkConnection) {
   const engine = await viem.getContractAt("OptionMarginEngine", engineProxy.address);
 
   // Deploy PME with perps mock
-  const perpsMock = await viem.deployContract("contracts/PerpsDEXMock.sol:PerpsDEXMock", []);
+  const perpsMock = await viem.deployContract("PerpsDEXMock", []);
   // PME reads spot price from perpsDex.getMarketPrice() — set it to match the oracle
   // INITIAL_PRICE_E8 = 50000_00000000 (8 dec) → token decimals (6): 50_000_000_000
   await perpsMock.write.setMarketPrice([50_000_000_000n]);
 
-  const pmeImpl = await viem.deployContract(
-    "contracts/PortfolioMarginEngine.sol:PortfolioMarginEngine",
-    [],
-  );
+  const pmeImpl = await viem.deployContract("PortfolioMarginEngine", []);
   const pmeProxy = await viem.deployContract("ERC1967Proxy", [
     pmeImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -232,10 +228,7 @@ export async function deployMatchingRouterFixture(conn: NetworkConnection) {
   const { owner } = accounts;
   const { viem } = conn;
 
-  const routerImpl = await viem.deployContract(
-    "contracts/OptionMatchingRouter.sol:OptionMatchingRouter",
-    [],
-  );
+  const routerImpl = await viem.deployContract("OptionMatchingRouter", []);
   const routerProxy = await viem.deployContract("ERC1967Proxy", [
     routerImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -277,10 +270,7 @@ export async function deploySettlementFixture(conn: NetworkConnection) {
   const pc = await viem.getPublicClient();
 
   // ── Registry ──────────────────────────────────────────────────────────
-  const registryImpl = await viem.deployContract(
-    "contracts/OptionMarketRegistry.sol:OptionMarketRegistry",
-    [],
-  );
+  const registryImpl = await viem.deployContract("OptionMarketRegistry", []);
   const registryProxy = await viem.deployContract("ERC1967Proxy", [
     registryImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -292,14 +282,11 @@ export async function deploySettlementFixture(conn: NetworkConnection) {
   const registry = await viem.getContractAt("OptionMarketRegistry", registryProxy.address);
 
   // ── Mocks ─────────────────────────────────────────────────────────────
-  const usdc = await viem.deployContract("contracts/USDCMock.sol:USDCMock", []);
-  const oracle = await viem.deployContract(
-    "contracts/PriceOracleMock.sol:PriceOracleMock",
-    [INITIAL_PRICE_E8, ORACLE_DECIMALS],
-  );
+  const usdc = await viem.deployContract("USDCMock", []);
+  const oracle = await viem.deployContract("PriceOracleMock", [INITIAL_PRICE_E8, ORACLE_DECIMALS]);
 
   // ── Vault ─────────────────────────────────────────────────────────────
-  const vaultImpl = await viem.deployContract("contracts/CollateralVault.sol:CollateralVault", []);
+  const vaultImpl = await viem.deployContract("CollateralVault", []);
   const vaultProxy = await viem.deployContract("ERC1967Proxy", [
     vaultImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -311,10 +298,7 @@ export async function deploySettlementFixture(conn: NetworkConnection) {
   const vault = await viem.getContractAt("CollateralVault", vaultProxy.address);
 
   // ── OrderBook ─────────────────────────────────────────────────────────
-  const bookImpl = await viem.deployContract(
-    "contracts/OptionOrderBook.sol:OptionOrderBook",
-    [],
-  );
+  const bookImpl = await viem.deployContract("OptionOrderBook", []);
   const bookProxy = await viem.deployContract("ERC1967Proxy", [
     bookImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -326,10 +310,7 @@ export async function deploySettlementFixture(conn: NetworkConnection) {
   const book = await viem.getContractAt("OptionOrderBook", bookProxy.address);
 
   // ── MarginEngine (with vault) ─────────────────────────────────────────
-  const engineImpl = await viem.deployContract(
-    "contracts/OptionMarginEngine.sol:OptionMarginEngine",
-    [],
-  );
+  const engineImpl = await viem.deployContract("OptionMarginEngine", []);
   const engineProxy = await viem.deployContract("ERC1967Proxy", [
     engineImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -341,13 +322,10 @@ export async function deploySettlementFixture(conn: NetworkConnection) {
   const engine = await viem.getContractAt("OptionMarginEngine", engineProxy.address);
 
   // ── PME (with perps mock) ─────────────────────────────────────────────
-  const perpsMock = await viem.deployContract("contracts/PerpsDEXMock.sol:PerpsDEXMock", []);
+  const perpsMock = await viem.deployContract("PerpsDEXMock", []);
   await perpsMock.write.setMarketPrice([50_000_000_000n]);
 
-  const pmeImpl = await viem.deployContract(
-    "contracts/PortfolioMarginEngine.sol:PortfolioMarginEngine",
-    [],
-  );
+  const pmeImpl = await viem.deployContract("PortfolioMarginEngine", []);
   const pmeProxy = await viem.deployContract("ERC1967Proxy", [
     pmeImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -359,10 +337,7 @@ export async function deploySettlementFixture(conn: NetworkConnection) {
   const pme = await viem.getContractAt("PortfolioMarginEngine", pmeProxy.address);
 
   // ── MatchingRouter ────────────────────────────────────────────────────
-  const routerImpl = await viem.deployContract(
-    "contracts/OptionMatchingRouter.sol:OptionMatchingRouter",
-    [],
-  );
+  const routerImpl = await viem.deployContract("OptionMatchingRouter", []);
   const routerProxy = await viem.deployContract("ERC1967Proxy", [
     routerImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -374,10 +349,7 @@ export async function deploySettlementFixture(conn: NetworkConnection) {
   const router = await viem.getContractAt("OptionMatchingRouter", routerProxy.address);
 
   // ── OptionSettlement ──────────────────────────────────────────────────
-  const settlementImpl = await viem.deployContract(
-    "contracts/OptionSettlement.sol:OptionSettlement",
-    [],
-  );
+  const settlementImpl = await viem.deployContract("OptionSettlement", []);
   const settlementProxy = await viem.deployContract("ERC1967Proxy", [
     settlementImpl.address as `0x${string}`,
     encodeFunctionData({

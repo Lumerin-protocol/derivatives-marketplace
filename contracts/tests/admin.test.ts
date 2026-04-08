@@ -15,10 +15,7 @@ describe("HashPowerPerpsDEX - Admin Functions", function () {
       const { owner } = accounts;
 
       const newPrice = parseUnits("100000", 6);
-      const newOracle = await viem.deployContract("contracts/PriceOracleMock.sol:PriceOracleMock", [
-        newPrice,
-        6,
-      ]);
+      const newOracle = await viem.deployContract("PriceOracleMock", [newPrice, 6]);
 
       await perps.write.setOracle([newOracle.address], { account: owner.account });
 
@@ -58,12 +55,12 @@ describe("HashPowerPerpsDEX - Admin Functions", function () {
       const { owner } = accounts;
 
       await pme.write.setShocks(
-        [BigInt(0.20e18), BigInt(0.10e18), BigInt(0.15e18), BigInt(0.08e18)],
+        [BigInt(0.2e18), BigInt(0.1e18), BigInt(0.15e18), BigInt(0.08e18)],
         { account: owner.account },
       );
 
-      assert.equal(await pme.read.imSpotShock(), BigInt(0.20e18));
-      assert.equal(await pme.read.mmSpotShock(), BigInt(0.10e18));
+      assert.equal(await pme.read.imSpotShock(), BigInt(0.2e18));
+      assert.equal(await pme.read.mmSpotShock(), BigInt(0.1e18));
     });
 
     it("should revert when non-owner tries to set shocks", async function () {
@@ -72,10 +69,9 @@ describe("HashPowerPerpsDEX - Admin Functions", function () {
       const { buyer } = accounts;
 
       await viem.assertions.revertWithCustomError(
-        pme.write.setShocks(
-          [BigInt(0.20e18), BigInt(0.10e18), BigInt(0.15e18), BigInt(0.08e18)],
-          { account: buyer.account },
-        ),
+        pme.write.setShocks([BigInt(0.2e18), BigInt(0.1e18), BigInt(0.15e18), BigInt(0.08e18)], {
+          account: buyer.account,
+        }),
         pme,
         "OwnableUnauthorizedAccount",
       );

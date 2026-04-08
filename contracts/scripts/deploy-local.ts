@@ -107,7 +107,7 @@ async function main() {
   } = contracts;
   const { owner, seller, seller2, buyer, buyer2 } = accounts;
 
-  // Perps collateral (vault) — notionals are ~$50k/unit; keep well above IM for seeded ladder
+  // Perps collateral (vault) — hashrate index ~4.21 USDC per 100 TH/s/day; keep headroom for IM
   const collateralPerUser = parseUnits("150000", config.tokenDecimals);
   await perps.write.addCollateral([collateralPerUser], { account: seller.account });
   await perps.write.addCollateral([collateralPerUser], { account: buyer.account });

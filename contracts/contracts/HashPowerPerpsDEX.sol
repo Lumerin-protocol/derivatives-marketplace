@@ -12,9 +12,9 @@ import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils
 import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import { ERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
 import { MulticallUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/MulticallUpgradeable.sol";
-import { AggregatorV3Interface } from "./AggregatorV3Interface.sol";
-import { ICollateralVault } from "./ICollateralVault.sol";
-import { IPortfolioMarginEngine } from "./IPortfolioMarginEngine.sol";
+import { AggregatorV3Interface } from "./interfaces/AggregatorV3Interface.sol";
+import { ICollateralVault } from "./interfaces/ICollateralVault.sol";
+import { IPortfolioMarginEngine } from "./interfaces/IPortfolioMarginEngine.sol";
 import { console } from "hardhat/console.sol";
 
 /// @title HashPower Perps DEX

@@ -6,10 +6,7 @@ import type { NetworkConnection } from "hardhat/types/network";
 const { viem, networkHelpers } = await network.connect();
 
 async function deployHarness(conn: NetworkConnection) {
-  const harness = await conn.viem.deployContract(
-    "contracts/test/FixedPointMathHarness.sol:FixedPointMathHarness",
-    [],
-  );
+  const harness = await conn.viem.deployContract("FixedPointMathHarness", []);
   return { harness };
 }
 

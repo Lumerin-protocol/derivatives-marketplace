@@ -20,10 +20,10 @@ async function deployFullStackFixture(conn: NetworkConnection) {
   const [owner, alice] = await viem.getWalletClients();
 
   // ── USDC mock ──
-  const usdc = await viem.deployContract("contracts/USDCMock.sol:USDCMock", []);
+  const usdc = await viem.deployContract("USDCMock", []);
 
   // ── CollateralVault (proxy) ──
-  const vaultImpl = await viem.deployContract("contracts/CollateralVault.sol:CollateralVault", []);
+  const vaultImpl = await viem.deployContract("CollateralVault", []);
   const vaultProxy = await viem.deployContract("ERC1967Proxy", [
     vaultImpl.address as `0x${string}`,
     encodeFunctionData({ abi: vaultImpl.abi, functionName: "initialize", args: [usdc.address] }),
@@ -31,12 +31,12 @@ async function deployFullStackFixture(conn: NetworkConnection) {
   const vault = await viem.getContractAt("CollateralVault", vaultProxy.address);
 
   // ── Product mocks ──
-  const perpsMock = await viem.deployContract("contracts/PerpsDEXMock.sol:PerpsDEXMock", []);
+  const perpsMock = await viem.deployContract("PerpsDEXMock", []);
   await perpsMock.write.setMarketPrice([50_000_000_000n]); // $50k in token decimals
-  const optionsMock = await viem.deployContract("contracts/test/OptionsEngineMock.sol:OptionsEngineMock", []);
+  const optionsMock = await viem.deployContract("OptionsEngineMock", []);
 
   // ── PortfolioMarginEngine (proxy) ──
-  const pmeImpl = await viem.deployContract("contracts/PortfolioMarginEngine.sol:PortfolioMarginEngine", []);
+  const pmeImpl = await viem.deployContract("PortfolioMarginEngine", []);
   const pmeProxy = await viem.deployContract("ERC1967Proxy", [
     pmeImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -59,20 +59,36 @@ async function deployFullStackFixture(conn: NetworkConnection) {
   await usdc.write.transfer([aliceAddr, 100_000_000_000n], { account: owner.account }); // 100k USDC
 
   // Alice approves vault
-  const usdcAlice = await viem.getContractAt("USDCMock", usdc.address, { client: { wallet: alice } });
+  const usdcAlice = await viem.getContractAt("USDCMock", usdc.address, {
+    client: { wallet: alice },
+  });
   await usdcAlice.write.approve([vault.address, maxUint256]);
 
   // Alice deposits 50k
-  const vaultAlice = await viem.getContractAt("CollateralVault", vault.address, { client: { wallet: alice } });
+  const vaultAlice = await viem.getContractAt("CollateralVault", vault.address, {
+    client: { wallet: alice },
+  });
   await vaultAlice.write.deposit([50_000_000_000n]);
 
-  return { vault, vaultAlice, pme, perpsMock, optionsMock, usdc, usdcAlice, owner, alice, aliceAddr };
+  return {
+    vault,
+    vaultAlice,
+    pme,
+    perpsMock,
+    optionsMock,
+    usdc,
+    usdcAlice,
+    owner,
+    alice,
+    aliceAddr,
+  };
 }
 
 describe("Cross-Margin Integration", () => {
   describe("deposit and withdraw with no positions", () => {
     it("allows full withdrawal when no positions", async () => {
-      const { vaultAlice, aliceAddr, usdcAlice } = await networkHelpers.loadFixture(deployFullStackFixture);
+      const { vaultAlice, aliceAddr, usdcAlice } =
+        await networkHelpers.loadFixture(deployFullStackFixture);
 
       const balBefore = await usdcAlice.read.balanceOf([aliceAddr]);
       await vaultAlice.write.withdraw([50_000_000_000n]);
@@ -84,7 +100,8 @@ describe("Cross-Margin Integration", () => {
 
   describe("perps-only margin-gated withdrawal", () => {
     it("blocks withdrawal that would breach portfolio IM", async () => {
-      const { vaultAlice, perpsMock, aliceAddr } = await networkHelpers.loadFixture(deployFullStackFixture);
+      const { vaultAlice, perpsMock, aliceAddr } =
+        await networkHelpers.loadFixture(deployFullStackFixture);
 
       // Alice has 50k USDC. 3 lots at $50k → IM = 3 * 10% * $50k = $15k
       await perpsMock.write.setUserPosition([aliceAddr, 3_000_000n, 50_000_000_000n]);
@@ -98,7 +115,8 @@ describe("Cross-Margin Integration", () => {
     });
 
     it("allows withdrawal that stays above portfolio IM", async () => {
-      const { vaultAlice, perpsMock, aliceAddr, usdcAlice } = await networkHelpers.loadFixture(deployFullStackFixture);
+      const { vaultAlice, perpsMock, aliceAddr, usdcAlice } =
+        await networkHelpers.loadFixture(deployFullStackFixture);
 
       // 3 lots → IM = $15k
       await perpsMock.write.setUserPosition([aliceAddr, 3_000_000n, 50_000_000_000n]);
@@ -121,9 +139,8 @@ describe("Cross-Margin Integration", () => {
       await perpsMock.write.setUserPosition([aliceAddr, 3_000_000n, 50_000_000_000n]);
 
       // Unhedged: can't withdraw 40k (remaining $10k < $15k IM)
-      await assert.rejects(
-        vaultAlice.write.withdraw([40_000_000_000n]),
-        (err: Error) => err.message.includes("WithdrawalWouldBreachMargin"),
+      await assert.rejects(vaultAlice.write.withdraw([40_000_000_000n]), (err: Error) =>
+        err.message.includes("WithdrawalWouldBreachMargin"),
       );
 
       // Offset with options delta: perpDelta = 3e18, need optionsDelta = -3e18
@@ -158,7 +175,8 @@ describe("Cross-Margin Integration", () => {
 
   describe("health checks through vault", () => {
     it("PME isHealthy reflects vault balance vs MM", async () => {
-      const { pme, perpsMock, aliceAddr } = await networkHelpers.loadFixture(deployFullStackFixture);
+      const { pme, perpsMock, aliceAddr } =
+        await networkHelpers.loadFixture(deployFullStackFixture);
 
       // Healthy: 50k balance, no positions
       assert.equal(await pme.read.isHealthy([aliceAddr]), true);
@@ -203,7 +221,8 @@ describe("Cross-Margin Integration", () => {
 
   describe("options margin considers perps positions", () => {
     it("perps unrealized loss adds to options margin requirement", async () => {
-      const { pme, perpsMock, aliceAddr } = await networkHelpers.loadFixture(deployFullStackFixture);
+      const { pme, perpsMock, aliceAddr } =
+        await networkHelpers.loadFixture(deployFullStackFixture);
 
       const imBase = await pme.read.computePortfolioIM([aliceAddr]);
       assert.equal(imBase, 0n, "no positions = 0 IM");

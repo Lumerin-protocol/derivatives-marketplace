@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import { IHashPowerPerpsDEX } from "./IHashPowerPerpsDEX.sol";
+import { IHashPowerPerpsDEX } from "../interfaces/IHashPowerPerpsDEX.sol";
 
 /// @title PerpsDEXMock — Minimal mock of HashPowerPerpsDEX for options integration tests
 contract PerpsDEXMock is IHashPowerPerpsDEX {

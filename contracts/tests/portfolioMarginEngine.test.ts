@@ -11,10 +11,10 @@ async function deployFixture(conn: NetworkConnection) {
   const [owner] = await viem.getWalletClients();
 
   // USDC mock
-  const usdc = await viem.deployContract("contracts/USDCMock.sol:USDCMock", []);
+  const usdc = await viem.deployContract("USDCMock", []);
 
   // CollateralVault (proxy)
-  const vaultImpl = await viem.deployContract("contracts/CollateralVault.sol:CollateralVault", []);
+  const vaultImpl = await viem.deployContract("CollateralVault", []);
   const vaultProxy = await viem.deployContract("ERC1967Proxy", [
     vaultImpl.address as `0x${string}`,
     encodeFunctionData({ abi: vaultImpl.abi, functionName: "initialize", args: [usdc.address] }),
@@ -22,21 +22,15 @@ async function deployFixture(conn: NetworkConnection) {
   const vault = await viem.getContractAt("CollateralVault", vaultProxy.address);
 
   // PerpsDEXMock — PME reads spot price from getMarketPrice()
-  const perpsMock = await viem.deployContract("contracts/PerpsDEXMock.sol:PerpsDEXMock", []);
+  const perpsMock = await viem.deployContract("PerpsDEXMock", []);
   await perpsMock.write.setMarketPrice([50_000_000_000n]); // $50,000 in token decimals
 
   // OptionMarginEngine (we only need getNetGreeks + getOptionsReservedMargin)
   // Use a simple mock that returns controllable values
-  const optionsMock = await viem.deployContract(
-    "contracts/test/OptionsEngineMock.sol:OptionsEngineMock",
-    [],
-  );
+  const optionsMock = await viem.deployContract("OptionsEngineMock", []);
 
   // PortfolioMarginEngine (proxy)
-  const pmeImpl = await viem.deployContract(
-    "contracts/PortfolioMarginEngine.sol:PortfolioMarginEngine",
-    [],
-  );
+  const pmeImpl = await viem.deployContract("PortfolioMarginEngine", []);
   const pmeProxy = await viem.deployContract("ERC1967Proxy", [
     pmeImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -219,7 +213,9 @@ describe("PortfolioMarginEngine", () => {
       const imBefore = await pme.read.computePortfolioIM([user]);
 
       // Triple the spot shock (10% → 30%)
-      await pme.write.setShocks([0.30e18, 0.20e18, 0.10e18, 0.05e18].map(BigInt) as [bigint, bigint, bigint, bigint]);
+      await pme.write.setShocks(
+        [0.3e18, 0.2e18, 0.1e18, 0.05e18].map(BigInt) as [bigint, bigint, bigint, bigint],
+      );
       const imAfter = await pme.read.computePortfolioIM([user]);
 
       assert.ok(imAfter > imBefore, "doubling shock doubles stress margin");

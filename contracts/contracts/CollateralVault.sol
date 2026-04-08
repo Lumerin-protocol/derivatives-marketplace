@@ -8,7 +8,8 @@ import { ERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC2
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-import { ICollateralVault } from "./ICollateralVault.sol";
+import { ICollateralVault } from "./interfaces/ICollateralVault.sol";
+import { IPortfolioMarginEngine } from "./interfaces/IPortfolioMarginEngine.sol";
 
 /// @title CollateralVault — Unified USDC custody for perps + options
 /// @notice ERC20 receipt token (non-transferable) representing deposited collateral.
@@ -16,13 +17,7 @@ import { ICollateralVault } from "./ICollateralVault.sol";
 ///         adjust balances via transfer/credit/debit. Withdrawals are gated
 ///         by a pluggable margin engine that computes the combined portfolio
 ///         margin requirement.
-contract CollateralVault is
-    ICollateralVault,
-    Initializable,
-    UUPSUpgradeable,
-    OwnableUpgradeable,
-    ERC20Upgradeable
-{
+contract CollateralVault is ICollateralVault, Initializable, UUPSUpgradeable, OwnableUpgradeable, ERC20Upgradeable {
     using SafeERC20 for IERC20;
 
     // ── Errors ──────────────────────────────────────────────────────────────
@@ -118,14 +113,10 @@ contract CollateralVault is
         if (bal < amount) revert InsufficientBalance();
 
         uint256 newBalance = bal - amount;
-        if (marginEngine != address(0)) {
-            (bool ok, bytes memory ret) = marginEngine.staticcall(
-                abi.encodeWithSignature("computePortfolioIM(address)", _msgSender())
-            );
-            if (ok && ret.length >= 32) {
-                uint256 required = abi.decode(ret, (uint256));
-                if (newBalance < required) revert WithdrawalWouldBreachMargin();
-            }
+        address engine = marginEngine;
+        if (engine != address(0)) {
+            uint256 required = IPortfolioMarginEngine(engine).computePortfolioIM(_msgSender());
+            if (newBalance < required) revert WithdrawalWouldBreachMargin();
         }
 
         _burn(_msgSender(), amount);
@@ -187,5 +178,5 @@ contract CollateralVault is
 
     // ── Upgrade ─────────────────────────────────────────────────────────────
 
-    function _authorizeUpgrade(address) internal override onlyOwner {}
+    function _authorizeUpgrade(address) internal override onlyOwner { }
 }

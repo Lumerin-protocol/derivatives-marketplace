@@ -3,11 +3,7 @@ import assert from "node:assert/strict";
 import { network } from "hardhat";
 import { encodeFunctionData, maxUint256 } from "viem";
 import type { NetworkConnection } from "hardhat/types/network";
-import {
-  defaultSeries,
-  INITIAL_PRICE_E8,
-  ORACLE_DECIMALS,
-} from "./optionsFixtures.ts";
+import { defaultSeries, INITIAL_PRICE_E8, ORACLE_DECIMALS } from "./optionsFixtures.ts";
 
 const { viem, networkHelpers } = await network.connect();
 
@@ -21,10 +17,7 @@ async function deployPerpsIntegrationFixture(conn: NetworkConnection) {
   const [owner] = await v.getWalletClients();
 
   // ── Registry ──────────────────────────────────────────────────────────
-  const registryImpl = await v.deployContract(
-    "contracts/OptionMarketRegistry.sol:OptionMarketRegistry",
-    [],
-  );
+  const registryImpl = await v.deployContract("OptionMarketRegistry", []);
   const registryProxy = await v.deployContract("ERC1967Proxy", [
     registryImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -36,14 +29,11 @@ async function deployPerpsIntegrationFixture(conn: NetworkConnection) {
   const registry = await v.getContractAt("OptionMarketRegistry", registryProxy.address);
 
   // ── Mocks ─────────────────────────────────────────────────────────────
-  const usdc = await v.deployContract("contracts/USDCMock.sol:USDCMock", []);
-  const oracle = await v.deployContract(
-    "contracts/PriceOracleMock.sol:PriceOracleMock",
-    [INITIAL_PRICE_E8, ORACLE_DECIMALS],
-  );
+  const usdc = await v.deployContract("USDCMock", []);
+  const oracle = await v.deployContract("PriceOracleMock", [INITIAL_PRICE_E8, ORACLE_DECIMALS]);
 
   // ── Vault ─────────────────────────────────────────────────────────────
-  const vaultImpl = await v.deployContract("contracts/CollateralVault.sol:CollateralVault", []);
+  const vaultImpl = await v.deployContract("CollateralVault", []);
   const vaultProxy = await v.deployContract("ERC1967Proxy", [
     vaultImpl.address as `0x${string}`,
     encodeFunctionData({ abi: vaultImpl.abi, functionName: "initialize", args: [usdc.address] }),
@@ -51,10 +41,7 @@ async function deployPerpsIntegrationFixture(conn: NetworkConnection) {
   const vault = await v.getContractAt("CollateralVault", vaultProxy.address);
 
   // ── MarginEngine (with vault) ─────────────────────────────────────────
-  const engineImpl = await v.deployContract(
-    "contracts/OptionMarginEngine.sol:OptionMarginEngine",
-    [],
-  );
+  const engineImpl = await v.deployContract("OptionMarginEngine", []);
   const engineProxy = await v.deployContract("ERC1967Proxy", [
     engineImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -66,15 +53,12 @@ async function deployPerpsIntegrationFixture(conn: NetworkConnection) {
   const engine = await v.getContractAt("OptionMarginEngine", engineProxy.address);
 
   // ── PerpsDEXMock ──────────────────────────────────────────────────────
-  const perpsMock = await v.deployContract("contracts/PerpsDEXMock.sol:PerpsDEXMock", []);
+  const perpsMock = await v.deployContract("PerpsDEXMock", []);
   // PME reads spot from perpsDex.getMarketPrice() — set to match oracle
   await perpsMock.write.setMarketPrice([50_000_000_000n]);
 
   // ── PME ───────────────────────────────────────────────────────────────
-  const pmeImpl = await v.deployContract(
-    "contracts/PortfolioMarginEngine.sol:PortfolioMarginEngine",
-    [],
-  );
+  const pmeImpl = await v.deployContract("PortfolioMarginEngine", []);
   const pmeProxy = await v.deployContract("ERC1967Proxy", [
     pmeImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -92,10 +76,7 @@ async function deployPerpsIntegrationFixture(conn: NetworkConnection) {
   await engine.write.setPerpsDex([perpsMock.address], { account: owner.account });
 
   // ── OrderBook + Router ────────────────────────────────────────────────
-  const bookImpl = await v.deployContract(
-    "contracts/OptionOrderBook.sol:OptionOrderBook",
-    [],
-  );
+  const bookImpl = await v.deployContract("OptionOrderBook", []);
   const bookProxy = await v.deployContract("ERC1967Proxy", [
     bookImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -106,10 +87,7 @@ async function deployPerpsIntegrationFixture(conn: NetworkConnection) {
   ]);
   const book = await v.getContractAt("OptionOrderBook", bookProxy.address);
 
-  const routerImpl = await v.deployContract(
-    "contracts/OptionMatchingRouter.sol:OptionMatchingRouter",
-    [],
-  );
+  const routerImpl = await v.deployContract("OptionMatchingRouter", []);
   const routerProxy = await v.deployContract("ERC1967Proxy", [
     routerImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -178,10 +156,7 @@ async function deployNoPerpsFixture(conn: NetworkConnection) {
   const wallets = await v.getWalletClients();
   const trader1 = wallets[3]!;
 
-  const registryImpl = await v.deployContract(
-    "contracts/OptionMarketRegistry.sol:OptionMarketRegistry",
-    [],
-  );
+  const registryImpl = await v.deployContract("OptionMarketRegistry", []);
   const registryProxy = await v.deployContract("ERC1967Proxy", [
     registryImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -192,24 +167,18 @@ async function deployNoPerpsFixture(conn: NetworkConnection) {
   ]);
   const registry = await v.getContractAt("OptionMarketRegistry", registryProxy.address);
 
-  const usdc = await v.deployContract("contracts/USDCMock.sol:USDCMock", []);
-  const oracle = await v.deployContract(
-    "contracts/PriceOracleMock.sol:PriceOracleMock",
-    [INITIAL_PRICE_E8, ORACLE_DECIMALS],
-  );
+  const usdc = await v.deployContract("USDCMock", []);
+  const oracle = await v.deployContract("PriceOracleMock", [INITIAL_PRICE_E8, ORACLE_DECIMALS]);
 
   // Vault
-  const vaultImpl = await v.deployContract("contracts/CollateralVault.sol:CollateralVault", []);
+  const vaultImpl = await v.deployContract("CollateralVault", []);
   const vaultProxy = await v.deployContract("ERC1967Proxy", [
     vaultImpl.address as `0x${string}`,
     encodeFunctionData({ abi: vaultImpl.abi, functionName: "initialize", args: [usdc.address] }),
   ]);
   const vault = await v.getContractAt("CollateralVault", vaultProxy.address);
 
-  const engineImpl = await v.deployContract(
-    "contracts/OptionMarginEngine.sol:OptionMarginEngine",
-    [],
-  );
+  const engineImpl = await v.deployContract("OptionMarginEngine", []);
   const engineProxy = await v.deployContract("ERC1967Proxy", [
     engineImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -221,13 +190,10 @@ async function deployNoPerpsFixture(conn: NetworkConnection) {
   const engine = await v.getContractAt("OptionMarginEngine", engineProxy.address);
 
   // PME with a perps mock (no perps linked to engine, but PME is mandatory)
-  const perpsMock = await v.deployContract("contracts/PerpsDEXMock.sol:PerpsDEXMock", []);
+  const perpsMock = await v.deployContract("PerpsDEXMock", []);
   await perpsMock.write.setMarketPrice([50_000_000_000n]);
 
-  const pmeImpl = await v.deployContract(
-    "contracts/PortfolioMarginEngine.sol:PortfolioMarginEngine",
-    [],
-  );
+  const pmeImpl = await v.deployContract("PortfolioMarginEngine", []);
   const pmeProxy = await v.deployContract("ERC1967Proxy", [
     pmeImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -250,9 +216,7 @@ async function deployNoPerpsFixture(conn: NetworkConnection) {
 describe("Level 1 Perps Integration", () => {
   describe("admin", () => {
     it("setPerpsDex links the perps DEX", async () => {
-      const { engine, perpsMock } = await networkHelpers.loadFixture(
-        deployPerpsIntegrationFixture,
-      );
+      const { engine, perpsMock } = await networkHelpers.loadFixture(deployPerpsIntegrationFixture);
 
       const linked = await engine.read.perpsDex();
       assert.equal(linked.toLowerCase(), perpsMock.address.toLowerCase());
@@ -261,9 +225,7 @@ describe("Level 1 Perps Integration", () => {
 
   describe("getPerpPosition", () => {
     it("returns zero when no perps position", async () => {
-      const { engine, traders } = await networkHelpers.loadFixture(
-        deployPerpsIntegrationFixture,
-      );
+      const { engine, traders } = await networkHelpers.loadFixture(deployPerpsIntegrationFixture);
 
       const [qty, entry] = await engine.read.getPerpPosition([traders.trader1.account.address]);
       assert.equal(qty, 0n);
@@ -289,17 +251,13 @@ describe("Level 1 Perps Integration", () => {
 
   describe("getPerpCollateral", () => {
     it("returns zero when no perps collateral", async () => {
-      const { engine, traders } = await networkHelpers.loadFixture(
-        deployPerpsIntegrationFixture,
-      );
+      const { engine, traders } = await networkHelpers.loadFixture(deployPerpsIntegrationFixture);
       const col = await engine.read.getPerpCollateral([traders.trader1.account.address]);
       assert.equal(col, 0n);
     });
 
     it("returns 0 in Level 2 (collateral is in shared vault)", async () => {
-      const { engine, traders } = await networkHelpers.loadFixture(
-        deployPerpsIntegrationFixture,
-      );
+      const { engine, traders } = await networkHelpers.loadFixture(deployPerpsIntegrationFixture);
       const col = await engine.read.getPerpCollateral([traders.trader1.account.address]);
       assert.equal(col, 0n);
     });
@@ -307,9 +265,7 @@ describe("Level 1 Perps Integration", () => {
 
   describe("getPortfolioOverview", () => {
     it("returns options-only data when no perps exposure", async () => {
-      const { engine, traders } = await networkHelpers.loadFixture(
-        deployPerpsIntegrationFixture,
-      );
+      const { engine, traders } = await networkHelpers.loadFixture(deployPerpsIntegrationFixture);
 
       const p = await engine.read.getPortfolioOverview([traders.trader1.account.address]);
 
@@ -333,11 +289,31 @@ describe("Level 1 Perps Integration", () => {
       );
 
       await router.write.submitOrder(
-        [{ seriesId, isBuy: false, priceTicks: 100n, size: LOT, orderType: LIMIT, postOnly: false, reduceOnly: false }],
+        [
+          {
+            seriesId,
+            isBuy: false,
+            priceTicks: 100n,
+            size: LOT,
+            orderType: LIMIT,
+            postOnly: false,
+            reduceOnly: false,
+          },
+        ],
         { account: traders.trader2.account },
       );
       await router.write.submitOrder(
-        [{ seriesId, isBuy: true, priceTicks: 100n, size: LOT, orderType: LIMIT, postOnly: false, reduceOnly: false }],
+        [
+          {
+            seriesId,
+            isBuy: true,
+            priceTicks: 100n,
+            size: LOT,
+            orderType: LIMIT,
+            postOnly: false,
+            reduceOnly: false,
+          },
+        ],
         { account: traders.trader1.account },
       );
 
@@ -394,11 +370,31 @@ describe("Level 1 Perps Integration", () => {
       );
 
       await router.write.submitOrder(
-        [{ seriesId, isBuy: false, priceTicks: 100n, size: LOT, orderType: LIMIT, postOnly: false, reduceOnly: false }],
+        [
+          {
+            seriesId,
+            isBuy: false,
+            priceTicks: 100n,
+            size: LOT,
+            orderType: LIMIT,
+            postOnly: false,
+            reduceOnly: false,
+          },
+        ],
         { account: traders.trader2.account },
       );
       await router.write.submitOrder(
-        [{ seriesId, isBuy: true, priceTicks: 100n, size: LOT, orderType: LIMIT, postOnly: false, reduceOnly: false }],
+        [
+          {
+            seriesId,
+            isBuy: true,
+            priceTicks: 100n,
+            size: LOT,
+            orderType: LIMIT,
+            postOnly: false,
+            reduceOnly: false,
+          },
+        ],
         { account: traders.trader1.account },
       );
 
@@ -416,11 +412,31 @@ describe("Level 1 Perps Integration", () => {
       );
 
       await router.write.submitOrder(
-        [{ seriesId, isBuy: true, priceTicks: 100n, size: LOT, orderType: LIMIT, postOnly: false, reduceOnly: false }],
+        [
+          {
+            seriesId,
+            isBuy: true,
+            priceTicks: 100n,
+            size: LOT,
+            orderType: LIMIT,
+            postOnly: false,
+            reduceOnly: false,
+          },
+        ],
         { account: traders.trader2.account },
       );
       await router.write.submitOrder(
-        [{ seriesId, isBuy: false, priceTicks: 100n, size: LOT, orderType: LIMIT, postOnly: false, reduceOnly: false }],
+        [
+          {
+            seriesId,
+            isBuy: false,
+            priceTicks: 100n,
+            size: LOT,
+            orderType: LIMIT,
+            postOnly: false,
+            reduceOnly: false,
+          },
+        ],
         { account: traders.trader1.account },
       );
 
@@ -441,9 +457,7 @@ describe("Level 1 Perps Integration", () => {
 
   describe("no perps linked", () => {
     it("returns zeros when perpsDex is not set", async () => {
-      const { engine, traders } = await networkHelpers.loadFixture(
-        deployNoPerpsFixture,
-      );
+      const { engine, traders } = await networkHelpers.loadFixture(deployNoPerpsFixture);
 
       const [qty, entry] = await engine.read.getPerpPosition([traders.trader1.account.address]);
       assert.equal(qty, 0n);
