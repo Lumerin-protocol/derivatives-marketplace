@@ -1,12 +1,14 @@
 import { createServer } from "node:http";
-import type { Server } from "node:http";
-import type { MakerConfig } from "./config.ts";
+import type { Server, ServerResponse } from "node:http";
+import type pino from "pino";
 import type { OracleTracker } from "./oracleTracker.ts";
 import type { InventoryManager } from "./inventoryManager.ts";
 import type { BookTracker } from "./bookTracker.ts";
 import type { GasTracker } from "./gasTracker.ts";
+import type Fraction from "fraction.js";
 import type { RiskManager } from "./riskManager.ts";
-import type pino from "pino";
+import type { MakerConfig } from "./config.ts";
+import type { ErrorInfo } from "./errors.ts";
 
 export interface ExecutorStats {
   ordersPlaced: number;
@@ -14,11 +16,26 @@ export interface ExecutorStats {
   reconcileCount: number;
 }
 
-export interface ErrorInfo {
-  message: string;
-  [key: string]: unknown;
+export interface HealthCheckOptions {
+  port: number;
+  config: MakerConfig;
+  oracle: OracleTracker;
+  inventory: InventoryManager;
+  book: BookTracker;
+  gas: GasTracker;
+  risk: RiskManager;
+  logger: pino.Logger;
 }
 
+/**
+ * HTTP endpoint exposing health, status, and runtime config.
+ *
+ *  GET /health  → JSON snapshot of all trackers and config (sanitised)
+ *  POST /stop   → pause the main loop, cancel resting orders (via onStop)
+ *  POST /start  → resume the main loop (via onStart)
+ *
+ * The bot's main loop checks `paused` and skips ticks while true.
+ */
 export class HealthCheck {
   private server: Server | null = null;
   private startedAt = Date.now();
@@ -34,6 +51,7 @@ export class HealthCheck {
   onStop: (() => Promise<void>) | null = null;
   onStart: (() => Promise<void>) | null = null;
 
+  private readonly port: number;
   private readonly config: MakerConfig;
   private readonly oracle: OracleTracker;
   private readonly inventory: InventoryManager;
@@ -42,123 +60,27 @@ export class HealthCheck {
   private readonly risk: RiskManager;
   private readonly logger: pino.Logger;
 
-  constructor(
-    config: MakerConfig,
-    oracle: OracleTracker,
-    inventory: InventoryManager,
-    book: BookTracker,
-    gas: GasTracker,
-    risk: RiskManager,
-    logger: pino.Logger,
-  ) {
-    this.config = config;
-    this.oracle = oracle;
-    this.inventory = inventory;
-    this.book = book;
-    this.gas = gas;
-    this.risk = risk;
-    this.logger = logger;
+  constructor(opts: HealthCheckOptions) {
+    this.port = opts.port;
+    this.config = opts.config;
+    this.oracle = opts.oracle;
+    this.inventory = opts.inventory;
+    this.book = opts.book;
+    this.gas = opts.gas;
+    this.risk = opts.risk;
+    this.logger = opts.logger;
   }
 
   start(): Promise<void> {
     return new Promise((resolve) => {
       this.startedAt = Date.now();
-
       this.server = createServer((req, res) => {
         try {
-          if (req.method === "POST" && req.url === "/stop") {
-            this.handleStop(res);
-            return;
-          }
-
-          if (req.method === "POST" && req.url === "/start") {
-            this.handleStart(res);
-            return;
-          }
-
-          if (req.method === "GET" && req.url === "/health") {
-            const body = JSON.stringify({
-              status: this.status,
-              walletAddress: this.walletAddress,
-              lastError: this.lastError,
-              uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
-              config: {
-                network: this.config.network,
-                nodeEnv: this.config.nodeEnv,
-                perpsAddress: this.config.perpsAddress,
-                dryRun: this.config.dryRun,
-                logLevel: this.config.logLevel,
-                commitHash: this.config.commitHash,
-                quoting: {
-                  numLevelsPerSide: this.config.numLevelsPerSide,
-                  baseQuantity: this.config.baseQuantity.toString(),
-                  minSpreadBps: this.config.minSpreadBps,
-                  volatilityMultiplier: this.config.volatilityMultiplier,
-                  inventorySkewGamma: this.config.inventorySkewGamma,
-                  maxSkewTicks: this.config.maxSkewTicks,
-                },
-                gas: {
-                  ethPriceFeedAddress: this.config.ethPriceFeedAddress ?? null,
-                  gasSpikeThresholdPct: this.config.gasSpikeThresholdPct,
-                  gasCapMultiplier: this.config.gasCapMultiplier,
-                  gasPenaltyBps: this.config.gasPenaltyBps,
-                  maxGasBudgetPerHourUsd: this.config.maxGasBudgetPerHourUsd.toString(),
-                  maxGasBudgetPerDayUsd: this.config.maxGasBudgetPerDayUsd.toString(),
-                  urgentRequoteThresholdTicks: this.config.urgentRequoteThresholdTicks,
-                },
-                risk: {
-                  maxPositionSize: this.config.maxPositionSize.toString(),
-                  maxUtilizationPct: this.config.maxUtilizationPct,
-                  minCollateralBalance: this.config.minCollateralBalance.toString(),
-                  maxDailyLossUsd: this.config.maxDailyLossUsd.toString(),
-                },
-                timing: {
-                  pollIntervalMs: this.config.pollIntervalMs,
-                  requoteThresholdTicks: this.config.requoteThresholdTicks,
-                  requoteCooldownMs: this.config.requoteCooldownMs,
-                  resyncIntervalMs: this.config.resyncIntervalMs,
-                },
-              },
-              market: {
-                oraclePrice: this.oracle.currentPrice.toString(),
-                volatility: this.oracle.volatility,
-                bestBid: this.book.bestBid.toString(),
-                bestAsk: this.book.bestAsk.toString(),
-                ownOrders: this.book.ownOrders.size,
-              },
-              inventory: {
-                netPosition: this.inventory.netQuantity.toString(),
-                collateralBalance: this.inventory.collateralBalance.toString(),
-                ethBalance: this.inventory.ethBalance.toString(),
-                tokenBalance: this.inventory.tokenBalance.toString(),
-                inventorySkew: this.inventory.inventorySkew,
-                utilizationPct: this.inventory.utilizationPct,
-              },
-              gas: {
-                gasGwei: (Number(this.gas.currentGasPrice) / 1e9).toFixed(2),
-                gasSpiking: this.gas.isGasSpiking,
-                gasSpikePct: this.gas.gasSpikePct.toFixed(0),
-              },
-              risk: {
-                throttled: this.risk.throttled,
-                throttleReason: this.risk.throttleReason,
-                cumulativeGasCostUsd: this.risk.cumulativeGasCostUsd.toString(),
-              },
-              stats: {
-                tickCount: this.tickCount,
-                lastTickAt: this.lastTickAt,
-                ordersPlaced: this.executorStats?.ordersPlaced ?? 0,
-                ordersCancelled: this.executorStats?.ordersCancelled ?? 0,
-                reconcileCount: this.executorStats?.reconcileCount ?? 0,
-              },
-            });
-
-            res.writeHead(200, { "Content-Type": "application/json" });
-            res.end(body);
-          } else {
-            res.writeHead(404);
-            res.end();
-          }
+          if (req.method === "POST" && req.url === "/stop") return this.handleStop(res);
+          if (req.method === "POST" && req.url === "/start") return this.handleStart(res);
+          if (req.method === "GET" && req.url === "/health") return this.handleHealth(res);
+          res.writeHead(404);
+          res.end();
         } catch (err) {
           this.logger.error({ err }, "server error");
           res.writeHead(500);
@@ -167,79 +89,16 @@ export class HealthCheck {
       });
 
       const logger = this.logger;
-
-      this.server.listen(this.config.healthPort, () => {
-        logger.info(
-          { url: `http://localhost:${this.config.healthPort}/health` },
-          "Health endpoint started",
-        );
+      this.server.listen(this.port, () => {
+        logger.info({ url: `http://localhost:${this.port}/health` }, "health endpoint started");
         resolve();
       });
     });
   }
 
-  private handleStop(res: import("node:http").ServerResponse): void {
-    if (this.paused) {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, status: this.status }));
-      return;
-    }
-
-    this.paused = true;
-    this.status = "stopped";
-    this.lastError = null;
-
-    if (this.onStop) {
-      this.onStop()
-        .then(() => {
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: true, status: this.status }));
-        })
-        .catch((err) => {
-          this.logger.error({ err }, "onStop callback failed");
-          res.writeHead(500, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "stop callback failed" }));
-        });
-    } else {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, status: this.status }));
-    }
-  }
-
-  private handleStart(res: import("node:http").ServerResponse): void {
-    if (!this.paused) {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, status: this.status }));
-      return;
-    }
-
-    this.paused = false;
-    this.status = "running";
-    this.lastError = null;
-
-    if (this.onStart) {
-      this.onStart()
-        .then(() => {
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: true, status: this.status }));
-        })
-        .catch((err) => {
-          this.logger.error({ err }, "onStart callback failed");
-          res.writeHead(500, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "start callback failed" }));
-        });
-    } else {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, status: this.status }));
-    }
-  }
-
   stop(): Promise<void> {
     return new Promise((resolve, reject) => {
-      if (!this.server) {
-        resolve();
-        return;
-      }
+      if (!this.server) return resolve();
       this.server.close((err) => {
         this.server = null;
         if (err) reject(err);
@@ -247,4 +106,102 @@ export class HealthCheck {
       });
     });
   }
+
+  private handleHealth(res: ServerResponse): void {
+    const body = JSON.stringify({
+      status: this.status,
+      walletAddress: this.walletAddress,
+      lastError: this.lastError,
+      uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
+      config: {
+        nodeEnv: this.config.nodeEnv,
+        commitHash: this.config.commitHash,
+        logLevel: this.config.logLevel,
+        dryRun: this.config.dryRun,
+        network: this.config.network.name,
+        venue: { kind: this.config.venue.kind, address: this.config.venue.address },
+        pricing: this.config.pricing,
+        sizing: this.config.sizing,
+        risk: this.config.risk,
+        gas: this.config.gas,
+        timing: this.config.timing,
+      },
+      market: {
+        oraclePrice: this.oracle.currentPrice.toString(),
+        volatility: fractionToNumber(this.oracle.volatility),
+        bestBid: this.book.bestBid.toString(),
+        bestAsk: this.book.bestAsk.toString(),
+        ownOrders: this.book.ownOrders.size,
+      },
+      inventory: {
+        netPosition: this.inventory.netQuantity.toString(),
+        collateralBalance: this.inventory.collateralBalance.toString(),
+        nativeBalance: this.inventory.nativeBalance.toString(),
+        walletTokenBalance: this.inventory.walletTokenBalance.toString(),
+        inventorySkew: fractionToNumber(this.inventory.inventorySkew),
+        utilizationPct: this.inventory.utilizationPct,
+      },
+      gas: {
+        gasGwei: (Number(this.gas.currentGasPrice) / 1e9).toFixed(2),
+        gasSpiking: this.gas.isGasSpiking,
+        gasSpikePct: fractionToNumber(this.gas.gasSpikePct).toFixed(0),
+      },
+      risk: {
+        throttled: this.risk.throttled,
+        throttleReason: this.risk.throttleReason,
+        cumulativeGasCostUsd: this.risk.cumulativeGasCostUsd.toString(),
+      },
+      stats: {
+        tickCount: this.tickCount,
+        lastTickAt: this.lastTickAt,
+        ordersPlaced: this.executorStats?.ordersPlaced ?? 0,
+        ordersCancelled: this.executorStats?.ordersCancelled ?? 0,
+        reconcileCount: this.executorStats?.reconcileCount ?? 0,
+      },
+    });
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(body);
+  }
+
+  private handleStop(res: ServerResponse): void {
+    if (this.paused) return this.respondOk(res);
+    this.paused = true;
+    this.status = "stopped";
+    this.lastError = null;
+
+    if (!this.onStop) return this.respondOk(res);
+    this.onStop()
+      .then(() => this.respondOk(res))
+      .catch((err) => {
+        this.logger.error({ err }, "onStop callback failed");
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "stop callback failed" }));
+      });
+  }
+
+  private handleStart(res: ServerResponse): void {
+    if (!this.paused) return this.respondOk(res);
+    this.paused = false;
+    this.status = "running";
+    this.lastError = null;
+
+    if (!this.onStart) return this.respondOk(res);
+    this.onStart()
+      .then(() => this.respondOk(res))
+      .catch((err) => {
+        this.logger.error({ err }, "onStart callback failed");
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "start callback failed" }));
+      });
+  }
+
+  private respondOk(res: ServerResponse): void {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, status: this.status }));
+  }
+}
+
+function fractionToNumber(value: Fraction): number {
+  // diagnostic only — never used in trading math
+  return (Number(value.s) * Number(value.n)) / Number(value.d);
 }

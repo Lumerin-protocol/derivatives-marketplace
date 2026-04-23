@@ -1,7 +1,9 @@
-import { createPublicClient, createWalletClient, http, webSocket, defineChain } from "viem";
+import { createPublicClient, createWalletClient, defineChain, http, webSocket } from "viem";
+import type { Chain, PublicClient, WalletClient, Transport } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import type { MakerConfig } from "./config.ts";
+import type { Account, Hex } from "viem";
 import { arbitrum, arbitrumSepolia, base, baseSepolia, hardhat as hardhatBase } from "viem/chains";
+import { ConfigError } from "./errors.ts";
 
 export const hardhat = defineChain({
   ...hardhatBase,
@@ -13,26 +15,50 @@ export const hardhat = defineChain({
   },
 });
 
-export const chainMapping = {
+export const chainMapping: Record<string, Chain> = {
   "arbitrum-sepolia": arbitrumSepolia,
   "base-sepolia": baseSepolia,
-  arbitrum: arbitrum,
-  base: base,
-  hardhat: hardhat,
-} as const;
+  arbitrum,
+  base,
+  hardhat,
+};
 
-export function createClients(config: MakerConfig) {
-  const chain = chainMapping[config.network as keyof typeof chainMapping];
+export function resolveChain(networkName: string): Chain {
+  const chain = chainMapping[networkName];
   if (!chain) {
-    throw new Error(`Unsupported network: ${config.network}`);
+    throw new ConfigError(`Unsupported network: ${networkName}`);
   }
-  const transport = config.ethNodeAddress.startsWith("ws")
-    ? webSocket(config.ethNodeAddress)
-    : http(config.ethNodeAddress);
+  return chain;
+}
 
+export function createTransport(rpcUrl: string): Transport {
+  return rpcUrl.startsWith("ws") ? webSocket(rpcUrl) : http(rpcUrl);
+}
+
+export interface NetworkClients {
+  publicClient: PublicClient;
+  chain: Chain;
+  transport: Transport;
+}
+
+export function createNetworkClients(networkName: string, rpcUrl: string): NetworkClients {
+  const chain = resolveChain(networkName);
+  const transport = createTransport(rpcUrl);
   const publicClient = createPublicClient({ transport, chain });
-  const account = privateKeyToAccount(config.makerPrivateKey);
-  const walletClient = createWalletClient({ account, transport, chain });
+  return { publicClient, chain, transport };
+}
 
-  return { publicClient, walletClient, account, chain };
+export interface WalletClients {
+  account: Account;
+  walletClient: WalletClient;
+}
+
+export function createWalletFromKey(
+  privateKey: Hex,
+  chain: Chain,
+  transport: Transport,
+): WalletClients {
+  const account = privateKeyToAccount(privateKey);
+  const walletClient = createWalletClient({ account, transport, chain });
+  return { account, walletClient };
 }

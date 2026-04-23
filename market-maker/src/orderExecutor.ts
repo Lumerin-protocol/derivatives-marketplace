@@ -1,25 +1,41 @@
-import { type PublicClient, type WalletClient, type Account, type Chain, encodeFunctionData } from "viem";
-import type { MakerConfig } from "./config.ts";
-import type { Quoter, DesiredQuotes, QuoteLevel } from "./quoter.ts";
-import type { BookTracker, OwnOrder } from "./bookTracker.ts";
+import type pino from "pino";
+import type {
+  DesiredQuotes,
+  InstrumentAdapter,
+  OwnOrder,
+  QuoteLevel,
+} from "./adapter.ts";
+import type { Quoter } from "./quoter.ts";
+import type { BookTracker } from "./bookTracker.ts";
 import type { GasTracker } from "./gasTracker.ts";
 import type { RiskManager } from "./riskManager.ts";
 import type { OracleTracker } from "./oracleTracker.ts";
-import type pino from "pino";
-import { hashPowerPerpsDexAbi } from "./abi.ts";
 import { bigAbs } from "./math.ts";
 
+export interface OrderExecutorConfig {
+  /** Skip a requote if elapsed since last < cooldown (ms). */
+  requoteCooldownMs: number;
+  /** Skip if price drifted < N ticks from last quote mid. */
+  requoteThresholdTicks: number;
+  /** Override threshold (in ticks) when gas is spiking — quote anyway if drift >= this. */
+  urgentRequoteThresholdTicks: number;
+  dryRun: boolean;
+}
+
+/**
+ * Diff desired quotes vs the resting book; cancel + place via venue multicall.
+ *
+ * Cooldown, threshold, gas-spike deferral, partial-fill top-up are all here.
+ * Tx gas cost is reported back to RiskManager for budget enforcement.
+ */
 export class OrderExecutor {
   readonly stats = { ordersPlaced: 0, ordersCancelled: 0, reconcileCount: 0 };
 
   private lastRequoteAt = 0;
   private lastQuoteMidPrice = 0n;
 
-  private readonly publicClient: PublicClient;
-  private readonly walletClient: WalletClient;
-  private readonly account: Account;
-  private readonly chain: Chain;
-  private readonly config: MakerConfig;
+  private readonly instrument: InstrumentAdapter;
+  private readonly cfg: OrderExecutorConfig;
   private readonly quoter: Quoter;
   private readonly book: BookTracker;
   private readonly gas: GasTracker;
@@ -28,11 +44,8 @@ export class OrderExecutor {
   private readonly logger: pino.Logger;
 
   constructor(
-    publicClient: PublicClient,
-    walletClient: WalletClient,
-    account: Account,
-    chain: Chain,
-    config: MakerConfig,
+    instrument: InstrumentAdapter,
+    cfg: OrderExecutorConfig,
     quoter: Quoter,
     book: BookTracker,
     gas: GasTracker,
@@ -40,20 +53,16 @@ export class OrderExecutor {
     oracle: OracleTracker,
     logger: pino.Logger,
   ) {
-    this.publicClient = publicClient;
-    this.walletClient = walletClient;
-    this.account = account;
-    this.chain = chain;
-    this.config = config;
+    this.instrument = instrument;
+    this.cfg = cfg;
     this.quoter = quoter;
     this.book = book;
     this.gas = gas;
     this.risk = risk;
     this.oracle = oracle;
-    this.logger = logger.child({ component: "executor" });
+    this.logger = logger.child({ component: "executor", instrument: instrument.id });
   }
 
-  /** Main reconcile loop: diff desired quotes vs current orders, cancel/place as needed. */
   async reconcile(desired: DesiredQuotes): Promise<void> {
     if (!this.shouldRequote(desired)) {
       this.logger.debug("requote skipped (within threshold or cooldown)");
@@ -62,14 +71,18 @@ export class OrderExecutor {
 
     if (this.gas.isGasSpiking) {
       const drift = this.priceDriftTicks();
-      if (drift < this.config.urgentRequoteThresholdTicks) {
+      if (drift < this.cfg.urgentRequoteThresholdTicks) {
         this.logger.info(
-          { drift, threshold: this.config.urgentRequoteThresholdTicks, gasSpike: this.gas.gasSpikePct.toFixed(0) },
+          {
+            drift,
+            threshold: this.cfg.urgentRequoteThresholdTicks,
+            gasSpike: this.gas.gasSpikePct.toString(),
+          },
           "requote skipped: gas spike, drift below urgent threshold",
         );
         return;
       }
-      this.logger.warn({ drift }, "proceeding with requote despite gas spike (urgent drift)");
+      this.logger.warn({ drift }, "proceeding with requote despite gas spike");
     }
 
     const ordersToCancel = this.findStaleOrders(desired);
@@ -80,18 +93,15 @@ export class OrderExecutor {
       return;
     }
 
-    const maxFeePerGas = this.gas.cappedGasPrice();
-
     const calls: `0x${string}`[] = [];
-
     for (const order of ordersToCancel) {
-      calls.push(encodeFunctionData({ abi: hashPowerPerpsDexAbi, functionName: "cancelOrder", args: [order.orderId] }));
+      calls.push(this.instrument.buildCancelCalldata(order.orderId));
     }
     for (const level of ordersToPlace) {
-      calls.push(encodeFunctionData({ abi: hashPowerPerpsDexAbi, functionName: "createOrder", args: [level.price, level.quantity] }));
+      calls.push(this.instrument.buildCreateCalldata(level.price, level.quantity));
     }
 
-    if (this.config.dryRun) {
+    if (this.cfg.dryRun) {
       this.logger.info(
         { cancels: ordersToCancel.length, places: ordersToPlace.length },
         "DRY RUN: would send multicall batch",
@@ -99,18 +109,10 @@ export class OrderExecutor {
       return;
     }
 
+    const maxFeePerGas = this.gas.cappedGasPrice();
     try {
-      const hash = await this.walletClient.writeContract({
-        address: this.config.perpsAddress,
-        abi: hashPowerPerpsDexAbi,
-        functionName: "multicall",
-        args: [calls],
-        account: this.account,
-        chain: this.chain,
-        maxFeePerGas,
-      });
-
-      const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+      const hash = await this.instrument.venue.multicall(calls, { maxFeePerGas });
+      const receipt = await this.instrument.venue.publicClient.waitForTransactionReceipt({ hash });
       const gasCost = this.computeTxGasCost(receipt);
       this.risk.recordGasCost(gasCost);
 
@@ -118,7 +120,11 @@ export class OrderExecutor {
       this.stats.ordersPlaced += ordersToPlace.length;
 
       this.logger.info(
-        { cancels: ordersToCancel.length, places: ordersToPlace.length, gas: receipt.gasUsed.toString() },
+        {
+          cancels: ordersToCancel.length,
+          places: ordersToPlace.length,
+          gas: receipt.gasUsed.toString(),
+        },
         "multicall batch executed",
       );
     } catch (err) {
@@ -134,40 +140,29 @@ export class OrderExecutor {
     this.stats.reconcileCount++;
   }
 
-  /** Cancel all MM orders (used by circuit breaker). */
   async cancelAll(): Promise<void> {
     const orders = [...this.book.ownOrders.values()];
     if (orders.length === 0) return;
 
     this.logger.warn({ count: orders.length }, "cancelling all orders");
-    const maxFeePerGas = this.gas.cappedGasPrice();
+    const calls = orders.map((o) => this.instrument.buildCancelCalldata(o.orderId));
 
-    const calls = orders.map((order) =>
-      encodeFunctionData({ abi: hashPowerPerpsDexAbi, functionName: "cancelOrder", args: [order.orderId] }),
-    );
-
-    if (this.config.dryRun) {
-      this.logger.info({ count: orders.length }, "DRY RUN: would cancel all orders via multicall");
+    if (this.cfg.dryRun) {
+      this.logger.info({ count: orders.length }, "DRY RUN: would cancel all orders");
       return;
     }
 
+    const maxFeePerGas = this.gas.cappedGasPrice();
     try {
-      const hash = await this.walletClient.writeContract({
-        address: this.config.perpsAddress,
-        abi: hashPowerPerpsDexAbi,
-        functionName: "multicall",
-        args: [calls],
-        account: this.account,
-        chain: this.chain,
-        maxFeePerGas,
-      });
-
-      const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+      const hash = await this.instrument.venue.multicall(calls, { maxFeePerGas });
+      const receipt = await this.instrument.venue.publicClient.waitForTransactionReceipt({ hash });
       const gasCost = this.computeTxGasCost(receipt);
       this.risk.recordGasCost(gasCost);
-
       this.stats.ordersCancelled += orders.length;
-      this.logger.info({ count: orders.length, gas: receipt.gasUsed.toString() }, "all orders cancelled via multicall");
+      this.logger.info(
+        { count: orders.length, gas: receipt.gasUsed.toString() },
+        "all orders cancelled",
+      );
     } catch (err) {
       this.logger.error({ count: orders.length, err }, "cancel-all multicall failed");
       throw err;
@@ -175,122 +170,79 @@ export class OrderExecutor {
   }
 
   private shouldRequote(desired: DesiredQuotes): boolean {
-    // Cooldown check
-    if (Date.now() - this.lastRequoteAt < this.effectiveCooldownMs()) {
-      return false;
-    }
+    if (Date.now() - this.lastRequoteAt < this.effectiveCooldownMs()) return false;
 
-    // If fewer orders resting than desired (e.g. after a full fill), requote to refill
     const expectedCount = desired.bids.length + desired.asks.length;
-    if (this.book.ownOrders.size < expectedCount) {
-      return true;
-    }
+    if (this.book.ownOrders.size < expectedCount) return true;
+    if (this.hasQuantityDeficit(desired)) return true;
 
-    // If any price level has less quantity than desired (partial fill), top up
-    if (this.hasQuantityDeficit(desired)) {
-      return true;
-    }
-
-    // Price drift check
-    const drift = this.priceDriftTicks();
-    return drift >= this.effectiveRequoteThreshold();
+    return this.priceDriftTicks() >= this.effectiveRequoteThreshold();
   }
 
   private priceDriftTicks(): number {
-    if (this.lastQuoteMidPrice === 0n) return Infinity;
+    if (this.lastQuoteMidPrice === 0n) return Number.POSITIVE_INFINITY;
     const tick = this.quoter.getTick();
     if (tick === 0n) return 0;
     const diff = bigAbs(this.oracle.currentPrice - this.lastQuoteMidPrice);
     return Number(diff / tick);
   }
 
-  /** Dynamic cooldown: increase when gas budget is throttled. */
   private effectiveCooldownMs(): number {
-    let cooldown = this.config.requoteCooldownMs;
-    if (this.risk.throttled) {
-      cooldown *= 3;
-    }
-    return cooldown;
+    return this.risk.throttled ? this.cfg.requoteCooldownMs * 3 : this.cfg.requoteCooldownMs;
   }
 
-  /** Dynamic requote threshold: widen when gas budget is throttled. */
   private effectiveRequoteThreshold(): number {
-    let threshold = this.config.requoteThresholdTicks;
-    if (this.risk.throttled) {
-      threshold *= 2;
-    }
-    return threshold;
+    return this.risk.throttled ? this.cfg.requoteThresholdTicks * 2 : this.cfg.requoteThresholdTicks;
   }
 
-  /**
-   * Find existing orders that don't match any desired level (should be cancelled).
-   * An order is "matching" if its price equals a desired level's price.
-   */
   private findStaleOrders(desired: DesiredQuotes): OwnOrder[] {
     const desiredPrices = new Set<bigint>();
     for (const b of desired.bids) desiredPrices.add(b.price);
     for (const a of desired.asks) desiredPrices.add(a.price);
-
     const stale: OwnOrder[] = [];
     for (const order of this.book.ownOrders.values()) {
-      if (!desiredPrices.has(order.price)) {
-        stale.push(order);
-      }
+      if (!desiredPrices.has(order.price)) stale.push(order);
     }
     return stale;
   }
 
-  /**
-   * Find desired levels that need new orders placed.
-   * For levels with no existing order, places the full desired quantity.
-   * For partially filled levels, places a top-up order for the deficit.
-   */
   private findNewOrders(desired: DesiredQuotes): QuoteLevel[] {
-    const existingQtyByPrice = this.aggregateOwnQuantityByPrice();
-
-    const toPlace: QuoteLevel[] = [];
+    const existing = this.aggregateOwnQuantityByPrice();
+    const out: QuoteLevel[] = [];
     for (const b of desired.bids) {
-      const existing = existingQtyByPrice.get(b.price) ?? 0n;
-      const deficit = b.quantity - existing;
-      if (deficit > 0n) {
-        toPlace.push({ price: b.price, quantity: deficit });
-      }
+      const have = existing.get(b.price) ?? 0n;
+      const deficit = b.quantity - have;
+      if (deficit > 0n) out.push({ price: b.price, quantity: deficit });
     }
     for (const a of desired.asks) {
-      const existing = existingQtyByPrice.get(a.price) ?? 0n;
-      const deficit = a.quantity - existing;
-      if (deficit < 0n) {
-        toPlace.push({ price: a.price, quantity: deficit });
-      }
+      const have = existing.get(a.price) ?? 0n;
+      const deficit = a.quantity - have;
+      if (deficit < 0n) out.push({ price: a.price, quantity: deficit });
     }
-    return toPlace;
+    return out;
   }
 
-  /** Check whether any price level with an existing order has less quantity than desired. */
   private hasQuantityDeficit(desired: DesiredQuotes): boolean {
-    const existingQtyByPrice = this.aggregateOwnQuantityByPrice();
-
+    const existing = this.aggregateOwnQuantityByPrice();
     for (const b of desired.bids) {
-      const existing = existingQtyByPrice.get(b.price);
-      if (existing !== undefined && b.quantity - existing > 0n) return true;
+      const have = existing.get(b.price);
+      if (have !== undefined && b.quantity - have > 0n) return true;
     }
     for (const a of desired.asks) {
-      const existing = existingQtyByPrice.get(a.price);
-      if (existing !== undefined && a.quantity - existing < 0n) return true;
+      const have = existing.get(a.price);
+      if (have !== undefined && a.quantity - have < 0n) return true;
     }
     return false;
   }
 
   private aggregateOwnQuantityByPrice(): Map<bigint, bigint> {
-    const qtyByPrice = new Map<bigint, bigint>();
-    for (const order of this.book.ownOrders.values()) {
-      const current = qtyByPrice.get(order.price) ?? 0n;
-      qtyByPrice.set(order.price, current + order.quantity);
+    const m = new Map<bigint, bigint>();
+    for (const o of this.book.ownOrders.values()) {
+      m.set(o.price, (m.get(o.price) ?? 0n) + o.quantity);
     }
-    return qtyByPrice;
+    return m;
   }
 
-  /** Compute gas cost in USD from a tx receipt. */
   private computeTxGasCost(receipt: { gasUsed: bigint; effectiveGasPrice: bigint }): bigint {
     if (this.gas.ethPriceUsd === 0n) return 0n;
     return (receipt.gasUsed * receipt.effectiveGasPrice * this.gas.ethPriceUsd) / 10n ** 18n;

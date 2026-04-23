@@ -1,27 +1,42 @@
-import type { PublicClient } from "viem";
-import type { MakerConfig } from "./config.ts";
+import type pino from "pino";
+import type Fraction from "fraction.js";
+import type { DesiredQuotes, InstrumentAdapter, InstrumentContext, QuoteLevel } from "./adapter.ts";
 import type { OracleTracker } from "./oracleTracker.ts";
 import type { GasTracker } from "./gasTracker.ts";
 import type { InventoryManager } from "./inventoryManager.ts";
 import type { RiskManager } from "./riskManager.ts";
-import type pino from "pino";
-import { hashPowerPerpsDexAbi } from "./abi.ts";
-import { roundDownToTick, roundUpToTick, BPS_SCALE, calculateNotional } from "./math.ts";
+import { roundDownToTick, roundUpToTick } from "./math.ts";
+import { computeMidQuote, type EffectiveSpreadConfig } from "./pricing/effectiveSpread.ts";
+import { computeReservationMidQuote, type ReservationPriceConfig } from "./pricing/reservationPrice.ts";
+import { linearSizes } from "./sizing/linear.ts";
+import { geometricTaperSizes } from "./sizing/geometricTaper.ts";
 
-export interface QuoteLevel {
-  price: bigint;
-  quantity: bigint;
+export type { ReservationPriceConfig };
+export type PricingStrategyName = "effective-spread" | "reservation-price";
+export type SizingStrategyName = "linear" | "geometric-taper";
+
+export interface QuoterConfig {
+  pricing:
+    | ({ strategy: "effective-spread" } & EffectiveSpreadConfig)
+    | ({ strategy: "reservation-price" } & ReservationPriceConfig);
+  sizing:
+    | { strategy: "linear"; baseQuantity: bigint; numLevelsPerSide: number }
+    | { strategy: "geometric-taper"; baseQuantity: bigint; numLevelsPerSide: number; taperRatio: number };
+  /** Max ticks the inventory skew can shift quotes (effective-spread only). */
+  maxSkewTicks: number;
 }
 
-export interface DesiredQuotes {
-  bids: QuoteLevel[];
-  asks: QuoteLevel[];
-}
-
+/**
+ * Computes desired bid/ask quotes for one instrument by combining a pricing strategy
+ * (mid + spread) with a sizing strategy (per-level quantities).
+ *
+ * Stateless across ticks; all state lives in the trackers it reads from.
+ */
 export class Quoter {
   private tick = 0n;
-  private readonly publicClient: PublicClient;
-  private readonly config: MakerConfig;
+  private context: InstrumentContext = {};
+  private readonly instrument: InstrumentAdapter;
+  private readonly cfg: QuoterConfig;
   private readonly oracle: OracleTracker;
   private readonly gas: GasTracker;
   private readonly inventory: InventoryManager;
@@ -29,30 +44,30 @@ export class Quoter {
   private readonly logger: pino.Logger;
 
   constructor(
-    publicClient: PublicClient,
-    config: MakerConfig,
+    instrument: InstrumentAdapter,
+    cfg: QuoterConfig,
     oracle: OracleTracker,
     gas: GasTracker,
     inventory: InventoryManager,
     risk: RiskManager,
     logger: pino.Logger,
   ) {
-    this.publicClient = publicClient;
-    this.config = config;
+    this.instrument = instrument;
+    this.cfg = cfg;
     this.oracle = oracle;
     this.gas = gas;
     this.inventory = inventory;
     this.risk = risk;
-    this.logger = logger.child({ component: "quoter" });
+    this.logger = logger.child({ component: "quoter", instrument: instrument.id });
   }
 
   async initialize(): Promise<void> {
-    this.tick = await this.publicClient.readContract({
-      address: this.config.perpsAddress,
-      abi: hashPowerPerpsDexAbi,
-      functionName: "minimumPriceIncrement",
-    });
-    this.logger.info({ tick: this.tick.toString() }, "quoter initialized");
+    this.tick = await this.instrument.getMinTick();
+    this.context = await this.instrument.getContext();
+    this.logger.info(
+      { tick: this.tick.toString(), deliveryDate: this.context.deliveryDate },
+      "quoter initialized",
+    );
   }
 
   getTick(): bigint {
@@ -65,40 +80,53 @@ export class Quoter {
       return { bids: [], asks: [] };
     }
 
-    const spreadBps = this.effectiveSpreadBps();
-    const halfSpreadBps = BigInt(Math.round(spreadBps / 2));
-    const skewBps = this.inventorySkewBps();
+    const sizes = this.computeSizes();
+    const midQuote = this.cfg.pricing.strategy === "reservation-price"
+      ? computeReservationMidQuote({
+          oracle: this.oracle,
+          gas: this.gas,
+          inventory: this.inventory,
+          context: this.context,
+          cfg: this.cfg.pricing,
+          tick: this.tick,
+        })
+      : computeMidQuote({
+          oracle: this.oracle,
+          gas: this.gas,
+          inventory: this.inventory,
+          cfg: this.cfg.pricing,
+          baseQuantity: this.cfg.sizing.baseQuantity,
+          maxSkewTicks: this.cfg.maxSkewTicks,
+          tick: this.tick,
+        });
 
+    const { bidMid, askMid, spreadBps } = midQuote;
     const { quoteBid, quoteAsk } = this.risk.allowedSides();
 
     const bids: QuoteLevel[] = [];
     const asks: QuoteLevel[] = [];
-    const n = this.config.numLevelsPerSide;
 
-    for (let level = 0; level < n; level++) {
+    for (let level = 0; level < sizes.length; level++) {
       const levelTicks = BigInt(level) * this.tick;
-      const sizeMultiplier = BigInt(level + 1);
-      const qty = this.config.baseQuantity * sizeMultiplier;
+      const qty = sizes[level];
 
       if (quoteBid) {
-        const bidRaw = (oraclePrice * (BPS_SCALE - halfSpreadBps - skewBps)) / BPS_SCALE - levelTicks;
+        const bidRaw = bidMid - levelTicks;
         const bidPrice = roundDownToTick(bidRaw > 0n ? bidRaw : this.tick, this.tick);
-        // Positive quantity = buy/long
         bids.push({ price: bidPrice, quantity: qty });
       }
 
       if (quoteAsk) {
-        const askRaw = (oraclePrice * (BPS_SCALE + halfSpreadBps - skewBps)) / BPS_SCALE + levelTicks;
+        const askRaw = askMid + levelTicks;
         const askPrice = roundUpToTick(askRaw, this.tick);
-        // Negative quantity = sell/short
-        asks.push({ price: askPrice, quantity: askPrice > 0n ? -qty : 0n });
+        if (askPrice > 0n) asks.push({ price: askPrice, quantity: -qty });
       }
     }
 
     this.logger.debug(
       {
-        spreadBps: spreadBps.toFixed(1),
-        skewBps: Number(skewBps),
+        strategy: this.cfg.pricing.strategy,
+        spreadBps: fractionToString(spreadBps),
         bidLevels: bids.length,
         askLevels: asks.length,
         bidTop: bids[0]?.price.toString(),
@@ -110,55 +138,16 @@ export class Quoter {
     return { bids, asks };
   }
 
-  /** Effective spread in basis points (floating point for precision). */
-  private effectiveSpreadBps(): number {
-    const cfg = this.config;
-
-    const gasFloor = this.gasFloorBps();
-    const base = Math.max(cfg.minSpreadBps, gasFloor);
-
-    const volComponent = cfg.volatilityMultiplier * this.oracle.volatility * 10_000;
-
-    const invComponent = Math.abs(this.inventory.inventorySkew) * cfg.minSpreadBps;
-
-    const gasSpikeComponent =
-      this.gas.gasSpikePct > 0
-        ? cfg.gasPenaltyBps * (this.gas.gasSpikePct / 100)
-        : 0;
-
-    return base + volComponent + invComponent + gasSpikeComponent;
+  private computeSizes(): bigint[] {
+    const s = this.cfg.sizing;
+    if (s.strategy === "linear") {
+      return linearSizes(s.baseQuantity, s.numLevelsPerSide);
+    }
+    return geometricTaperSizes(s.baseQuantity * BigInt(s.numLevelsPerSide), s.taperRatio, s.numLevelsPerSide);
   }
+}
 
-  /**
-   * Gas floor: minimum spread in bps to break even on gas costs.
-   * gasFloorBps = roundTripCostUsd / expectedNotionalPerFill * 10000
-   */
-  private gasFloorBps(): number {
-    const rtCost = this.gas.roundTripCostUsd;
-    if (rtCost === 0n) return 0;
-
-    const expectedNotional = calculateNotional(
-      this.oracle.currentPrice,
-      this.config.baseQuantity,
-    );
-    if (expectedNotional === 0n) return 0;
-
-    return Number(rtCost * 10_000n / expectedNotional);
-  }
-
-  /**
-   * Inventory skew in BPS applied to both bid and ask (shifts quotes).
-   * Positive skew = long inventory → shift quotes down (less aggressive buys, more aggressive sells).
-   */
-  private inventorySkewBps(): bigint {
-    const skewTicks = Math.round(
-      this.config.inventorySkewGamma *
-        this.inventory.inventorySkew *
-        this.config.maxSkewTicks,
-    );
-    // Convert skew ticks to a BPS-like offset on the oracle price
-    if (this.oracle.currentPrice === 0n) return 0n;
-    const offsetValue = BigInt(skewTicks) * this.tick;
-    return (offsetValue * BPS_SCALE) / this.oracle.currentPrice;
-  }
+function fractionToString(f: Fraction): string {
+  // safe approximation for diagnostics; never used in trading math
+  return (Number(f.n) / Number(f.d)).toFixed(2);
 }

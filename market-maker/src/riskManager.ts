@@ -1,43 +1,56 @@
-import type { MakerConfig } from "./config.ts";
+import type pino from "pino";
 import type { InventoryManager } from "./inventoryManager.ts";
 import type { GasTracker } from "./gasTracker.ts";
 import type { OracleTracker } from "./oracleTracker.ts";
-import type pino from "pino";
 import { RollingBudget, bigAbs } from "./math.ts";
-import type { ErrorInfo } from "./healthcheck.ts";
+import type { ErrorInfo } from "./errors.ts";
+
 export type ThrottleReason = "gas_hourly" | "gas_daily" | "none";
 
+export interface RiskManagerConfig {
+  maxPositionSize: bigint;
+  /** Stop quoting both sides when utilization exceeds this percentage. */
+  maxUtilizationPct: number;
+  minCollateralBalance: bigint;
+  maxDailyLossUsd: bigint;
+  maxGasBudgetPerHourUsd: bigint;
+  maxGasBudgetPerDayUsd: bigint;
+}
+
+/**
+ * Risk halts (stop quoting and cancel) and throttles (slow down quoting).
+ *
+ * Halts are recoverable on the next tick once the underlying condition clears.
+ * Daily PnL counters reset at midnight UTC.
+ */
 export class RiskManager {
   halted = false;
   haltReason: ErrorInfo | null = null;
   throttled = false;
   throttleReason: ThrottleReason = "none";
 
-  /** Track gas spending in rolling windows. */
+  cumulativeGasCostUsd = 0n;
+
   private readonly gasHourlyBudget: RollingBudget;
   private readonly gasDailyBudget: RollingBudget;
 
-  /** Cumulative gas cost for PnL accounting. */
-  cumulativeGasCostUsd = 0n;
-
-  /** Snapshot of collateral at start of day (reset at midnight UTC or on startup). */
   private startOfDayBalance = 0n;
   private startOfDayTimestamp = 0;
 
-  private readonly config: MakerConfig;
+  private readonly cfg: RiskManagerConfig;
   private readonly inventory: InventoryManager;
   private readonly gas: GasTracker;
   private readonly oracle: OracleTracker;
   private readonly logger: pino.Logger;
 
   constructor(
-    config: MakerConfig,
+    cfg: RiskManagerConfig,
     inventory: InventoryManager,
     gas: GasTracker,
     oracle: OracleTracker,
     logger: pino.Logger,
   ) {
-    this.config = config;
+    this.cfg = cfg;
     this.inventory = inventory;
     this.gas = gas;
     this.oracle = oracle;
@@ -46,43 +59,40 @@ export class RiskManager {
     this.gasDailyBudget = new RollingBudget(24 * 60 * 60 * 1000);
   }
 
-  /** Call once on startup to snapshot starting balance. */
+  /** Snapshot starting collateral; call once after first inventory update. */
   initialize(): void {
     this.startOfDayBalance = this.inventory.collateralBalance;
     this.startOfDayTimestamp = Date.now();
   }
 
-  /** Record gas cost from a transaction. */
   recordGasCost(costUsd: bigint): void {
     this.gasHourlyBudget.add(costUsd);
     this.gasDailyBudget.add(costUsd);
     this.cumulativeGasCostUsd += costUsd;
   }
 
-  /** Run all risk checks. Returns true if the bot should continue quoting. */
+  /** Returns true if the bot should continue quoting. */
   check(): boolean {
     this.checkDayRollover();
 
-    // Drawdown circuit breaker
-    if (this.inventory.collateralBalance < this.config.minCollateralBalance) {
+    if (this.inventory.collateralBalance < this.cfg.minCollateralBalance) {
       this.halted = true;
       this.haltReason = {
         message: "collateral below minimum",
         balance: this.inventory.collateralBalance.toString(),
-        min: this.config.minCollateralBalance.toString(),
+        min: this.cfg.minCollateralBalance.toString(),
       };
       this.logger.error(this.haltReason, "HALT: collateral below minimum");
       return false;
     }
 
-    // Daily loss check (includes gas costs)
     const truePnl = this.truePnl();
-    if (truePnl < 0n && bigAbs(truePnl) > this.config.maxDailyLossUsd) {
+    if (truePnl < 0n && bigAbs(truePnl) > this.cfg.maxDailyLossUsd) {
       this.halted = true;
       this.haltReason = {
         message: "daily loss limit breached",
         pnl: truePnl.toString(),
-        max: this.config.maxDailyLossUsd.toString(),
+        max: this.cfg.maxDailyLossUsd.toString(),
       };
       this.logger.error(this.haltReason, "HALT: daily loss limit breached");
       return false;
@@ -91,18 +101,17 @@ export class RiskManager {
     this.halted = false;
     this.haltReason = null;
 
-    // Gas budget throttling
     const hourlyGas = this.gasHourlyBudget.total();
-    if (hourlyGas > this.config.maxGasBudgetPerHourUsd) {
+    if (hourlyGas > this.cfg.maxGasBudgetPerHourUsd) {
       this.throttled = true;
       this.throttleReason = "gas_hourly";
       this.logger.warn(
-        { hourlyGas: hourlyGas.toString(), max: this.config.maxGasBudgetPerHourUsd.toString() },
+        { hourlyGas: hourlyGas.toString(), max: this.cfg.maxGasBudgetPerHourUsd.toString() },
         "throttled: hourly gas budget exceeded",
       );
     } else {
       const dailyGas = this.gasDailyBudget.total();
-      if (dailyGas > this.config.maxGasBudgetPerDayUsd) {
+      if (dailyGas > this.cfg.maxGasBudgetPerDayUsd) {
         this.throttled = true;
         this.throttleReason = "gas_daily";
         this.logger.warn({ dailyGas: dailyGas.toString() }, "throttled: daily gas budget exceeded");
@@ -116,16 +125,14 @@ export class RiskManager {
   }
 
   /**
-   * Which sides should the MM quote?
-   * Respects position limits: don't quote the side that would increase exposure beyond max.
+   * Sides allowed to quote. Respects position cap and stops quoting at high utilization
+   * (only the side that reduces exposure is allowed).
    */
   allowedSides(): { quoteBid: boolean; quoteAsk: boolean } {
-    const maxPos = this.config.maxPositionSize;
+    const maxPos = this.cfg.maxPositionSize;
     const net = this.inventory.netQuantity;
 
-    // If utilization is too high, stop quoting entirely
-    if (this.inventory.utilizationPct > this.config.maxUtilizationPct) {
-      // Only quote the side that reduces position
+    if (this.inventory.utilizationPct > this.cfg.maxUtilizationPct) {
       if (net > 0n) return { quoteBid: false, quoteAsk: true };
       if (net < 0n) return { quoteBid: true, quoteAsk: false };
       return { quoteBid: false, quoteAsk: false };
@@ -137,16 +144,12 @@ export class RiskManager {
     };
   }
 
-  /**
-   * True PnL = (currentBalance - startBalance) - cumulativeGasCost
-   * Negative = loss.
-   */
+  /** Net PnL today including gas. Negative = loss. */
   private truePnl(): bigint {
     const balanceDelta = this.inventory.collateralBalance - this.startOfDayBalance;
     return balanceDelta - this.cumulativeGasCostUsd;
   }
 
-  /** Roll over start-of-day snapshot at midnight UTC. */
   private checkDayRollover(): void {
     const now = Date.now();
     const todayMidnight = new Date();

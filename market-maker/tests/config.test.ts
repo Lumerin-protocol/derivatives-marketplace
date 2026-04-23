@@ -1,127 +1,198 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { loadConfig } from "../src/config.ts";
+import { writeFileSync, unlinkSync, mkdtempSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { loadConfig, type MakerConfig } from "../src/config.ts";
 
-const REQUIRED_ENV = {
-  NETWORK: "hardhat",
-  ETH_NODE_ADDRESS: "http://localhost:8545",
-  PERPS_ADDRESS: "0x0000000000000000000000000000000000000001",
-  MAKER_PRIVATE_KEY: "0x0000000000000000000000000000000000000000000000000000000000000001",
-};
+function writeTmp(dir: string, name: string, content: string): string {
+  const path = join(dir, name);
+  writeFileSync(path, content, "utf8");
+  return path;
+}
+
+const VALID_YAML = `
+wallets:
+  default:
+    privateKey: "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+network:
+  name: arbitrum
+  rpcUrl: "https://arb1.arbitrum.io/rpc"
+venue:
+  kind: perps
+  wallet: default
+  address: "0x1234567890123456789012345678901234567890"
+pricing:
+  strategy: effective-spread
+  minSpreadBps: 10
+  volatilityMultiplier: 2.0
+  inventorySkewGamma: 0.5
+  maxSkewTicks: 20
+sizing:
+  strategy: linear
+  baseQuantity: "1000000"
+  numLevelsPerSide: 5
+risk:
+  maxPositionSize: "50000000"
+  maxUtilizationPct: 80
+  minCollateralBalance: "10000000"
+  maxDailyLossUsd: "500000000"
+gas:
+  gasCapMultiplier: 2.0
+timing:
+  pollIntervalMs: 3000
+health:
+  port: 8080
+`;
+
+let tmpDir: string;
+
+beforeEach(() => {
+  tmpDir = mkdtempSync(join(tmpdir(), "mm-cfg-"));
+});
+
+afterEach(() => {
+  try { unlinkSync(join(tmpDir, "test.yml")); } catch { /* ignore */ }
+});
 
 describe("loadConfig", () => {
-  let savedEnv: Record<string, string | undefined>;
-
-  beforeEach(() => {
-    savedEnv = { ...process.env };
-    for (const [k, v] of Object.entries(REQUIRED_ENV)) {
-      process.env[k] = v;
-    }
+  it("parses a valid YAML file", () => {
+    const path = writeTmp(tmpDir, "test.yml", VALID_YAML);
+    const cfg = loadConfig({ path });
+    assert.strictEqual(cfg.venue.kind, "perps");
+    assert.strictEqual(cfg.network.name, "arbitrum");
+    assert.strictEqual(cfg.pricing.minSpreadBps, 10);
+    assert.strictEqual(cfg.sizing.baseQuantity, "1000000");
   });
 
-  afterEach(() => {
-    for (const key of Object.keys(process.env)) {
-      if (!(key in savedEnv)) {
-        delete process.env[key];
-      } else {
-        process.env[key] = savedEnv[key];
-      }
-    }
+  it("applies defaults for optional fields", () => {
+    // Remove the whole timing block to trigger defaults
+    const yaml = VALID_YAML.replace(
+      /^timing:\n  pollIntervalMs: 3000\n/m,
+      "timing: {}\n",
+    );
+    const path = writeTmp(tmpDir, "test.yml", yaml);
+    const cfg = loadConfig({ path });
+    assert.strictEqual(cfg.timing.pollIntervalMs, 3000); // default
   });
 
-  it("loads required fields from env", () => {
-    const config = loadConfig();
-    assert.equal(config.network, "hardhat");
-    assert.equal(config.ethNodeAddress, "http://localhost:8545");
-    assert.equal(config.perpsAddress, "0x0000000000000000000000000000000000000001");
-    assert.equal(config.makerPrivateKey, "0x0000000000000000000000000000000000000000000000000000000000000001");
+  it("expands ${VAR} tokens from env", () => {
+    const yaml = `
+wallets:
+  default:
+    privateKey: \${TEST_PRIVATE_KEY}
+network:
+  name: arbitrum
+  rpcUrl: \${TEST_RPC_URL}
+venue:
+  kind: perps
+  wallet: default
+  address: "0x1234567890123456789012345678901234567890"
+pricing:
+  strategy: effective-spread
+  minSpreadBps: 5
+  volatilityMultiplier: 1.0
+  inventorySkewGamma: 0.3
+  maxSkewTicks: 10
+sizing:
+  strategy: linear
+  baseQuantity: "500000"
+  numLevelsPerSide: 3
+risk:
+  maxPositionSize: "10000000"
+  minCollateralBalance: "5000000"
+  maxDailyLossUsd: "100000000"
+gas:
+  gasCapMultiplier: 1.5
+timing: {}
+health: {}
+`;
+    const path = writeTmp(tmpDir, "test.yml", yaml);
+    const env: NodeJS.ProcessEnv = {
+      TEST_PRIVATE_KEY: "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+      TEST_RPC_URL: "https://example.com/rpc",
+    };
+    const cfg = loadConfig({ path, env });
+    assert.strictEqual(cfg.wallets["default"].privateKey, env.TEST_PRIVATE_KEY);
+    assert.strictEqual(cfg.network.rpcUrl, "https://example.com/rpc");
   });
 
-  it("throws when required env var is missing", () => {
-    delete process.env.NETWORK;
-    assert.throws(() => loadConfig(), {
-      message: /Missing required environment variable: NETWORK/,
-    });
+  it("throws for missing env variable", () => {
+    const yaml = VALID_YAML.replace(
+      '"0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"',
+      "${MISSING_VAR}",
+    );
+    const path = writeTmp(tmpDir, "test.yml", yaml);
+    assert.throws(
+      () => loadConfig({ path, env: {} }),
+      /MISSING_VAR/,
+    );
   });
 
-  it("throws for each missing required var", () => {
-    for (const key of Object.keys(REQUIRED_ENV)) {
-      delete process.env[key];
-      assert.throws(() => loadConfig(), {
-        message: new RegExp(`Missing required environment variable: ${key}`),
-      });
-      process.env[key] = REQUIRED_ENV[key as keyof typeof REQUIRED_ENV];
-    }
+  it("supports ${VAR:-default} fallback syntax", () => {
+    const yaml = VALID_YAML.replace(
+      '"0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"',
+      '${ABSENT_KEY:-0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890}',
+    );
+    const path = writeTmp(tmpDir, "test.yml", yaml);
+    const cfg = loadConfig({ path, env: {} });
+    assert.strictEqual(
+      cfg.wallets["default"].privateKey,
+      "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+    );
   });
 
-  it("applies default values when optional env vars are not set", () => {
-    const config = loadConfig();
-    assert.equal(config.numLevelsPerSide, 5);
-    assert.equal(config.baseQuantity, 1_000_000n);
-    assert.equal(config.minSpreadBps, 10);
-    assert.equal(config.volatilityMultiplier, 2.0);
-    assert.equal(config.inventorySkewGamma, 0.5);
-    assert.equal(config.maxSkewTicks, 20);
-    assert.equal(config.gasSpikeThresholdPct, 200);
-    assert.equal(config.gasCapMultiplier, 2.0);
-    assert.equal(config.gasPenaltyBps, 5);
-    assert.equal(config.maxGasBudgetPerHourUsd, 50_000_000n);
-    assert.equal(config.maxGasBudgetPerDayUsd, 500_000_000n);
-    assert.equal(config.urgentRequoteThresholdTicks, 10);
-    assert.equal(config.maxPositionSize, 100_000_000n);
-    assert.equal(config.maxUtilizationPct, 80);
-    assert.equal(config.minCollateralBalance, 100_000_000n);
-    assert.equal(config.maxDailyLossUsd, 1_000_000_000n);
-    assert.equal(config.pollIntervalMs, 3000);
-    assert.equal(config.requoteThresholdTicks, 2);
-    assert.equal(config.requoteCooldownMs, 1000);
-    assert.equal(config.resyncIntervalMs, 60000);
-    assert.equal(config.dryRun, false);
-    assert.equal(config.healthPort, 3001);
-    assert.equal(config.logLevel, "info");
+  it("throws when venue.wallet is not declared in wallets map", () => {
+    const yaml = VALID_YAML.replace("wallet: default", "wallet: undeclaredWallet");
+    const path = writeTmp(tmpDir, "test.yml", yaml);
+    assert.throws(() => loadConfig({ path }), /undeclaredWallet/);
   });
 
-  it("parses custom numeric values from env", () => {
-    process.env.MAKER_LEVELS_PER_SIDE = "10";
-    process.env.MAKER_BASE_QUANTITY = "5000000";
-    process.env.MAKER_MIN_SPREAD_BPS = "25";
-    process.env.MAKER_POLL_INTERVAL_MS = "5000";
-    const config = loadConfig();
-    assert.equal(config.numLevelsPerSide, 10);
-    assert.equal(config.baseQuantity, 5_000_000n);
-    assert.equal(config.minSpreadBps, 25);
-    assert.equal(config.pollIntervalMs, 5000);
+  it("throws on invalid venue.kind", () => {
+    const yaml = VALID_YAML.replace("kind: perps", "kind: invalidkind");
+    const path = writeTmp(tmpDir, "test.yml", yaml);
+    assert.throws(() => loadConfig({ path }), /Config validation failed/);
   });
 
-  it("parses dryRun as true when set", () => {
-    process.env.MAKER_DRY_RUN = "true";
-    assert.equal(loadConfig().dryRun, true);
+  it("throws on invalid address format", () => {
+    const yaml = VALID_YAML.replace(
+      '"0x1234567890123456789012345678901234567890"',
+      '"not-an-address"',
+    );
+    const path = writeTmp(tmpDir, "test.yml", yaml);
+    assert.throws(() => loadConfig({ path }), /Config validation failed/);
   });
 
-  it("parses dryRun as false for non-true values", () => {
-    process.env.MAKER_DRY_RUN = "false";
-    assert.equal(loadConfig().dryRun, false);
-    process.env.MAKER_DRY_RUN = "1";
-    assert.equal(loadConfig().dryRun, false);
+  it("throws when config file does not exist", () => {
+    assert.throws(
+      () => loadConfig({ path: "/nonexistent/path/config.yml" }),
+      /Failed to read config/,
+    );
   });
 
-  it("parses logLevel from env", () => {
-    process.env.MAKER_LOG_LEVEL = "debug";
-    assert.equal(loadConfig().logLevel, "debug");
+  it("throws when no path provided and no MAKER_CONFIG env", () => {
+    assert.throws(
+      () => loadConfig({ env: {} }), // no MAKER_CONFIG in env, no argv flag
+      /No config path/,
+    );
   });
 
-  it("defaults logLevel to info when env not set", () => {
-    delete process.env.MAKER_LOG_LEVEL;
-    assert.equal(loadConfig().logLevel, "info");
+  it("accepts reservation-price strategy with riskAversion", () => {
+    const yaml = VALID_YAML
+      .replace("strategy: effective-spread", "strategy: reservation-price")
+      .replace("  inventorySkewGamma: 0.5\n", "  riskAversion: 0.2\n  marginCallTimeSeconds: 3600\n");
+    const path = writeTmp(tmpDir, "test.yml", yaml);
+    const cfg = loadConfig({ path });
+    assert.strictEqual(cfg.pricing.strategy, "reservation-price");
   });
 
-  it("parses ethPriceFeedAddress when set", () => {
-    process.env.ETH_PRICE_FEED_ADDRESS = "0xaabbccdd00000000000000000000000000000002";
-    assert.equal(loadConfig().ethPriceFeedAddress, "0xaabbccdd00000000000000000000000000000002");
-  });
-
-  it("returns undefined ethPriceFeedAddress when not set", () => {
-    delete process.env.ETH_PRICE_FEED_ADDRESS;
-    assert.equal(loadConfig().ethPriceFeedAddress, undefined);
+  it("parses futures.yml-style config with geometric-taper sizing", () => {
+    const yaml = VALID_YAML
+      .replace("strategy: linear", "strategy: geometric-taper")
+      .replace("  numLevelsPerSide: 5\n", "  numLevelsPerSide: 4\n  taperRatio: 0.6\n");
+    const path = writeTmp(tmpDir, "test.yml", yaml);
+    const cfg: MakerConfig = loadConfig({ path });
+    assert.strictEqual(cfg.sizing.strategy, "geometric-taper");
+    assert.strictEqual(cfg.sizing.taperRatio, 0.6);
   });
 });

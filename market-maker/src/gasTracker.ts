@@ -1,83 +1,133 @@
-import type { PublicClient } from "viem";
-import type { MakerConfig } from "./config.ts";
+import type { Address, PublicClient } from "viem";
 import type pino from "pino";
-import { hashPowerPerpsDexAbi, aggregatorV3InterfaceAbi } from "./abi.ts";
+import Fraction from "fraction.js";
 import { RollingWindow } from "./math.ts";
+
+export interface GasTrackerConfig {
+  /** Chainlink aggregator address; if absent, ethPriceUsd stays 0. */
+  ethPriceFeedAddress?: Address;
+  gasSpikeThresholdPct: number;
+  gasCapMultiplier: number;
+}
+
+const aggregatorV3InterfaceAbi = [
+  {
+    inputs: [],
+    name: "decimals",
+    outputs: [{ internalType: "uint8", name: "", type: "uint8" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "latestRoundData",
+    outputs: [
+      { internalType: "uint80", name: "roundId", type: "uint80" },
+      { internalType: "int256", name: "answer", type: "int256" },
+      { internalType: "uint256", name: "startedAt", type: "uint256" },
+      { internalType: "uint256", name: "updatedAt", type: "uint256" },
+      { internalType: "uint80", name: "answeredInRound", type: "uint80" },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
 
 export class GasTracker {
   currentGasPrice = 0n;
-  medianGasPrice = 0;
-  gasSpikePct = 0;
+  /** Fraction representation of median gas price (bigint is nicer but RollingWindow gives us bigint median so we store bigint). */
+  medianGasPrice = 0n;
+  /** Gas spike as Fraction (percentage). */
+  gasSpikePct: Fraction = new Fraction(0n);
   isGasSpiking = false;
 
-  /** Estimated gas units for a single createOrder call. */
   estimatedCreateGas = 300_000n;
-  /** Estimated gas units for a single cancelOrder call. */
   estimatedCancelGas = 100_000n;
 
-  /** Current ETH price in collateral decimals (e.g. USDC 6 decimals). */
+  /** Current ETH price scaled to 6-decimal USDC terms. */
   ethPriceUsd = 0n;
 
   private readonly publicClient: PublicClient;
-  private readonly config: MakerConfig;
+  private readonly config: GasTrackerConfig;
   private readonly gasWindow: RollingWindow;
   private readonly logger: pino.Logger;
-  private gasEstimatesCached = false;
 
-  constructor(publicClient: PublicClient, config: MakerConfig, logger: pino.Logger) {
+  constructor(publicClient: PublicClient, config: GasTrackerConfig, logger: pino.Logger) {
     this.publicClient = publicClient;
     this.config = config;
     this.gasWindow = new RollingWindow(60);
     this.logger = logger.child({ component: "gas" });
   }
 
-  /**
-   * One-time: estimate gas for createOrder / cancelOrder.
-   * Falls back to defaults if estimation fails (e.g. no orders to cancel).
-   * TODO: gas estimation on Arbitrum is not constant since it includes L1 fees, call estimate on each transaction
-   */
-  async calibrate(mmAddress: `0x${string}`): Promise<void> {
-    if (this.gasEstimatesCached) return;
-
-    try {
-      const createGas = await this.publicClient.estimateContractGas({
-        address: this.config.perpsAddress,
-        abi: hashPowerPerpsDexAbi,
-        functionName: "createOrder",
-        args: [1_000_000n, 1_000_000n],
-        account: mmAddress,
-      });
-      this.estimatedCreateGas = createGas;
-      this.logger.info({ createGas: createGas.toString() }, "calibrated createOrder gas");
-    } catch {
-      this.logger.warn("createOrder gas estimation failed, using default");
-    }
-
-    this.gasEstimatesCached = true;
-  }
-
   async update(): Promise<void> {
     this.currentGasPrice = await this.publicClient.getGasPrice();
-    const gasPriceNum = Number(this.currentGasPrice);
-    this.gasWindow.push(gasPriceNum);
+    this.gasWindow.push(this.currentGasPrice);
     this.medianGasPrice = this.gasWindow.median();
 
-    if (this.medianGasPrice > 0) {
-      this.gasSpikePct = ((gasPriceNum - this.medianGasPrice) / this.medianGasPrice) * 100;
+    if (this.medianGasPrice > 0n) {
+      const diff = this.currentGasPrice - this.medianGasPrice;
+      this.gasSpikePct = new Fraction(diff, this.medianGasPrice).mul(new Fraction(100n));
     } else {
-      this.gasSpikePct = 0;
+      this.gasSpikePct = new Fraction(0n);
     }
 
-    this.isGasSpiking = this.gasSpikePct > this.config.gasSpikeThresholdPct;
+    this.isGasSpiking = this.gasSpikePct.compare(new Fraction(this.config.gasSpikeThresholdPct)) > 0;
 
     if (this.config.ethPriceFeedAddress) {
       await this.updateEthPrice();
     }
 
     this.logger.debug(
-      { gasGwei: gasPriceNum / 1e9, spikePct: this.gasSpikePct, spiking: this.isGasSpiking },
+      { gasPrice: this.currentGasPrice.toString(), spiking: this.isGasSpiking },
       "gas tick",
     );
+  }
+
+  /**
+   * Cost of `gasUnits` gas at the current price, expressed in 6-decimal USDC units.
+   * Returns 0n if ETH price is unknown.
+   */
+  gasCostUsd(gasUnits: bigint): bigint {
+    if (this.ethPriceUsd === 0n) return 0n;
+    return (gasUnits * this.currentGasPrice * this.ethPriceUsd) / 10n ** 18n;
+  }
+
+  get placeCostUsd(): bigint {
+    return this.gasCostUsd(this.estimatedCreateGas);
+  }
+
+  get cancelCostUsd(): bigint {
+    return this.gasCostUsd(this.estimatedCancelGas);
+  }
+
+  get roundTripCostUsd(): bigint {
+    return this.cancelCostUsd + this.placeCostUsd;
+  }
+
+  requoteCycleCostUsd(totalOrders: number): bigint {
+    return BigInt(totalOrders) * this.roundTripCostUsd;
+  }
+
+  cappedGasPrice(): bigint {
+    if (this.medianGasPrice === 0n) return this.currentGasPrice;
+    // cap = median * capMultiplier; use bigint arithmetic with 1000-precision
+    const multPrecision = 1000n;
+    const mult = BigInt(Math.round(this.config.gasCapMultiplier * 1000));
+    const cap = (this.medianGasPrice * mult) / multPrecision;
+    return this.currentGasPrice < cap ? cap : this.currentGasPrice;
+  }
+
+  /** Calibrate gas estimates against a candidate transaction. Adapters provide the tx. */
+  async calibrate(estimator: () => Promise<bigint>): Promise<void> {
+    try {
+      const gas = await estimator();
+      if (gas > 0n) {
+        this.estimatedCreateGas = gas;
+        this.logger.info({ createGas: gas.toString() }, "calibrated createOrder gas");
+      }
+    } catch (err) {
+      this.logger.warn({ err }, "gas calibration failed, using defaults");
+    }
   }
 
   private async updateEthPrice(): Promise<void> {
@@ -97,8 +147,6 @@ export class GasTracker {
           },
         ],
       });
-
-      // Scale ETH price to 6-decimal USDC terms
       if (answer > 0n) {
         this.ethPriceUsd = scaleDecimals(answer, BigInt(decimals), 6n);
       }
@@ -106,45 +154,8 @@ export class GasTracker {
       this.logger.warn("ETH price feed read failed");
     }
   }
-
-  /** Cost of a single createOrder in collateral (USDC) units. */
-  get placeCostUsd(): bigint {
-    return this.gasCostUsd(this.estimatedCreateGas);
-  }
-
-  /** Cost of a single cancelOrder in collateral (USDC) units. */
-  get cancelCostUsd(): bigint {
-    return this.gasCostUsd(this.estimatedCancelGas);
-  }
-
-  /** Cost of one cancel + one place (a single order round-trip). */
-  get roundTripCostUsd(): bigint {
-    return this.cancelCostUsd + this.placeCostUsd;
-  }
-
-  /** Full requote cycle: N cancels + N places, where N = levels per side * 2. */
-  requoteCycleCostUsd(totalOrders: number): bigint {
-    return BigInt(totalOrders) * this.roundTripCostUsd;
-  }
-
-  /** Compute the maxFeePerGas to use, capped relative to median but never below current gas price. */
-  cappedGasPrice(): bigint {
-    const medianBig = BigInt(Math.round(this.medianGasPrice));
-    if (medianBig === 0n) return this.currentGasPrice;
-    const cap = (medianBig * BigInt(Math.round(this.config.gasCapMultiplier * 100))) / 100n;
-    // Never go below current gas price — a cap below base fee causes tx failure
-    return this.currentGasPrice < cap ? cap : this.currentGasPrice;
-  }
-
-  private gasCostUsd(gasUnits: bigint): bigint {
-    if (this.ethPriceUsd === 0n) return 0n;
-    // gasCost_eth = gasUnits * gasPrice (in wei) → divide by 1e18 for ETH
-    // gasCost_usd = gasCost_eth * ethPriceUsd (6 decimals)
-    // Combined: gasUnits * gasPrice * ethPriceUsd / 1e18
-    return (gasUnits * this.currentGasPrice * this.ethPriceUsd) / 10n ** 18n;
-  }
 }
 
-function scaleDecimals(value: bigint, from: bigint, to: bigint) {
-  return from >= to ? value / 10n ** BigInt(from - to) : value * 10n ** BigInt(to - from);
+function scaleDecimals(value: bigint, from: bigint, to: bigint): bigint {
+  return from >= to ? value / 10n ** (from - to) : value * 10n ** (to - from);
 }

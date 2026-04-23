@@ -20,8 +20,9 @@ WORKDIR /app
 COPY --from=deps /app/node_modules node_modules/
 COPY package.json tsconfig.json ./
 COPY src/ src/
+COPY configs/ configs/
 
 RUN addgroup -S maker && adduser -S maker -G maker
 USER maker
 
-CMD ["node", "src/index.ts"]
+CMD ["node", "src/main.ts"]

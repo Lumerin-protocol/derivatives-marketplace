@@ -1,59 +1,59 @@
-import type { Log, PublicClient, WatchContractEventReturnType } from "viem";
-import type { MakerConfig } from "./config.ts";
 import type pino from "pino";
-import { hashPowerPerpsDexAbi } from "./abi.ts";
+import type { InstrumentAdapter, OwnOrder, Unsubscribe, VenueEvent } from "./adapter.ts";
 
-export interface OwnOrder {
-  orderId: `0x${string}`;
-  price: bigint;
-  quantity: bigint;
+export interface BookTrackerConfig {
+  /** Periodic full resync interval (ms). Live events keep state fresh in between. */
+  resyncIntervalMs: number;
+  /** Levels per side requested in the snapshot. */
+  snapshotDepth?: number;
 }
 
+/**
+ * Tracks the resting order book and the MM's own orders for a single instrument.
+ *
+ * Sources state from:
+ *  - periodic full snapshot via `instrument.getOrderBookSnapshot()` and `getOwnOrders()`
+ *  - live updates via the venue's `subscribeVenueEvents` (filtered to this instrument)
+ *
+ * The adapter is responsible for filtering events by `isOwn` (the MM's wallet).
+ */
 export class BookTracker {
   bestBid = 0n;
   bestAsk = 0n;
   midPrice = 0n;
 
-  /** Map of orderId -> OwnOrder for the MM's resting orders. */
+  /** orderId -> own order resting on the venue. */
   readonly ownOrders = new Map<`0x${string}`, OwnOrder>();
 
-  /** Depth per price level per side. bidDepth[price] = total quantity. */
   private readonly bidDepth = new Map<bigint, bigint>();
   private readonly askDepth = new Map<bigint, bigint>();
 
-  private readonly publicClient: PublicClient;
-  private readonly config: MakerConfig;
+  private readonly instrument: InstrumentAdapter;
   private readonly logger: pino.Logger;
-  private readonly mmAddress: `0x${string}`;
+  private readonly cfg: BookTrackerConfig;
 
-  private unwatch: WatchContractEventReturnType | null = null;
+  private unsubscribe: Unsubscribe | null = null;
   private lastResyncAt = 0;
 
-  constructor(
-    publicClient: PublicClient,
-    config: MakerConfig,
-    mmAddress: `0x${string}`,
-    logger: pino.Logger,
-  ) {
-    this.publicClient = publicClient;
-    this.config = config;
-    this.mmAddress = mmAddress;
-    this.logger = logger.child({ component: "book" });
+  constructor(instrument: InstrumentAdapter, cfg: BookTrackerConfig, logger: pino.Logger) {
+    this.instrument = instrument;
+    this.cfg = cfg;
+    this.logger = logger.child({ component: "book", instrument: instrument.id });
   }
 
   async start(): Promise<void> {
     await this.fullResync();
-    this.watchEvents();
+    this.subscribe();
   }
 
   stop(): void {
-    this.unwatch?.();
-    this.unwatch = null;
+    this.unsubscribe?.();
+    this.unsubscribe = null;
   }
 
   /** Periodic resync if interval elapsed. Called each tick. */
   async refresh(): Promise<void> {
-    if (Date.now() - this.lastResyncAt > this.config.resyncIntervalMs) {
+    if (Date.now() - this.lastResyncAt > this.cfg.resyncIntervalMs) {
       await this.fullResync();
     }
   }
@@ -63,53 +63,25 @@ export class BookTracker {
   }
 
   private async fullResync(): Promise<void> {
+    const [snapshot, ownOrders] = await Promise.all([
+      this.instrument.getOrderBookSnapshot({ depth: this.cfg.snapshotDepth ?? 200 }),
+      this.instrument.getOwnOrders(),
+    ]);
+
     this.bidDepth.clear();
     this.askDepth.clear();
+    for (const lvl of snapshot.bids) this.bidDepth.set(lvl.price, lvl.quantity);
+    for (const lvl of snapshot.asks) this.askDepth.set(lvl.price, lvl.quantity);
 
-    const [bidPrices, askPrices] = await this.publicClient.readContract({
-      address: this.config.perpsAddress,
-      abi: hashPowerPerpsDexAbi,
-      functionName: "getOrderBookPrices",
-      args: [200n],
-    });
+    this.bestBid = snapshot.bids.length > 0 ? snapshot.bids[0].price : 0n;
+    this.bestAsk = snapshot.asks.length > 0 ? snapshot.asks[0].price : 0n;
+    this.midPrice = this.bestBid > 0n && this.bestAsk > 0n ? (this.bestBid + this.bestAsk) / 2n : 0n;
 
-    const depthCalls = [
-      ...bidPrices.map((p) => ({
-        address: this.config.perpsAddress,
-        abi: hashPowerPerpsDexAbi,
-        functionName: "getQuantityAtPrice" as const,
-        args: [p, true] as const,
-      })),
-      ...askPrices.map((p) => ({
-        address: this.config.perpsAddress,
-        abi: hashPowerPerpsDexAbi,
-        functionName: "getQuantityAtPrice" as const,
-        args: [p, false] as const,
-      })),
-    ];
-
-    if (depthCalls.length > 0) {
-      const results = await this.publicClient.multicall({
-        contracts: depthCalls,
-        allowFailure: false,
-      });
-
-      for (let i = 0; i < bidPrices.length; i++) {
-        const r = results[i];
-        this.bidDepth.set(bidPrices[i], r);
-      }
-      for (let i = 0; i < askPrices.length; i++) {
-        const r = results[bidPrices.length + i];
-        this.askDepth.set(askPrices[i], r);
-      }
+    this.ownOrders.clear();
+    for (const order of ownOrders) {
+      this.ownOrders.set(order.orderId, order);
     }
 
-    this.bestBid = bidPrices.length > 0 ? bidPrices[0] : 0n;
-    this.bestAsk = askPrices.length > 0 ? askPrices[0] : 0n;
-    this.midPrice =
-      this.bestBid > 0n && this.bestAsk > 0n ? (this.bestBid + this.bestAsk) / 2n : 0n;
-
-    await this.resyncOwnOrders();
     this.lastResyncAt = Date.now();
     this.logger.info(
       {
@@ -121,94 +93,43 @@ export class BookTracker {
     );
   }
 
-  private async resyncOwnOrders(): Promise<void> {
-    this.ownOrders.clear();
+  private subscribe(): void {
+    this.unsubscribe = this.instrument.venue.subscribeVenueEvents((evt) => this.handleEvent(evt));
+  }
 
-    const orderIds = await this.publicClient.readContract({
-      address: this.config.perpsAddress,
-      abi: hashPowerPerpsDexAbi,
-      functionName: "getUserOrders",
-      args: [this.mmAddress],
-    });
-
-    if (orderIds.length === 0) return;
-
-    const orderCalls = orderIds.map((id) => ({
-      address: this.config.perpsAddress,
-      abi: hashPowerPerpsDexAbi,
-      functionName: "getOrder" as const,
-      args: [id] as const,
-    }));
-
-    const results = await this.publicClient.multicall({
-      contracts: orderCalls,
-      allowFailure: false,
-    });
-
-    for (let i = 0; i < orderIds.length; i++) {
-      const order = results[i];
-      const orderId = orderIds[i];
-      this.ownOrders.set(orderId, {
-        orderId: orderId,
-        price: order.price,
-        quantity: order.quantity,
-      });
+  private handleEvent(evt: VenueEvent): void {
+    if ("instrumentId" in evt && evt.instrumentId !== undefined && evt.instrumentId !== this.instrument.id) {
+      return;
     }
-  }
-
-  private watchEvents(): void {
-    this.unwatch = this.publicClient.watchContractEvent({
-      address: this.config.perpsAddress,
-      abi: hashPowerPerpsDexAbi,
-      onLogs: (logs) => {
-        for (const log of logs) {
-          this.handleEvent(log as any);
-        }
-      },
-    });
-  }
-
-  private handleEvent(log: Log<bigint, number, false, undefined, false, typeof hashPowerPerpsDexAbi>) {
-    switch (log.eventName) {
-      case "OrderCreated": {
-        const participant = log.args.participant;
-        const orderId = log.args.orderId;
-        const price = log.args.price;
-        const quantity = log.args.quantity;
-        if (!participant || !orderId || price === undefined || quantity === undefined) return;
-
-        if (participant.toLowerCase() === this.mmAddress.toLowerCase()) {
-          this.ownOrders.set(orderId, { orderId, price, quantity });
-        }
+    switch (evt.type) {
+      case "order-created":
+        if (evt.isOwn) this.ownOrders.set(evt.order.orderId, evt.order);
         break;
-      }
-      case "OrderCancelled": {
-        const orderId = log.args.orderId;
-        if (orderId) this.ownOrders.delete(orderId);
+      case "order-cancelled":
+        if (evt.isOwn) this.ownOrders.delete(evt.orderId);
         break;
-      }
-      case "OrderUpdated": {
-        const orderId = log.args.orderId;
-        const newQuantity = log.args.newQuantity;
-        if (!orderId || newQuantity === undefined) return;
-
-        const existing = this.ownOrders.get(orderId);
-        if (existing) {
-          if (newQuantity === 0n) {
-            this.ownOrders.delete(orderId);
-          } else {
-            existing.quantity = newQuantity;
+      case "order-updated":
+        if (evt.isOwn) {
+          const existing = this.ownOrders.get(evt.orderId);
+          if (existing) {
+            if (evt.newQuantity === 0n) this.ownOrders.delete(evt.orderId);
+            else existing.quantity = evt.newQuantity;
           }
         }
         break;
-      }
-      case "OrderMatched": {
-        const makerOrderId = log.args.makerOrderId;
-        if (makerOrderId) {
-          this.logger.info({ makerOrderId }, "own order matched");
+      case "order-matched":
+        if (evt.isOwn) {
+          this.logger.info({ makerOrderId: evt.makerOrderId }, "own order matched");
         }
         break;
+      case "depth-changed": {
+        const map = evt.isBid ? this.bidDepth : this.askDepth;
+        if (evt.newQuantity === 0n) map.delete(evt.price);
+        else map.set(evt.price, evt.newQuantity);
+        break;
       }
+      default:
+        break;
     }
   }
 }

@@ -1,9 +1,6 @@
 import pino from "pino";
+import type { ErrorInfo } from "./errors.ts";
 
-/**
- * Returns a deep copy of the value with the `abi` field removed at every level.
- * Viem error objects attach a huge ABI that is unnecessary for debugging.
- */
 function stripAbiRecursive<T>(value: T): T {
   if (value === null || typeof value !== "object") {
     return value;
@@ -31,4 +28,11 @@ export function serializeError(err: unknown): Record<string, unknown> {
   }
   const serialized = pino.stdSerializers.errWithCause(err) as Record<string, unknown>;
   return stripAbiRecursive(serialized) as Record<string, unknown>;
+}
+
+export function toErrorInfo(err: unknown): ErrorInfo {
+  if (!(err instanceof Error)) {
+    return { message: String(err) };
+  }
+  return serializeError(err) as unknown as ErrorInfo;
 }

@@ -1,3 +1,6 @@
+import Fraction from "fraction.js";
+import { ln, sqrt } from "./rational.ts";
+
 export const QUANTITY_DECIMALS = 6;
 export const QUANTITY_SCALE = 10n ** BigInt(QUANTITY_DECIMALS);
 export const BPS_SCALE = 10_000n;
@@ -13,9 +16,17 @@ export function roundUpToTick(price: bigint, tick: bigint): bigint {
   return remainder === 0n ? price : price + tick - remainder;
 }
 
+/** Round price to nearest tick (ties up). */
+export function roundToTick(price: bigint, tick: bigint): bigint {
+  const remainder = price % tick;
+  if (remainder === 0n) return price;
+  return remainder * 2n >= tick ? price + (tick - remainder) : price - remainder;
+}
+
 /** Notional value: price * absQuantity / 10^QUANTITY_DECIMALS. */
 export function calculateNotional(price: bigint, absQuantity: bigint): bigint {
-  return (price * absQuantity) / QUANTITY_SCALE;
+  const q = bigAbs(absQuantity);
+  return (price * q) / QUANTITY_SCALE;
 }
 
 /** Apply basis-point offset to a price: price * (BPS_SCALE +/- bps) / BPS_SCALE. */
@@ -23,20 +34,34 @@ export function applyBps(price: bigint, bps: bigint): bigint {
   return (price * (BPS_SCALE + bps)) / BPS_SCALE;
 }
 
+/** Absolute value for bigint. */
+export function bigAbs(v: bigint): bigint {
+  return v < 0n ? -v : v;
+}
+
+/** Min / max for bigint. */
+export const bigMin = (a: bigint, b: bigint) => (a < b ? a : b);
+export const bigMax = (a: bigint, b: bigint) => (a > b ? a : b);
+
 /**
- * Rolling window statistics for realized volatility.
- * Stores raw price samples and computes std-dev of log-returns.
+ * Rolling window of bigint samples. Computes:
+ *  - realized volatility = stddev of log returns (Fraction-precise)
+ *  - median (bigint)
+ *
+ * `precisionBits` controls the precision used for the internal `ln` and `sqrt`
+ * approximations when computing volatility; default is plenty for vol estimation.
  */
 export class RollingWindow {
-  private readonly samples: number[];
+  private readonly samples: bigint[] = [];
   private readonly maxSize: number;
+  private readonly precisionBits: number;
 
-  constructor(maxSize: number) {
+  constructor(maxSize: number, precisionBits = 64) {
     this.maxSize = maxSize;
-    this.samples = [];
+    this.precisionBits = precisionBits;
   }
 
-  push(value: number): void {
+  push(value: bigint): void {
     this.samples.push(value);
     if (this.samples.length > this.maxSize) {
       this.samples.shift();
@@ -47,39 +72,50 @@ export class RollingWindow {
     return this.samples.length;
   }
 
-  /** Compute realized volatility as std-dev of log-returns (annualized not needed here). */
-  volatility(): number {
-    if (this.samples.length < 3) return 0;
+  latest(): bigint | undefined {
+    return this.samples.length > 0 ? this.samples[this.samples.length - 1] : undefined;
+  }
 
-    const logReturns: number[] = [];
+  /**
+   * Realized volatility as stddev of log returns, returned as Fraction.
+   * Returns 0 if fewer than 3 samples or all returns are degenerate.
+   */
+  volatility(): Fraction {
+    if (this.samples.length < 3) return new Fraction(0n);
+
+    const returns: Fraction[] = [];
     for (let i = 1; i < this.samples.length; i++) {
       const prev = this.samples[i - 1];
       const curr = this.samples[i];
-      if (prev > 0 && curr > 0) {
-        logReturns.push(Math.log(curr / prev));
+      if (prev > 0n && curr > 0n) {
+        // r = ln(curr / prev) = ln(curr) - ln(prev)
+        const ratio = new Fraction(curr, prev);
+        returns.push(ln(ratio, this.precisionBits));
       }
     }
 
-    if (logReturns.length < 2) return 0;
+    if (returns.length < 2) return new Fraction(0n);
 
-    const mean = logReturns.reduce((a, b) => a + b, 0) / logReturns.length;
-    const variance =
-      logReturns.reduce((sum, r) => sum + (r - mean) ** 2, 0) / (logReturns.length - 1);
-    return Math.sqrt(variance);
+    let sum = new Fraction(0n);
+    for (const r of returns) sum = sum.add(r);
+    const mean = sum.div(new Fraction(BigInt(returns.length)));
+
+    let varSum = new Fraction(0n);
+    for (const r of returns) {
+      const d = r.sub(mean);
+      varSum = varSum.add(d.mul(d));
+    }
+    const variance = varSum.div(new Fraction(BigInt(returns.length - 1)));
+    return sqrt(variance, this.precisionBits);
   }
 
-  /** Median of samples (for gas spike detection). */
-  median(): number {
-    if (this.samples.length === 0) return 0;
-    const sorted = [...this.samples].sort((a, b) => a - b);
+  /** Median of samples (bigint). */
+  median(): bigint {
+    if (this.samples.length === 0) return 0n;
+    const sorted = [...this.samples].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
     const mid = Math.floor(sorted.length / 2);
-    return sorted.length % 2 === 0
-      ? (sorted[mid - 1] + sorted[mid]) / 2
-      : sorted[mid];
-  }
-
-  latest(): number | undefined {
-    return this.samples.length > 0 ? this.samples[this.samples.length - 1] : undefined;
+    if (sorted.length % 2 === 1) return sorted[mid];
+    return (sorted[mid - 1] + sorted[mid]) / 2n;
   }
 }
 
@@ -95,28 +131,21 @@ export class RollingBudget {
     this.windowMs = windowMs;
   }
 
-  add(amount: bigint): void {
-    this.entries.push({ timestamp: Date.now(), amount });
+  add(amount: bigint, now: number = Date.now()): void {
+    this.entries.push({ timestamp: now, amount });
   }
 
-  total(): bigint {
-    this.prune();
+  total(now: number = Date.now()): bigint {
+    this.prune(now);
     let sum = 0n;
-    for (const e of this.entries) {
-      sum += e.amount;
-    }
+    for (const e of this.entries) sum += e.amount;
     return sum;
   }
 
-  private prune(): void {
-    const cutoff = Date.now() - this.windowMs;
+  private prune(now: number): void {
+    const cutoff = now - this.windowMs;
     while (this.entries.length > 0 && this.entries[0].timestamp < cutoff) {
       this.entries.shift();
     }
   }
-}
-
-/** Absolute value for bigint. */
-export function bigAbs(v: bigint): bigint {
-  return v < 0n ? -v : v;
 }

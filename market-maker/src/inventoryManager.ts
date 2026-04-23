@@ -1,124 +1,102 @@
-import type { PublicClient } from "viem";
-import type { MakerConfig } from "./config.ts";
 import type pino from "pino";
-import { hashPowerPerpsDexAbi, multicall3Abi } from "./abi.ts";
+import Fraction from "fraction.js";
+import type { InstrumentAdapter } from "./adapter.ts";
 import { bigAbs } from "./math.ts";
-import { erc20Abi } from "viem";
 
+export interface InventoryManagerConfig {
+  /** Max absolute net position; used for skew normalisation. */
+  maxPositionSize: bigint;
+}
+
+/**
+ * Tracks the MM's position on a single instrument plus the venue's collateral snapshot.
+ *
+ * One inventory manager per instrument. Collateral is shared across all instruments on
+ * the same venue, so multi-instrument deployments would aggregate margin separately.
+ */
 export class InventoryManager {
   netQuantity = 0n;
   entryPrice = 0n;
+
   collateralBalance = 0n;
-  requiredMargin = 0n;
-  ethBalance = 0n;
-  tokenBalance = 0n;
-
-  /** Ratio in [-1, 1]: netQuantity / maxPositionSize. */
-  inventorySkew = 0;
-  availableMargin = 0n;
-  utilizationPct = 0;
-
-  private readonly publicClient: PublicClient;
-  private readonly config: MakerConfig;
-  private readonly mmAddress: `0x${string}`;
-  private readonly logger: pino.Logger;
+  maintenanceMargin = 0n;
+  walletTokenBalance = 0n;
+  nativeBalance = 0n;
   collateralTokenAddress: `0x${string}` | null = null;
 
-  constructor(
-    publicClient: PublicClient,
-    config: MakerConfig,
-    mmAddress: `0x${string}`,
-    logger: pino.Logger,
-  ) {
-    this.publicClient = publicClient;
-    this.config = config;
-    this.mmAddress = mmAddress;
-    this.logger = logger.child({ component: "inventory" });
+  /** Margin available to back new exposure (collateralBalance − maintenanceMargin). */
+  availableMargin = 0n;
+  /** Maintenance margin / collateral as a Fraction in [0, 1]. */
+  utilization: Fraction = new Fraction(0n);
+  /** netQuantity / maxPositionSize as a Fraction in [-1, 1]. */
+  inventorySkew: Fraction = new Fraction(0n);
+
+  private readonly instrument: InstrumentAdapter;
+  private readonly cfg: InventoryManagerConfig;
+  private readonly logger: pino.Logger;
+
+  constructor(instrument: InstrumentAdapter, cfg: InventoryManagerConfig, logger: pino.Logger) {
+    this.instrument = instrument;
+    this.cfg = cfg;
+    this.logger = logger.child({ component: "inventory", instrument: instrument.id });
   }
 
   async update(): Promise<void> {
-    if (!this.collateralTokenAddress) {
-      this.collateralTokenAddress = await this.publicClient.readContract({
-        address: this.config.perpsAddress,
-        abi: hashPowerPerpsDexAbi,
-        functionName: "collateralToken",
-      });
-    }
-    const results = await this.publicClient.multicall({
-      allowFailure: false,
-      contracts: [
-        {
-          address: this.config.perpsAddress,
-          abi: hashPowerPerpsDexAbi,
-          functionName: "getUserPosition",
-          args: [this.mmAddress],
-        },
-        {
-          address: this.config.perpsAddress,
-          abi: hashPowerPerpsDexAbi,
-          functionName: "balanceOf",
-          args: [this.mmAddress],
-        },
-        {
-          address: this.collateralTokenAddress,
-          abi: erc20Abi,
-          functionName: "balanceOf",
-          args: [this.mmAddress],
-        },
-        {
-          address: this.config.perpsAddress,
-          abi: hashPowerPerpsDexAbi,
-          functionName: "getMaintenanceMargin",
-          args: [this.mmAddress],
-        },
-        {
-          address: this.publicClient.chain?.contracts?.multicall3?.address as `0x${string}`,
-          abi: multicall3Abi,
-          functionName: "getEthBalance",
-          args: [this.mmAddress],
-        },
-      ],
-    });
-    this.netQuantity = results[0].netQuantity;
-    this.entryPrice = results[0].aggregatedEntryPrice;
-    this.collateralBalance = results[1];
-    this.tokenBalance = results[2];
-    this.requiredMargin = results[3];
-    this.ethBalance = results[4];
+    const [pos, collateral] = await Promise.all([
+      this.instrument.getPosition(),
+      this.instrument.venue.getCollateral(),
+    ]);
+
+    this.netQuantity = pos.netQuantity;
+    this.entryPrice = pos.entryPrice;
+
+    this.collateralBalance = collateral.balance;
+    this.maintenanceMargin = collateral.maintenanceMargin;
+    this.walletTokenBalance = collateral.walletTokenBalance;
+    this.nativeBalance = collateral.nativeBalance;
+    this.collateralTokenAddress = collateral.collateralTokenAddress;
 
     this.availableMargin =
-      this.collateralBalance > this.requiredMargin
-        ? this.collateralBalance - this.requiredMargin
+      this.collateralBalance > this.maintenanceMargin
+        ? this.collateralBalance - this.maintenanceMargin
         : 0n;
 
-    this.utilizationPct =
+    this.utilization =
       this.collateralBalance > 0n
-        ? Number((this.requiredMargin * 100n) / this.collateralBalance)
-        : 0;
+        ? new Fraction(this.maintenanceMargin, this.collateralBalance)
+        : new Fraction(0n);
 
-    const maxPos = this.config.maxPositionSize;
-    this.inventorySkew = maxPos > 0n ? Number(this.netQuantity) / Number(maxPos) : 0;
-    // Clamp to [-1, 1]
-    this.inventorySkew = Math.max(-1, Math.min(1, this.inventorySkew));
+    const maxPos = this.cfg.maxPositionSize;
+    if (maxPos > 0n) {
+      const raw = new Fraction(this.netQuantity, maxPos);
+      const one = new Fraction(1n);
+      const negOne = new Fraction(-1n);
+      this.inventorySkew = raw.compare(one) > 0 ? one : raw.compare(negOne) < 0 ? negOne : raw;
+    } else {
+      this.inventorySkew = new Fraction(0n);
+    }
 
     this.logger.debug(
       {
         net: this.netQuantity.toString(),
         balance: this.collateralBalance.toString(),
-        skew: this.inventorySkew.toFixed(3),
-        utilPct: this.utilizationPct,
+        skew: this.inventorySkew.valueOf(),
+        utilization: this.utilization.valueOf(),
       },
       "inventory tick",
     );
   }
 
-  /** Whether the MM has an open position. */
   get hasPosition(): boolean {
     return this.netQuantity !== 0n;
   }
 
-  /** Absolute position size. */
   get absPosition(): bigint {
     return bigAbs(this.netQuantity);
+  }
+
+  /** Utilization as integer percent in [0, 100]. */
+  get utilizationPct(): number {
+    return Number(this.utilization.mul(new Fraction(100n)).round().valueOf());
   }
 }

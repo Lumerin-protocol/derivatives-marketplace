@@ -164,29 +164,14 @@ jobs:
 
       - name: Update task definition and deploy
         env:
-          MAKER_ETH_PRICE_FEED_ADDRESS: ${{ vars.MAKER_ETH_PRICE_FEED_ADDRESS }}
-          MAKER_POLL_INTERVAL_MS: ${{ vars.MAKER_POLL_INTERVAL_MS }}
-          MAKER_RESYNC_INTERVAL_MS: ${{ vars.MAKER_RESYNC_INTERVAL_MS }}
-          MAKER_DRY_RUN: ${{ vars.MAKER_DRY_RUN }}
-          MAKER_MIN_SPREAD_BPS: ${{ vars.MAKER_MIN_SPREAD_BPS }}
-          MAKER_LEVELS_PER_SIDE: ${{ vars.MAKER_LEVELS_PER_SIDE }}
-          MAKER_BASE_QUANTITY: ${{ vars.MAKER_BASE_QUANTITY }}
-          MAKER_MAX_POSITION_SIZE: ${{ vars.MAKER_MAX_POSITION_SIZE }}
-          MAKER_MAX_DAILY_LOSS_USD: ${{ vars.MAKER_MAX_DAILY_LOSS_USD }}
-          MAKER_VOLATILITY_MULTIPLIER: ${{ vars.MAKER_VOLATILITY_MULTIPLIER }}
-          MAKER_INVENTORY_SKEW_GAMMA: ${{ vars.MAKER_INVENTORY_SKEW_GAMMA }}
-          MAKER_MAX_SKEW_TICKS: ${{ vars.MAKER_MAX_SKEW_TICKS }}
-          MAKER_GAS_SPIKE_THRESHOLD_PCT: ${{ vars.MAKER_GAS_SPIKE_THRESHOLD_PCT }}
-          MAKER_GAS_CAP_MULTIPLIER: ${{ vars.MAKER_GAS_CAP_MULTIPLIER }}
-          MAKER_GAS_PENALTY_BPS: ${{ vars.MAKER_GAS_PENALTY_BPS }}
-          MAKER_MAX_GAS_BUDGET_HOUR_USD: ${{ vars.MAKER_MAX_GAS_BUDGET_HOUR_USD }}
-          MAKER_MAX_GAS_BUDGET_DAY_USD: ${{ vars.MAKER_MAX_GAS_BUDGET_DAY_USD }}
-          MAKER_URGENT_REQUOTE_TICKS: ${{ vars.MAKER_URGENT_REQUOTE_TICKS }}
-          MAKER_MAX_UTILIZATION_PCT: ${{ vars.MAKER_MAX_UTILIZATION_PCT }}
-          MAKER_MIN_COLLATERAL: ${{ vars.MAKER_MIN_COLLATERAL }}
-          MAKER_REQUOTE_THRESHOLD_TICKS: ${{ vars.MAKER_REQUOTE_THRESHOLD_TICKS }}
-          MAKER_REQUOTE_COOLDOWN_MS: ${{ vars.MAKER_REQUOTE_COOLDOWN_MS }}
+          # Runtime secrets — passed as container env vars; referenced in configs/perps.yml
+          # as ${MAKER_PRIVATE_KEY}, ${ETH_NODE_ADDRESS}, ${PERPS_ADDRESS}, etc.
+          MAKER_PRIVATE_KEY: ${{ secrets.MAKER_PRIVATE_KEY }}
+          ETH_NODE_ADDRESS: ${{ secrets.ETH_NODE_ADDRESS }}
           PERPS_ADDRESS: ${{ vars.PERPS_ADDRESS }}
+          NETWORK: ${{ vars.NETWORK }}
+          ETH_PRICE_FEED_ADDRESS: ${{ vars.MAKER_ETH_PRICE_FEED_ADDRESS }}
+          NODE_ENV: production
         run: |
           CLUSTER="${{ needs.build.outputs.ecs_cluster }}"
           SERVICE="${{ needs.build.outputs.ecs_service }}"
@@ -214,35 +199,20 @@ jobs:
               task-def.json > new-task-def.json
           fi
           
-          # Build env var overrides from GitHub environment variables
-          echo "🔧 Injecting environment variables from GitHub config..."
+          # Inject the minimal env vars needed for configs/perps.yml ${VAR} expansion.
+          # All tuning parameters live in configs/perps.yml (baked into the image).
+          echo "🔧 Injecting runtime secrets and addresses..."
           jq -n '[
-            {"name":"ETH_PRICE_FEED_ADDRESS","value":env.MAKER_ETH_PRICE_FEED_ADDRESS},
-            {"name":"MAKER_POLL_INTERVAL_MS","value":env.MAKER_POLL_INTERVAL_MS},
-            {"name":"MAKER_RESYNC_INTERVAL_MS","value":env.MAKER_RESYNC_INTERVAL_MS},
-            {"name":"MAKER_DRY_RUN","value":env.MAKER_DRY_RUN},
-            {"name":"MAKER_MIN_SPREAD_BPS","value":env.MAKER_MIN_SPREAD_BPS},
-            {"name":"MAKER_LEVELS_PER_SIDE","value":env.MAKER_LEVELS_PER_SIDE},
-            {"name":"MAKER_BASE_QUANTITY","value":env.MAKER_BASE_QUANTITY},
-            {"name":"MAKER_MAX_POSITION_SIZE","value":env.MAKER_MAX_POSITION_SIZE},
-            {"name":"MAKER_MAX_DAILY_LOSS_USD","value":env.MAKER_MAX_DAILY_LOSS_USD},
-            {"name":"MAKER_VOLATILITY_MULTIPLIER","value":env.MAKER_VOLATILITY_MULTIPLIER},
-            {"name":"MAKER_INVENTORY_SKEW_GAMMA","value":env.MAKER_INVENTORY_SKEW_GAMMA},
-            {"name":"MAKER_MAX_SKEW_TICKS","value":env.MAKER_MAX_SKEW_TICKS},
-            {"name":"MAKER_GAS_SPIKE_THRESHOLD_PCT","value":env.MAKER_GAS_SPIKE_THRESHOLD_PCT},
-            {"name":"MAKER_GAS_CAP_MULTIPLIER","value":env.MAKER_GAS_CAP_MULTIPLIER},
-            {"name":"MAKER_GAS_PENALTY_BPS","value":env.MAKER_GAS_PENALTY_BPS},
-            {"name":"MAKER_MAX_GAS_BUDGET_HOUR_USD","value":env.MAKER_MAX_GAS_BUDGET_HOUR_USD},
-            {"name":"MAKER_MAX_GAS_BUDGET_DAY_USD","value":env.MAKER_MAX_GAS_BUDGET_DAY_USD},
-            {"name":"MAKER_URGENT_REQUOTE_TICKS","value":env.MAKER_URGENT_REQUOTE_TICKS},
-            {"name":"MAKER_MAX_UTILIZATION_PCT","value":env.MAKER_MAX_UTILIZATION_PCT},
-            {"name":"MAKER_MIN_COLLATERAL","value":env.MAKER_MIN_COLLATERAL},
-            {"name":"MAKER_REQUOTE_THRESHOLD_TICKS","value":env.MAKER_REQUOTE_THRESHOLD_TICKS},
-            {"name":"MAKER_REQUOTE_COOLDOWN_MS","value":env.MAKER_REQUOTE_COOLDOWN_MS},
-            {"name":"PERPS_ADDRESS","value":env.PERPS_ADDRESS}
+            {"name":"MAKER_CONFIG",          "value":"/app/configs/perps.yml"},
+            {"name":"MAKER_PRIVATE_KEY",     "value":env.MAKER_PRIVATE_KEY},
+            {"name":"ETH_NODE_ADDRESS",      "value":env.ETH_NODE_ADDRESS},
+            {"name":"PERPS_ADDRESS",         "value":env.PERPS_ADDRESS},
+            {"name":"NETWORK",               "value":env.NETWORK},
+            {"name":"ETH_PRICE_FEED_ADDRESS","value":env.ETH_PRICE_FEED_ADDRESS},
+            {"name":"NODE_ENV",              "value":env.NODE_ENV}
           ]' > env-overrides.json
           
-          # Merge overrides into task definition: update existing vars, add new ones
+          # Merge overrides: update existing vars, append new ones
           jq --slurpfile overrides env-overrides.json '
             .containerDefinitions[0].environment as $existing |
             ($overrides[0] | map({(.name): .}) | add) as $override_map |
@@ -263,7 +233,7 @@ jobs:
           
           echo "✅ Registered new task definition: ${NEW_TASK_DEF}"
           
-          # Update ECS service with new task definition
+          # Update ECS service
           echo "🚀 Updating ECS service..."
           aws ecs update-service \
             --cluster ${CLUSTER} \
