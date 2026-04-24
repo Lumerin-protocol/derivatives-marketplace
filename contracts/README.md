@@ -60,13 +60,13 @@ After all three stages, `_ensureSufficientMargin` verifies the caller still meet
 
 #### Data Structures
 
-| Structure | Purpose |
-|---|---|
-| `activeBidPrices` / `activeAskPrices` | Sorted linked lists of active price levels (bids descending, asks ascending). Enable walking the book from best price outward in O(1) per step. |
-| `priceOrdersLongQueue[price]` / `priceOrdersShortQueue[price]` | FIFO linked-list queues of order IDs at each price level. Ensure time priority within a price. |
-| `participantOrderIdsIndex[user]` | Set of all order IDs belonging to a user. Used for cancellation and margin calculations. Capped at `MAX_ORDERS_PER_PARTICIPANT` (100). |
-| `participantPriceOrderIdsIndex[user][price]` | Set of a user's order IDs at a specific price. Enables efficient self-offset lookup. |
-| `userTotalOrderValue[user]` | Cached sum of notional value across all of a user's resting orders. Updated incrementally on create/fill/cancel to avoid re-scanning. |
+| Structure                                                      | Purpose                                                                                                                                         |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `activeBidPrices` / `activeAskPrices`                          | Sorted linked lists of active price levels (bids descending, asks ascending). Enable walking the book from best price outward in O(1) per step. |
+| `priceOrdersLongQueue[price]` / `priceOrdersShortQueue[price]` | FIFO linked-list queues of order IDs at each price level. Ensure time priority within a price.                                                  |
+| `participantOrderIdsIndex[user]`                               | Set of all order IDs belonging to a user. Used for cancellation and margin calculations. Capped at `MAX_ORDERS_PER_PARTICIPANT` (100).          |
+| `participantPriceOrderIdsIndex[user][price]`                   | Set of a user's order IDs at a specific price. Enables efficient self-offset lookup.                                                            |
+| `userTotalOrderValue[user]`                                    | Cached sum of notional value across all of a user's resting orders. Updated incrementally on create/fill/cancel to avoid re-scanning.           |
 
 ### Collateral and Margin
 
@@ -104,6 +104,7 @@ positionMargin    = positionValue * maintenanceMarginPercent / 100
 ```
 
 Where:
+
 - `userTotalOrderValue` — cached sum of `price * abs(qty) / 10^QUANTITY_DECIMALS` across all resting orders (updated incrementally, never re-scanned)
 - `positionValue` — `oraclePrice * abs(netQuantity) / 10^QUANTITY_DECIMALS`
 - `unrealizedLoss` — `(oraclePrice - entryPrice) * netQuantity / 10^QUANTITY_DECIMALS`, only added when negative (loss). Gains are ignored to be conservative.

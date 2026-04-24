@@ -13,9 +13,10 @@ import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/O
 import { ERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
 import { MulticallUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/MulticallUpgradeable.sol";
 import { AggregatorV3Interface } from "./interfaces/AggregatorV3Interface.sol";
-import { ICollateralVault } from "./interfaces/ICollateralVault.sol";
-import { IPortfolioMarginEngine } from "./interfaces/IPortfolioMarginEngine.sol";
+import { ICollateralVault } from "collateral-margin/contracts/contracts/interfaces/ICollateralVault.sol";
+import { IPortfolioMarginEngine } from "collateral-margin/contracts/contracts/interfaces/IPortfolioMarginEngine.sol";
 import { console } from "hardhat/console.sol";
+import { Versionable } from "./interfaces/Versionable.sol";
 
 /// @title HashPower Perps DEX
 /// @notice Perpetual trading contract with on-chain order book
@@ -28,7 +29,8 @@ contract HashPowerPerpsDEX is
     UUPSUpgradeable,
     OwnableUpgradeable,
     ERC20Upgradeable,
-    MulticallUpgradeable
+    MulticallUpgradeable,
+    Versionable
 {
     using SafeERC20 for IERC20;
     using EnumerableSet for EnumerableSet.Bytes32Set;
@@ -42,6 +44,7 @@ contract HashPowerPerpsDEX is
     uint8 public constant QUANTITY_DECIMALS = 6;
     uint256 public constant MAX_PRICE_LEVELS_PER_SIDE = 200; // Max active price levels per side (bid/ask)
     uint256 public immutable minimumPriceIncrement; // Minimum price increment for orders
+    string public constant VERSION = "2.0.0";
 
     // State variables
     IERC20 public collateralToken;
@@ -148,6 +151,7 @@ contract HashPowerPerpsDEX is
     error InvalidFundingParameters();
     error OrderMarginTooLow(); // Order margin is below minimumMarginPerOrder
     error MaxPriceLevelsReached(); // Too many active price levels on one side of the book
+    error InsuranceFundNotConfigured(); // CollateralVault.insuranceFund not set by vault owner
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(uint256 _minimumPriceIncrement) {
@@ -208,18 +212,20 @@ contract HashPowerPerpsDEX is
     /// @notice Returns the user's collateral balance from the vault.
     ///         Overrides ERC20 so existing integrations (and tests) keep working.
     function balanceOf(address account) public view override returns (uint256) {
-        return vault.getBalance(account);
-    }
-
-    /// @dev Read a user's collateral balance from the vault.
-    function _bal(address _user) private view returns (uint256) {
-        return vault.getBalance(_user);
+        return vault.balanceOf(account);
     }
 
     /// @dev Move collateral between two accounts via the vault.
     function _move(address _from, address _to, uint256 _amount) private {
         if (_amount == 0) return;
-        vault.transfer(_from, _to, _amount);
+        vault.internalTransfer(_from, _to, _amount);
+    }
+
+    /// @dev Shared reserve / fee ledger: vault `INSURANCE_FUND_ADDR` receipt account.
+    function _insuranceFundAccount() private view returns (address) {
+        address fund = vault.INSURANCE_FUND_ADDR();
+        if (fund == address(0)) revert InsuranceFundNotConfigured();
+        return fund;
     }
 
     /// @notice Get current market price from oracle
@@ -610,16 +616,11 @@ contract HashPowerPerpsDEX is
             revert InvalidSize();
         }
 
-        uint256 bal = _bal(_msgSender());
-        if (bal < _amount) {
+        if (balanceOf(_msgSender()) < _amount) {
             revert InsufficientCollateral();
         }
 
-        uint256 remainingCollateral = bal - _amount;
-        if (remainingCollateral < portfolioMargin.computePortfolioIM(_msgSender())) {
-            revert InsufficientMargin();
-        }
-
+        // vault.withdrawTo enforces portfolio IM via _checkMargin internally
         vault.withdrawTo(_msgSender(), _msgSender(), _amount);
         emit CollateralRemoved(_msgSender(), _amount);
     }
@@ -631,7 +632,7 @@ contract HashPowerPerpsDEX is
         Position memory position = positions[_user];
         if (position.netQuantity == 0) return false;
 
-        return _bal(_user) < portfolioMargin.computePortfolioMM(_user);
+        return balanceOf(_user) < portfolioMargin.computePortfolioMM(_user);
     }
 
     /// @notice Liquidate one or more underwater positions in a single transaction
@@ -669,24 +670,24 @@ contract HashPowerPerpsDEX is
         // Settle PnL
         if (pnl < 0) {
             uint256 loss = uint256(-pnl);
-            uint256 userBalance = _bal(_user);
+            uint256 userBalance = balanceOf(_user);
             uint256 transferAmount = loss < userBalance ? loss : userBalance;
             if (transferAmount > 0) {
-                _move(_user, address(this), transferAmount);
+                _move(_user, _insuranceFundAccount(), transferAmount);
             }
             if (transferAmount < loss) {
                 emit BadDebt(_user, loss - transferAmount);
             }
         } else if (pnl > 0) {
             uint256 profit = uint256(pnl);
-            if (_bal(address(this)) >= profit) {
-                _move(address(this), _user, profit);
+            if (balanceOf(_insuranceFundAccount()) >= profit) {
+                _move(_insuranceFundAccount(), _user, profit);
             }
         }
 
         // Pay liquidator fee from user's remaining balance
         if (liquidatorFee > 0) {
-            uint256 userBalance = _bal(_user);
+            uint256 userBalance = balanceOf(_user);
             if (userBalance >= liquidatorFee) {
                 _move(_user, _msgSender(), liquidatorFee);
             } else {
@@ -721,18 +722,18 @@ contract HashPowerPerpsDEX is
         // Transfer PnL to/from user
         if (pnl > 0) {
             uint256 profit = uint256(pnl);
-            if (_bal(address(this)) < profit) {
+            if (balanceOf(_insuranceFundAccount()) < profit) {
                 revert InsufficientReservePool();
             }
-            _move(address(this), _user, profit);
+            _move(_insuranceFundAccount(), _user, profit);
         } else if (pnl < 0) {
             uint256 loss = uint256(-pnl);
-            uint256 available = _bal(_user);
+            uint256 available = balanceOf(_user);
             if (available >= loss) {
-                _move(_user, address(this), loss);
+                _move(_user, _insuranceFundAccount(), loss);
             } else {
                 if (available > 0) {
-                    _move(_user, address(this), available);
+                    _move(_user, _insuranceFundAccount(), available);
                 }
                 emit BadDebt(_user, loss - available);
             }
@@ -813,7 +814,7 @@ contract HashPowerPerpsDEX is
     /// @notice Ensure user meets initial margin requirement.
     ///         Delegates to the cross-product PortfolioMarginEngine.
     function _ensureInitialMargin(address _user) private view {
-        if (_bal(_user) < portfolioMargin.computePortfolioIM(_user)) {
+        if (balanceOf(_user) < portfolioMargin.computePortfolioIM(_user)) {
             revert InsufficientMargin();
         }
     }
@@ -821,7 +822,7 @@ contract HashPowerPerpsDEX is
     /// @notice Ensure user meets maintenance margin requirement.
     ///         Delegates to the cross-product PortfolioMarginEngine.
     function _ensureMaintenanceMargin(address _user) private view {
-        if (_bal(_user) < portfolioMargin.computePortfolioMM(_user)) {
+        if (balanceOf(_user) < portfolioMargin.computePortfolioMM(_user)) {
             revert InsufficientMargin();
         }
     }
@@ -1001,9 +1002,9 @@ contract HashPowerPerpsDEX is
     /// @param _fee Signed fee amount (positive = participant pays, negative = rebate)
     function _transferFee(address _participant, int256 _fee) private {
         if (_fee > 0) {
-            _move(_participant, address(this), uint256(_fee));
+            _move(_participant, _insuranceFundAccount(), uint256(_fee));
         } else if (_fee < 0) {
-            _move(address(this), _participant, uint256(-_fee));
+            _move(_insuranceFundAccount(), _participant, uint256(-_fee));
         }
     }
 
@@ -1093,21 +1094,21 @@ contract HashPowerPerpsDEX is
 
         if (pendingFunding > 0) {
             uint256 owed = uint256(pendingFunding);
-            uint256 userBalance = _bal(_user);
+            uint256 userBalance = balanceOf(_user);
             if (userBalance >= owed) {
-                _move(_user, address(this), owed);
+                _move(_user, _insuranceFundAccount(), owed);
             } else {
                 if (userBalance > 0) {
-                    _move(_user, address(this), userBalance);
+                    _move(_user, _insuranceFundAccount(), userBalance);
                 }
                 emit BadDebt(_user, owed - userBalance);
             }
         } else {
             uint256 owed = uint256(-pendingFunding);
-            uint256 reserveBalance = _bal(address(this));
+            uint256 reserveBalance = balanceOf(_insuranceFundAccount());
             uint256 payout = owed < reserveBalance ? owed : reserveBalance;
             if (payout > 0) {
-                _move(address(this), _user, payout);
+                _move(_insuranceFundAccount(), _user, payout);
             }
         }
 
@@ -1293,11 +1294,6 @@ contract HashPowerPerpsDEX is
         emit FundingParametersUpdated(_fundingRateMaxBps, _fundingPeriod);
     }
 
-    /// @notice Deposit to reserve pool. Caller must have approved the vault for USDC.
-    function depositReservePool(uint256 _amount) external {
-        vault.depositFor(_msgSender(), address(this), _amount);
-    }
-
     /// @notice Reset all trading state (orders, positions, funding, nonce)
     /// @dev Intended for testnet use to wipe state without redeploying. ERC20 balances are not touched.
     function resetState() external onlyOwner {
@@ -1354,14 +1350,6 @@ contract HashPowerPerpsDEX is
         }
     }
 
-    /// @notice Withdraw from reserve pool
-    function withdrawReservePool(uint256 _amount) external onlyOwner {
-        if (_amount > _bal(address(this))) {
-            revert InsufficientReservePool();
-        }
-        vault.withdrawTo(address(this), _msgSender(), _amount);
-    }
-
     /// @notice Scale a value from one decimal precision to another
     function _scaleDecimals(uint256 _value, uint8 _fromDecimals, uint8 _toDecimals) private pure returns (uint256) {
         if (_fromDecimals > _toDecimals) {
@@ -1379,6 +1367,6 @@ contract HashPowerPerpsDEX is
 
     /// @notice Get ERC20 decimals
     function decimals() public view override returns (uint8) {
-        return tokenDecimals;
+        return IERC20Metadata(address(vault)).decimals();
     }
 }

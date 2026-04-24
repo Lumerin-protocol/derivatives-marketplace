@@ -39,11 +39,12 @@
     "@safe-global/types-kit": "^2.0.1",
     "dotenv": "^16.4.1",
     "ecies-geth": "^1.7.0",
-    "hashprice-oracle": "git+https://github.com/Lumerin-protocol/hashprice-oracle.git#main",
+    "hashprice-oracle": "file:../../hashprice-oracle",
     "multicall3": "github:mds1/multicall3",
     "solidity-linked-list": "^6.5.0",
     "viem": "^2.42.1",
-    "wait-on": "^7.2.0"
+    "wait-on": "^7.2.0",
+    "collateral-margin": "file:../../collateral-margin"
   },
   "packageManager": "pnpm@10.28.1"
 }

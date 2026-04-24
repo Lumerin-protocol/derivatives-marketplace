@@ -17,7 +17,14 @@ export default defineConfig({
       "@openzeppelin/contracts/interfaces/IERC5267.sol",
       "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol",
       "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol",
-      "hashprice-oracle/contracts/contracts/BTCPriceOracleMock.sol",
+      "collateral-margin/contracts/contracts/CollateralVault.sol",
+      "collateral-margin/contracts/contracts/PortfolioMarginEngine.sol",
+      "collateral-margin/contracts/contracts/interfaces/ICollateralVault.sol",
+      "collateral-margin/contracts/contracts/interfaces/IPortfolioMarginEngine.sol",
+      "collateral-margin/contracts/contracts/interfaces/IHashPowerPerpsDEX.sol",
+      "collateral-margin/contracts/contracts/interfaces/IOptionsEnginePortfolioView.sol",
+      "collateral-margin/contracts/contracts/mocks/PerpsDEXMock.sol",
+      "collateral-margin/contracts/contracts/mocks/OptionsEngineMock.sol",
     ],
     settings: {
       optimizer: {

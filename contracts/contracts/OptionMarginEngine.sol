@@ -11,9 +11,10 @@ import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableS
 
 import { AggregatorV3Interface } from "./interfaces/AggregatorV3Interface.sol";
 import { OptionMarketRegistry } from "./OptionMarketRegistry.sol";
-import { IHashPowerPerpsDEX } from "./interfaces/IHashPowerPerpsDEX.sol";
-import { ICollateralVault } from "./interfaces/ICollateralVault.sol";
-import { IPortfolioMarginEngine } from "./interfaces/IPortfolioMarginEngine.sol";
+import { IHashPowerPerpsDEX } from "collateral-margin/contracts/contracts/interfaces/IHashPowerPerpsDEX.sol";
+import { ICollateralVault } from "collateral-margin/contracts/contracts/interfaces/ICollateralVault.sol";
+import { IOptionsEnginePortfolioView } from "collateral-margin/contracts/contracts/interfaces/IOptionsEnginePortfolioView.sol";
+import { IPortfolioMarginEngine } from "collateral-margin/contracts/contracts/interfaces/IPortfolioMarginEngine.sol";
 import { Black76Lib } from "./libs/Black76Lib.sol";
 import { FixedPointMathLib } from "./libs/FixedPointMathLib.sol";
 
@@ -21,7 +22,7 @@ import { FixedPointMathLib } from "./libs/FixedPointMathLib.sol";
 /// @notice Holds user collateral, tracks option positions per series,
 ///         maintains EWMA IV, computes stress-scenario IM/MM margins,
 ///         and provides health checks for liquidation readiness.
-contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeable {
+contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeable, IOptionsEnginePortfolioView {
     using SafeERC20 for IERC20;
     using EnumerableSet for EnumerableSet.UintSet;
 
@@ -64,6 +65,7 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     error AccountHealthy(address account);
     error NotShortPosition(address account, uint64 seriesId);
     error ZeroLiquidation();
+    error InsuranceFundNotConfigured();
 
     // ── Events ──────────────────────────────────────────────────────────────
 
@@ -115,7 +117,8 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     // Phase 5: settlement + liquidation
     address public settlement;
     uint16 public liquidationFeeBps; // packed with settlement (e.g., 500 = 5%)
-    uint256 private _insuranceFund; // WAD
+    /// @dev Deprecated slot: insurance balance now `vault.INSURANCE_FUND_ADDR()` receipt ledger (WAD was never fully consistent with token units). Kept for storage layout.
+    uint256 private _deprecatedInsuranceFundWadSlot;
 
     // Phase 6: Level 1 perps integration (read-only awareness)
     IHashPowerPerpsDEX public perpsDex; // optional, address(0) if not linked
@@ -219,14 +222,14 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
         portfolioMargin = IPortfolioMarginEngine(_pm);
     }
 
-    /// @notice Deposit collateral into the insurance fund (anyone can contribute).
-    ///         Caller must have approved the vault.
+    /// @notice Deposit collateral into the shared vault insurance fund account (anyone can contribute).
+    ///         Caller must have approved the vault. Owner must set `vault.insuranceFund`.
     function depositToInsuranceFund(uint256 amount) external {
         if (amount == 0) revert ZeroAmount();
-        vault.depositFor(_msgSender(), address(this), amount);
-        uint256 wadAmount = _toWad(amount);
-        _insuranceFund += wadAmount;
-        emit InsuranceFundDeposited(_msgSender(), wadAmount, _insuranceFund);
+        address fund = vault.INSURANCE_FUND_ADDR();
+        if (fund == address(0)) revert InsuranceFundNotConfigured();
+        vault.depositFor(_msgSender(), fund, amount);
+        emit InsuranceFundDeposited(_msgSender(), _toWad(amount), _toWad(vault.insuranceFundBalance()));
     }
 
     // ── Collateral ──────────────────────────────────────────────────────────
@@ -241,7 +244,7 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     /// @notice Withdraw collateral. Reverts if withdrawal would breach IM + reserved.
     function withdraw(uint256 amount) external {
         if (amount == 0) revert ZeroAmount();
-        uint256 bal = vault.getBalance(_msgSender());
+        uint256 bal = vault.balanceOf(_msgSender());
         if (bal < amount) revert InsufficientCollateral();
         uint256 newBalance = bal - amount;
         uint256 requiredTokens = _fromWad(computeAccountIM(_msgSender()) + _reservedMargin[_msgSender()]);
@@ -269,14 +272,18 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
         if (pnlWad > 0) {
             vault.credit(user, pnlTokens);
         } else if (pnlWad < 0) {
-            uint256 bal = vault.getBalance(user);
+            uint256 bal = vault.balanceOf(user);
             if (bal >= pnlTokens) {
                 vault.debit(user, pnlTokens);
             } else {
                 if (bal > 0) vault.debit(user, bal);
                 uint256 badDebt = pnlTokens - bal;
-                uint256 covered = badDebt > _insuranceFund ? _insuranceFund : badDebt;
-                _insuranceFund -= covered;
+                address fund = vault.INSURANCE_FUND_ADDR();
+                uint256 fundBal = fund == address(0) ? 0 : vault.balanceOf(fund);
+                uint256 covered = badDebt > fundBal ? fundBal : badDebt;
+                if (covered > 0) {
+                    vault.debit(fund, covered);
+                }
                 emit BadDebtRecorded(uint256(-pnlWad), _toWad(covered));
             }
         }
@@ -308,10 +315,10 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
         uint256 fee = marginForLiquidated * uint256(liquidationFeeBps) / 10_000;
 
         address liquidator = _msgSender();
-        uint256 bal = vault.getBalance(account);
+        uint256 bal = vault.balanceOf(account);
         uint256 feeTokens = _fromWad(fee);
         uint256 actualFee = feeTokens > bal ? bal : feeTokens;
-        if (actualFee > 0) vault.transfer(account, liquidator, actualFee);
+        if (actualFee > 0) vault.internalTransfer(account, liquidator, actualFee);
         actualFee = _toWad(actualFee);
 
         _updatePosition(account, seriesId, int128(liqAmount));
@@ -338,8 +345,8 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     /// @notice Transfer premium between accounts (buyer pays seller).
     function transferPremium(address from, address to, uint256 wadAmount) external onlyRouter {
         uint256 tokenAmount = _fromWad(wadAmount);
-        if (vault.getBalance(from) < tokenAmount) revert InsufficientCollateral();
-        vault.transfer(from, to, tokenAmount);
+        if (vault.balanceOf(from) < tokenAmount) revert InsufficientCollateral();
+        vault.internalTransfer(from, to, tokenAmount);
     }
 
     // ── IV management ───────────────────────────────────────────────────────
@@ -413,7 +420,7 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     ///         When portfolioMargin is set, delegates to cross-product PME.
     function canPlaceOrder(address user, uint256 additionalIM) external view returns (bool) {
         uint256 additionalTokens = _fromWad(additionalIM);
-        return vault.getBalance(user) >= portfolioMargin.computePortfolioIM(user) + additionalTokens;
+        return vault.balanceOf(user) >= portfolioMargin.computePortfolioIM(user) + additionalTokens;
     }
 
     // ── Views ───────────────────────────────────────────────────────────────
@@ -447,8 +454,9 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
         return _getForwardPriceWad();
     }
 
+    /// @notice Insurance fund size in WAD (vault `insuranceFund` receipt balance).
     function getInsuranceFund() external view returns (uint256) {
-        return _insuranceFund;
+        return _toWad(vault.insuranceFundBalance());
     }
 
     /// @notice Aggregate signed net Greeks across all active option positions.
@@ -558,12 +566,12 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     }
 
     function _isHealthy(address user) private view returns (bool) {
-        return vault.getBalance(user) >= portfolioMargin.computePortfolioMM(user);
+        return vault.balanceOf(user) >= portfolioMargin.computePortfolioMM(user);
     }
 
     /// @dev User's collateral balance in WAD (read from vault, convert to WAD).
     function _userBalance(address user) private view returns (uint256) {
-        return _toWad(vault.getBalance(user));
+        return _toWad(vault.balanceOf(user));
     }
 
     // ── Internal: margin computation ────────────────────────────────────────

@@ -55,8 +55,8 @@ export async function deployPerpsFixture() {
     bytecode: multicall3Artifact.deployedBytecode,
   });
 
-  const usdcArtifact = loadArtifact("contracts/USDCMock.sol/USDCMock.json");
-  const oracleArtifact = loadArtifact("contracts/PriceOracleMock.sol/PriceOracleMock.json");
+  const usdcArtifact = loadArtifact("contracts/mocks/USDCMock.sol/USDCMock.json");
+  const oracleArtifact = loadArtifact("contracts/mocks/PriceOracleMock.sol/PriceOracleMock.json");
   const perpsArtifact = loadArtifact("contracts/HashPowerPerpsDEX.sol/HashPowerPerpsDEX.json");
   const proxyArtifact = loadArtifact(
     "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol/ERC1967Proxy.json",

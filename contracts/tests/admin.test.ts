@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { network } from "hardhat";
 import { parseUnits, zeroAddress } from "viem";
 import { deployPerpsFixture, deployPerpsWithCollateralFixture } from "./fixtures.ts";
-import { catchError } from "../lib/lib.ts";
 
 const { viem, networkHelpers } = await network.connect();
 
@@ -142,89 +141,103 @@ describe("HashPowerPerpsDEX - Admin Functions", function () {
     });
   });
 
-  describe("depositReservePool", function () {
-    it("should allow anyone to deposit to reserve pool", async function () {
+  describe("depositInsuranceFund", function () {
+    it("should allow owner to deposit to insurance fund", async function () {
       const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
-      const { perps } = contracts;
-      const { buyer } = accounts;
-
-      const amount = parseUnits("1000", 6);
-      const reserveBefore = await perps.read.balanceOf([perps.address]);
-
-      await perps.write.depositReservePool([amount], { account: buyer.account });
-
-      const reserveAfter = await perps.read.balanceOf([perps.address]);
-      assert.equal(reserveAfter - reserveBefore, amount);
-    });
-
-    it("should transfer tokens from depositor to vault", async function () {
-      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
-      const { perps, usdcMock, vault } = contracts;
-      const { buyer } = accounts;
-
-      const amount = parseUnits("500", 6);
-      const buyerBalanceBefore = await usdcMock.read.balanceOf([buyer.account.address]);
-      const vaultBalanceBefore = await usdcMock.read.balanceOf([vault.address]);
-
-      await perps.write.depositReservePool([amount], { account: buyer.account });
-
-      const buyerBalanceAfter = await usdcMock.read.balanceOf([buyer.account.address]);
-      const vaultBalanceAfter = await usdcMock.read.balanceOf([vault.address]);
-
-      assert.equal(buyerBalanceBefore - buyerBalanceAfter, amount);
-      assert.equal(vaultBalanceAfter - vaultBalanceBefore, amount);
-    });
-  });
-
-  describe("withdrawReservePool", function () {
-    it("should allow owner to withdraw from reserve pool", async function () {
-      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
-      const { perps } = contracts;
+      const { vault } = contracts;
       const { owner } = accounts;
 
       const amount = parseUnits("1000", 6);
-      const reserveBefore = await perps.read.balanceOf([perps.address]);
+      const reserveBefore = await vault.read.insuranceFundBalance();
 
-      await perps.write.withdrawReservePool([amount], { account: owner.account });
+      await vault.write.depositInsuranceFund([owner.account.address, amount], { account: owner.account });
 
-      const reserveAfter = await perps.read.balanceOf([perps.address]);
+      const reserveAfter = await vault.read.insuranceFundBalance();
+      assert.equal(reserveAfter - reserveBefore, amount);
+    });
+
+    it("should transfer tokens from source to vault", async function () {
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
+      const { vault, usdcMock } = contracts;
+      const { owner } = accounts;
+
+      const amount = parseUnits("500", 6);
+      const ownerBalanceBefore = await usdcMock.read.balanceOf([owner.account.address]);
+      const vaultBalanceBefore = await usdcMock.read.balanceOf([vault.address]);
+
+      await vault.write.depositInsuranceFund([owner.account.address, amount], { account: owner.account });
+
+      const ownerBalanceAfter = await usdcMock.read.balanceOf([owner.account.address]);
+      const vaultBalanceAfter = await usdcMock.read.balanceOf([vault.address]);
+
+      assert.equal(ownerBalanceBefore - ownerBalanceAfter, amount);
+      assert.equal(vaultBalanceAfter - vaultBalanceBefore, amount);
+    });
+
+    it("should revert when non-owner tries to deposit", async function () {
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
+      const { vault } = contracts;
+      const { buyer } = accounts;
+
+      await viem.assertions.revertWithCustomError(
+        vault.write.depositInsuranceFund([buyer.account.address, parseUnits("100", 6)], { account: buyer.account }),
+        vault,
+        "OwnableUnauthorizedAccount",
+      );
+    });
+  });
+
+  describe("withdrawInsuranceFund", function () {
+    it("should allow owner to withdraw from insurance fund", async function () {
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
+      const { vault } = contracts;
+      const { owner } = accounts;
+
+      const amount = parseUnits("1000", 6);
+      const reserveBefore = await vault.read.insuranceFundBalance();
+
+      await vault.write.withdrawInsuranceFund([owner.account.address, amount], { account: owner.account });
+
+      const reserveAfter = await vault.read.insuranceFundBalance();
       assert.equal(reserveBefore - reserveAfter, amount);
     });
 
     it("should revert when non-owner tries to withdraw", async function () {
       const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
-      const { perps } = contracts;
+      const { vault } = contracts;
       const { buyer } = accounts;
 
       await viem.assertions.revertWithCustomError(
-        perps.write.withdrawReservePool([parseUnits("100", 6)], { account: buyer.account }),
-        perps,
+        vault.write.withdrawInsuranceFund([buyer.account.address, parseUnits("100", 6)], { account: buyer.account }),
+        vault,
         "OwnableUnauthorizedAccount",
       );
     });
 
     it("should revert when withdrawing more than available", async function () {
       const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
-      const { perps } = contracts;
+      const { vault } = contracts;
       const { owner } = accounts;
 
-      const reserve = await perps.read.balanceOf([perps.address]);
+      const reserve = await vault.read.insuranceFundBalance();
       const tooMuch = reserve + parseUnits("1", 6);
 
-      await catchError(perps.abi, "InsufficientReservePool", async () => {
-        await perps.write.withdrawReservePool([tooMuch], { account: owner.account });
-      });
+      await viem.assertions.revertWithCustomError(
+        vault.write.withdrawInsuranceFund([owner.account.address, tooMuch], { account: owner.account }),
+        vault,
+        "ERC20InsufficientBalance",
+      );
     });
 
-    it("should transfer tokens to owner", async function () {
+    it("should transfer tokens to recipient", async function () {
       const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
-      const { perps, usdcMock } = contracts;
+      const { vault, usdcMock } = contracts;
       const { owner } = accounts;
 
       const amount = parseUnits("500", 6);
       const ownerBalanceBefore = await usdcMock.read.balanceOf([owner.account.address]);
 
-      await perps.write.withdrawReservePool([amount], { account: owner.account });
+      await vault.write.withdrawInsuranceFund([owner.account.address, amount], { account: owner.account });
 
       const ownerBalanceAfter = await usdcMock.read.balanceOf([owner.account.address]);
       assert.equal(ownerBalanceAfter - ownerBalanceBefore, amount);

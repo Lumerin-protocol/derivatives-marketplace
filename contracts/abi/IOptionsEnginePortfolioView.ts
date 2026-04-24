@@ -1,4 +1,4 @@
-export const MarginEngineMockAbi = [
+export const IOptionsEnginePortfolioViewAbi = [
   {
     "inputs": [
       {
@@ -7,11 +7,21 @@ export const MarginEngineMockAbi = [
         "type": "address"
       }
     ],
-    "name": "computePortfolioIM",
+    "name": "getNetGreeks",
     "outputs": [
       {
+        "internalType": "int256",
+        "name": "netDelta",
+        "type": "int256"
+      },
+      {
         "internalType": "uint256",
-        "name": "",
+        "name": "netGamma",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "netVega",
         "type": "uint256"
       }
     ],
@@ -24,16 +34,17 @@ export const MarginEngineMockAbi = [
         "internalType": "address",
         "name": "user",
         "type": "address"
-      },
+      }
+    ],
+    "name": "getOptionsReservedMargin",
+    "outputs": [
       {
         "internalType": "uint256",
-        "name": "amount",
+        "name": "",
         "type": "uint256"
       }
     ],
-    "name": "setIM",
-    "outputs": [],
-    "stateMutability": "nonpayable",
+    "stateMutability": "view",
     "type": "function"
   }
 ] as const;

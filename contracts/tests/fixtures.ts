@@ -111,7 +111,7 @@ export async function deployPerpsFixture(conn: Conn) {
     await usdcMock.write.approve([vault.address, maxUint256], { account: w.account });
   }
 
-  await perps.write.depositReservePool([collateralAmount], { account: owner.account });
+  await vault.write.depositInsuranceFund([owner.account.address, collateralAmount], { account: owner.account });
 
   return {
     config: {
@@ -400,7 +400,6 @@ export async function deployLocalFullStackFixture(conn: Conn) {
   await vault.write.setMarginEngine([pme.address]);
   await vault.write.setAuthorizedCaller([perps.address, true]);
   await vault.write.setAuthorizedCaller([optionMarginEngine.address, true]);
-
   await perps.write.setPortfolioMargin([pme.address], { account: owner.account });
   await optionMarginEngine.write.setPortfolioMargin([pme.address], { account: owner.account });
   await optionMarginEngine.write.setPerpsDex([perps.address], { account: owner.account });
@@ -509,7 +508,7 @@ export async function deployLocalFullStackFixture(conn: Conn) {
     await usdcMock.write.approve([vault.address, maxUint256], { account: w.account });
   }
 
-  await perps.write.depositReservePool([collateralAmount], { account: owner.account });
+  await vault.write.depositInsuranceFund([owner.account.address, collateralAmount], { account: owner.account });
 
   await optionMarginEngine.write.depositToInsuranceFund([INSURANCE_DEPOSIT], {
     account: owner.account,

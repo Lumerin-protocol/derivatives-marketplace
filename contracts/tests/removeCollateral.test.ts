@@ -62,10 +62,11 @@ describe("HashPowerPerpsDEX - removeCollateral", function () {
 
     const balance = await perps.read.balanceOf([buyer.account.address]);
 
+    const { vault } = contracts;
     await viem.assertions.revertWithCustomError(
       perps.write.removeCollateral([balance], { account: buyer.account }),
-      perps,
-      "InsufficientMargin",
+      vault,
+      "MarginBreach",
     );
   });
 

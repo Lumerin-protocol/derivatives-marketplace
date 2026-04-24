@@ -26,6 +26,9 @@ importers:
       '@safe-global/types-kit':
         specifier: ^2.0.1
         version: 2.0.1(typescript@5.9.3)(zod@3.25.76)
+      collateral-margin:
+        specifier: file:../../collateral-margin
+        version: file:../../collateral-margin
       dotenv:
         specifier: ^16.4.1
         version: 16.6.1
@@ -33,8 +36,8 @@ importers:
         specifier: ^1.7.0
         version: 1.7.6
       hashprice-oracle:
-        specifier: git+https://github.com/Lumerin-protocol/hashprice-oracle.git#main
-        version: https://codeload.github.com/Lumerin-protocol/hashprice-oracle/tar.gz/b65adbfeb7e6c4417747bfd3d94b6e89e162ed50
+        specifier: file:../../hashprice-oracle
+        version: file:../../hashprice-oracle
       multicall3:
         specifier: github:mds1/multicall3
         version: '@multicall/multicall3@https://codeload.github.com/mds1/multicall3/tar.gz/b667d67ecfa5361a81e8f110234ce242613b0012'
@@ -1416,6 +1419,9 @@ packages:
     resolution: {integrity: sha512-JQHZ2QMW6l3aH/j6xCqQThY/9OH4D/9ls34cgkUBiEeocRTU04tHfKPBsUK1PqZCUQM7GiA0IIXJSuXHI64Kbg==}
     engines: {node: '>=0.8'}
 
+  collateral-margin@file:../../collateral-margin:
+    resolution: {directory: ../../collateral-margin, type: directory}
+
   color-convert@2.0.1:
     resolution: {integrity: sha512-RRECPsj7iu/xb5oKYcsFHSppFNnsj/52OVTRKb4zP5onXwVF3zVmmToNcOfGC+CRDpfK/U584fMg38ZHCaElKQ==}
     engines: {node: '>=7.0.0'}
@@ -1739,9 +1745,8 @@ packages:
   hash.js@1.1.7:
     resolution: {integrity: sha512-taOaskGt4z4SOANNseOviYDvjEJinIkRgmp7LbKP2YTTmVxWBl87s/uzK9r+44BclBSp2X7K1hqeNfz9JbBeXA==}
 
-  hashprice-oracle@https://codeload.github.com/Lumerin-protocol/hashprice-oracle/tar.gz/b65adbfeb7e6c4417747bfd3d94b6e89e162ed50:
-    resolution: {tarball: https://codeload.github.com/Lumerin-protocol/hashprice-oracle/tar.gz/b65adbfeb7e6c4417747bfd3d94b6e89e162ed50}
-    version: 1.0.0
+  hashprice-oracle@file:../../hashprice-oracle:
+    resolution: {directory: ../../hashprice-oracle, type: directory}
 
   hasown@2.0.2:
     resolution: {integrity: sha512-0hJU9SCPvmMzIBdZFqNPXWa6dqh7WdH0cII9y+CyS8rG3nL48Bclra9HmKhVVUHyPWNH5Y7xDwAB7bfgSjkUMQ==}
@@ -4602,6 +4607,8 @@ snapshots:
   clone@1.0.4:
     optional: true
 
+  collateral-margin@file:../../collateral-margin: {}
+
   color-convert@2.0.1:
     dependencies:
       color-name: 1.1.4
@@ -5033,7 +5040,7 @@ snapshots:
       inherits: 2.0.4
       minimalistic-assert: 1.0.1
 
-  hashprice-oracle@https://codeload.github.com/Lumerin-protocol/hashprice-oracle/tar.gz/b65adbfeb7e6c4417747bfd3d94b6e89e162ed50: {}
+  hashprice-oracle@file:../../hashprice-oracle: {}
 
   hasown@2.0.2:
     dependencies:

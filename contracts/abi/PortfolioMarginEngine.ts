@@ -339,7 +339,7 @@ export const PortfolioMarginEngineAbi = [
     "name": "optionsEngine",
     "outputs": [
       {
-        "internalType": "contract OptionMarginEngine",
+        "internalType": "contract IOptionsEnginePortfolioView",
         "name": "",
         "type": "address"
       }
