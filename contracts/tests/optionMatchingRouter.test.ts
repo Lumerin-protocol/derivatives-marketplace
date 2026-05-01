@@ -626,7 +626,7 @@ describe("OptionMatchingRouter", () => {
 
   describe("margin integration", () => {
     it("sell order reverts if insufficient collateral", async () => {
-      const { router, engine, traders, seriesId } = await networkHelpers.loadFixture(
+      const { router, engine, vault, traders, seriesId } = await networkHelpers.loadFixture(
         deployMatchingRouterFixture,
       );
       const { trader1 } = traders;
@@ -635,7 +635,7 @@ describe("OptionMatchingRouter", () => {
       const bal = await engine.read.getCollateral([trader1.account.address]);
       const wadUnit = 10n ** 12n;
       const withdrawUsdc = bal / wadUnit - 1n; // leave $1
-      await engine.write.withdraw([withdrawUsdc], { account: trader1.account });
+      await vault.write.withdraw([withdrawUsdc], { account: trader1.account });
 
       await viem.assertions.revertWithCustomError(
         router.write.submitOrder(
@@ -658,7 +658,7 @@ describe("OptionMatchingRouter", () => {
     });
 
     it("buy that exceeds collateral for premium reverts", async () => {
-      const { router, engine, traders, seriesId } = await networkHelpers.loadFixture(
+      const { router, engine, vault, traders, seriesId } = await networkHelpers.loadFixture(
         deployMatchingRouterFixture,
       );
       const { trader1, trader2 } = traders;
@@ -684,7 +684,7 @@ describe("OptionMatchingRouter", () => {
       const wadUnit = 10n ** 12n;
       const leaveUsdc = 1n; // leave $0.000001 (1 unit of USDC)
       const withdrawUsdc = bal / wadUnit - leaveUsdc;
-      await engine.write.withdraw([withdrawUsdc], { account: trader1.account });
+      await vault.write.withdraw([withdrawUsdc], { account: trader1.account });
 
       // Buy 1 lot at tick 500 — premium $5 but only ~$0 collateral
       await viem.assertions.revertWithCustomError(

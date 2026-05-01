@@ -1,20 +1,4 @@
-export const PriceOracleMockAbi = [
-  {
-    "inputs": [
-      {
-        "internalType": "int256",
-        "name": "initialPrice",
-        "type": "int256"
-      },
-      {
-        "internalType": "uint8",
-        "name": "decimals_",
-        "type": "uint8"
-      }
-    ],
-    "stateMutability": "nonpayable",
-    "type": "constructor"
-  },
+[
   {
     "inputs": [],
     "name": "decimals",
@@ -42,17 +26,10 @@ export const PriceOracleMockAbi = [
     "type": "function"
   },
   {
-    "inputs": [],
-    "name": "freezeTimestamp",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
     "inputs": [
       {
         "internalType": "uint80",
-        "name": "",
+        "name": "_roundId",
         "type": "uint80"
       }
     ],
@@ -121,31 +98,6 @@ export const PriceOracleMockAbi = [
     "type": "function"
   },
   {
-    "inputs": [
-      {
-        "internalType": "int256",
-        "name": "price",
-        "type": "int256"
-      },
-      {
-        "internalType": "uint8",
-        "name": "decimals_",
-        "type": "uint8"
-      }
-    ],
-    "name": "setPrice",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "unfreezeTimestamp",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
     "inputs": [],
     "name": "version",
     "outputs": [
@@ -155,7 +107,7 @@ export const PriceOracleMockAbi = [
         "type": "uint256"
       }
     ],
-    "stateMutability": "pure",
+    "stateMutability": "view",
     "type": "function"
   }
-] as const;
+]

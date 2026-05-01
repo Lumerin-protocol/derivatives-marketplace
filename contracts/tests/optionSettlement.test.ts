@@ -333,26 +333,41 @@ describe("OptionSettlement", () => {
       );
     });
 
-    it("bad debt: short cannot fully pay, insurance fund covers", async () => {
+    it("bad debt: short cannot fully pay, shortfall is recorded", async () => {
       const fx = await networkHelpers.loadFixture(deploySettlementFixture);
-      const { settlement, engine, traders, seriesId } = fx;
+      const { settlement, engine, traders, seriesId, accounts } = fx;
 
       await createPositions(fx, 1n, 100n);
 
       // Settle at extreme ITM: $200,000 (strike $50,000 → payoff = $150,000 per contract)
-      // trader2 deposited $50k + received premium ≈ $50k total
+      // trader2 deposited ~$50k + received premium ≈ $50k total
       // So ~$100k bad debt
       await settleWithPrice(fx, 200000_00000000n);
 
       const insuranceBefore = await engine.read.getInsuranceFund();
+      const sellerBalBefore = await engine.read.getCollateral([traders.trader2.account.address]);
+      assert.ok(sellerBalBefore > 0n, "seller starts with collateral");
 
-      await settlement.write.claimSettlement([seriesId], { account: traders.trader2.account });
+      const hash = await settlement.write.claimSettlement([seriesId], {
+        account: traders.trader2.account,
+      });
+      const receipt = await accounts.pc.waitForTransactionReceipt({ hash });
 
+      // Short paid in everything they had → fund grows by the seller's prior balance.
       const insuranceAfter = await engine.read.getInsuranceFund();
-      assert.ok(insuranceAfter < insuranceBefore, "insurance fund should decrease");
+      assert.equal(
+        insuranceAfter - insuranceBefore,
+        sellerBalBefore,
+        "fund increases by what the short could pay",
+      );
 
-      const sellerBal = await engine.read.getCollateral([traders.trader2.account.address]);
-      assert.equal(sellerBal, 0n, "seller should have zero collateral");
+      // Short is fully drained.
+      const sellerBalAfter = await engine.read.getCollateral([traders.trader2.account.address]);
+      assert.equal(sellerBalAfter, 0n, "seller should have zero collateral");
+
+      // The unpayable remainder is reported via BadDebtRecorded.
+      const badDebtTopic = receipt.logs.find((l) => l.address.toLowerCase() === engine.address.toLowerCase());
+      assert.ok(badDebtTopic, "BadDebtRecorded should be emitted on the engine");
     });
   });
 

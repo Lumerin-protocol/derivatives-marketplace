@@ -1,8 +1,10 @@
-import type { Address, PublicClient, WatchContractEventReturnType } from "viem";
-import { hashPowerPerpsDexAbi } from "./abi.ts";
+import { zeroAddress, type Address, type WatchContractEventReturnType } from "viem";
+import { HashPowerPerpsDEXAbi as hashPowerPerpsDexAbi } from "../../contracts/abi/HashPowerPerpsDEX.ts";
+import { CollateralVaultAbi as collateralVaultAbi } from "../../contracts/abi/CollateralVault.ts";
 import type { Config } from "./config.ts";
 import { computeLiquidationPrice, computeLiquidationState } from "./positionHelper.ts";
 import type pino from "pino";
+import type { PublicClient } from "./client.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -26,6 +28,7 @@ export class PositionTracker {
   // Contract parameters (read once, refreshed on resync)
   private maintenanceMarginPercent = 0n;
   private quantityDecimals: bigint = 0n;
+  private vaultAddress: Address = zeroAddress;
   private readonly publicClient: PublicClient;
   private readonly config: Config;
   private readonly logger: pino.Logger;
@@ -73,23 +76,30 @@ export class PositionTracker {
   // ── Contract parameter reads ────────────────────────────────────────────
 
   private async readContractParams(): Promise<void> {
-    const [maintenanceMarginPercent, quantityDecimals] = await this.publicClient.multicall({
-      contracts: [
-        {
-          address: this.config.perpsAddress,
-          abi: hashPowerPerpsDexAbi,
-          functionName: "maintenanceMarginPercent",
-        },
-        {
-          address: this.config.perpsAddress,
-          abi: hashPowerPerpsDexAbi,
-          functionName: "QUANTITY_DECIMALS",
-        },
-      ] as const,
-      allowFailure: false,
-    });
+    const [maintenanceMarginPercent, quantityDecimals, vaultAddress] =
+      await this.publicClient.multicall({
+        contracts: [
+          {
+            address: this.config.perpsAddress,
+            abi: hashPowerPerpsDexAbi,
+            functionName: "maintenanceMarginPercent",
+          },
+          {
+            address: this.config.perpsAddress,
+            abi: hashPowerPerpsDexAbi,
+            functionName: "QUANTITY_DECIMALS",
+          },
+          {
+            address: this.config.perpsAddress,
+            abi: hashPowerPerpsDexAbi,
+            functionName: "vault",
+          },
+        ] as const,
+        allowFailure: false,
+      });
     this.maintenanceMarginPercent = BigInt(maintenanceMarginPercent);
     this.quantityDecimals = BigInt(quantityDecimals);
+    this.vaultAddress = vaultAddress;
   }
 
   // ── Full resync from contract state ─────────────────────────────────────
@@ -181,7 +191,7 @@ export class PositionTracker {
   // ── Event watchers ──────────────────────────────────────────────────────
 
   private startEventWatchers(): void {
-    const unwatch = this.publicClient.watchContractEvent({
+    const unwatchPerps = this.publicClient.watchContractEvent({
       address: this.config.perpsAddress,
       abi: hashPowerPerpsDexAbi,
       onLogs: async (logs) => {
@@ -190,12 +200,6 @@ export class PositionTracker {
           //TODO: I think here could be a race, since onLogs is sync function, so if
           //internals are async, there might be a race
           switch (log.eventName) {
-            case "Transfer": {
-              if (log.args.from && log.args.to && log.args.value) {
-                this.onTransfer(log.args.from, log.args.to, log.args.value);
-              }
-              break;
-            }
             case "OrderMatched": {
               const { maker, taker } = log.args;
               if (maker && taker) {
@@ -223,11 +227,28 @@ export class PositionTracker {
           }
         }
       },
-      onError: (error) => this.logger.error({ err: error }, "Event watcher error"),
+      onError: (error) => this.logger.error({ err: error }, "Perps event watcher error"),
     });
 
-    this.unwatchFns.push(unwatch);
-    this.logger.info("Event watchers started");
+    // Collateral lives on the vault: mints, burns, and product-driven internal transfers
+    // all surface as standard ERC-20 Transfer events from the vault contract.
+    const unwatchVault = this.publicClient.watchContractEvent({
+      address: this.vaultAddress,
+      abi: collateralVaultAbi,
+      eventName: "Transfer",
+      onLogs: (logs) => {
+        for (const log of logs) {
+          const { from, to, value } = log.args;
+          if (from && to && value !== undefined) {
+            this.onTransfer(from, to, value);
+          }
+        }
+      },
+      onError: (error) => this.logger.error({ err: error }, "Vault event watcher error"),
+    });
+
+    this.unwatchFns.push(unwatchPerps, unwatchVault);
+    this.logger.info({ vault: this.vaultAddress }, "Event watchers started");
   }
 
   // ── Event handlers ──────────────────────────────────────────────────────
@@ -358,7 +379,11 @@ export class PositionTracker {
           functionName: "getMaintenanceMargin",
           args: [user],
         },
-        { address: this.config.perpsAddress, abi: hashPowerPerpsDexAbi, functionName: "getMarketPrice" },
+        {
+          address: this.config.perpsAddress,
+          abi: hashPowerPerpsDexAbi,
+          functionName: "getMarketPrice",
+        },
       ],
       allowFailure: false,
     });

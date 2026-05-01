@@ -64,10 +64,12 @@ async function deployPerpsIntegrationFixture(conn: NetworkConnection) {
     encodeFunctionData({
       abi: pmeImpl.abi,
       functionName: "initialize",
-      args: [vault.address, perpsMock.address, engine.address],
+      args: [vault.address],
     }),
   ]);
   const pme = await v.getContractAt("PortfolioMarginEngine", pmeProxy.address);
+  await pme.write.setPerps([perpsMock.address], { account: owner.account });
+  await pme.write.setOptions([engine.address], { account: owner.account });
 
   // ── Wiring ────────────────────────────────────────────────────────────
   await vault.write.setMarginEngine([pme.address]);
@@ -128,10 +130,7 @@ async function deployPerpsIntegrationFixture(conn: NetworkConnection) {
     await usdc.write.transfer([w.account.address, depositAmount * 2n], { account: owner.account });
     const usdcAs = await v.getContractAt("USDCMock", usdc.address, { client: { wallet: w } });
     await usdcAs.write.approve([vault.address, maxUint256]);
-    const eng = await v.getContractAt("OptionMarginEngine", engine.address, {
-      client: { wallet: w },
-    });
-    await eng.write.deposit([depositAmount]);
+    await vault.write.deposit([depositAmount], { account: w.account });
   }
 
   return {
@@ -199,10 +198,12 @@ async function deployNoPerpsFixture(conn: NetworkConnection) {
     encodeFunctionData({
       abi: pmeImpl.abi,
       functionName: "initialize",
-      args: [vault.address, perpsMock.address, engine.address],
+      args: [vault.address],
     }),
   ]);
   const pme = await v.getContractAt("PortfolioMarginEngine", pmeProxy.address);
+  await pme.write.setPerps([perpsMock.address], { account: owner.account });
+  await pme.write.setOptions([engine.address], { account: owner.account });
 
   await vault.write.setMarginEngine([pme.address]);
   await vault.write.setAuthorizedCaller([engine.address, true]);

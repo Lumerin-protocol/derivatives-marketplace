@@ -1,4 +1,4 @@
-export const IOptionsEnginePortfolioViewAbi = [
+[
   {
     "inputs": [
       {
@@ -7,21 +7,11 @@ export const IOptionsEnginePortfolioViewAbi = [
         "type": "address"
       }
     ],
-    "name": "getNetGreeks",
+    "name": "computePortfolioIM",
     "outputs": [
       {
-        "internalType": "int256",
-        "name": "netDelta",
-        "type": "int256"
-      },
-      {
         "internalType": "uint256",
-        "name": "netGamma",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "netVega",
+        "name": "",
         "type": "uint256"
       }
     ],
@@ -36,7 +26,33 @@ export const IOptionsEnginePortfolioViewAbi = [
         "type": "address"
       }
     ],
-    "name": "getOptionsReservedMargin",
+    "name": "computePortfolioMM",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "imSpotShock",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "mmSpotShock",
     "outputs": [
       {
         "internalType": "uint256",
@@ -47,4 +63,4 @@ export const IOptionsEnginePortfolioViewAbi = [
     "stateMutability": "view",
     "type": "function"
   }
-] as const;
+]

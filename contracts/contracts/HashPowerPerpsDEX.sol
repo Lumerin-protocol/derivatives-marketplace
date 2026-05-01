@@ -4,13 +4,11 @@ pragma solidity ^0.8.20;
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import { IERC20Permit } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import { StructuredLinkedList } from "solidity-linked-list/contracts/StructuredLinkedList.sol";
 import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import { ERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
 import { MulticallUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/MulticallUpgradeable.sol";
 import { AggregatorV3Interface } from "./interfaces/AggregatorV3Interface.sol";
 import { ICollateralVault } from "collateral-margin/contracts/contracts/interfaces/ICollateralVault.sol";
@@ -28,7 +26,6 @@ contract HashPowerPerpsDEX is
     Initializable,
     UUPSUpgradeable,
     OwnableUpgradeable,
-    ERC20Upgradeable,
     MulticallUpgradeable,
     Versionable
 {
@@ -121,8 +118,6 @@ contract HashPowerPerpsDEX is
         uint256 makerEntryPriceAfter,
         uint256 takerEntryPriceAfter
     );
-    event CollateralAdded(address indexed user, uint256 amount);
-    event CollateralRemoved(address indexed user, uint256 amount);
     event MatchFeeUpdated(int16 newTakerFeeBps, int16 newMakerFeeBps);
     event MarginPercentUpdated(uint8 newMarginPercent);
     event MaintenanceMarginPercentUpdated(uint8 newMaintenanceMarginPercent);
@@ -163,13 +158,9 @@ contract HashPowerPerpsDEX is
     }
 
     /// @notice Initialize the contract
-    /// @param _collateralToken The ERC20 token used for collateral
     /// @param _priceOracle The Chainlink-style price oracle
-    /// @param _vault The shared collateral vault
-    function initialize(IERC20Metadata _collateralToken, AggregatorV3Interface _priceOracle, ICollateralVault _vault)
-        external
-        initializer
-    {
+    /// @param _vault The shared collateral vault. Its `collateralToken()` is used as the underlying ERC20.
+    function initialize(AggregatorV3Interface _priceOracle, ICollateralVault _vault) external initializer {
         if (address(_priceOracle) == address(0)) {
             revert InvalidOracle();
         }
@@ -177,18 +168,16 @@ contract HashPowerPerpsDEX is
             revert InsufficientCollateral();
         }
 
-        __ERC20_init(
-            string.concat("HashPower Perps ", _collateralToken.symbol()), string.concat("hp", _collateralToken.symbol())
-        );
         __Ownable_init(_msgSender());
         __UUPSUpgradeable_init();
         __Multicall_init();
 
-        collateralToken = _collateralToken;
-        priceOracle = _priceOracle;
-        tokenDecimals = _collateralToken.decimals();
-        oracleDecimals = _priceOracle.decimals();
         vault = _vault;
+        IERC20Metadata vaultToken = IERC20Metadata(address(_vault.collateralToken()));
+        collateralToken = vaultToken;
+        priceOracle = _priceOracle;
+        tokenDecimals = vaultToken.decimals();
+        oracleDecimals = _priceOracle.decimals();
     }
 
     /// @notice Authorize upgrade (only owner)
@@ -201,17 +190,8 @@ contract HashPowerPerpsDEX is
         portfolioMargin = _pm;
     }
 
-    /// @dev ERC20 transfers are disabled — balances live in the vault.
-    function _update(address from, address to, uint256 value) internal override {
-        if (from != address(0) && to != address(0)) {
-            revert InsufficientCollateral();
-        }
-        super._update(from, to, value);
-    }
-
     /// @notice Returns the user's collateral balance from the vault.
-    ///         Overrides ERC20 so existing integrations (and tests) keep working.
-    function balanceOf(address account) public view override returns (uint256) {
+    function balanceOf(address account) public view returns (uint256) {
         return vault.balanceOf(account);
     }
 
@@ -584,45 +564,6 @@ contract HashPowerPerpsDEX is
         } else {
             position.netQuantity += _quantity;
         }
-    }
-
-    /// @notice Add collateral to account. Caller must have approved the vault for USDC.
-    /// @param _amount Amount of collateral to add
-    function addCollateral(uint256 _amount) public {
-        _updateGlobalFunding();
-        if (_amount == 0) {
-            revert InvalidSize();
-        }
-        vault.depositFor(_msgSender(), _msgSender(), _amount);
-        emit CollateralAdded(_msgSender(), _amount);
-    }
-
-    /// @notice Add collateral to account using ERC-2612 permit (approve + deposit in one tx)
-    /// @param _amount Amount of collateral to add
-    /// @param _deadline Permit signature deadline
-    /// @param _v Permit signature v
-    /// @param _r Permit signature r
-    /// @param _s Permit signature s
-    function addCollateralWithPermit(uint256 _amount, uint256 _deadline, uint8 _v, bytes32 _r, bytes32 _s) external {
-        IERC20Permit(address(collateralToken)).permit(_msgSender(), address(vault), _amount, _deadline, _v, _r, _s);
-        addCollateral(_amount);
-    }
-
-    /// @notice Remove collateral from account
-    /// @param _amount Amount of collateral to remove
-    function removeCollateral(uint256 _amount) external {
-        _updateGlobalFunding();
-        if (_amount == 0) {
-            revert InvalidSize();
-        }
-
-        if (balanceOf(_msgSender()) < _amount) {
-            revert InsufficientCollateral();
-        }
-
-        // vault.withdrawTo enforces portfolio IM via _checkMargin internally
-        vault.withdrawTo(_msgSender(), _msgSender(), _amount);
-        emit CollateralRemoved(_msgSender(), _amount);
     }
 
     /// @notice Check if a user's position can be liquidated
@@ -1365,8 +1306,8 @@ contract HashPowerPerpsDEX is
         return (_value + _increment / 2) / _increment * _increment;
     }
 
-    /// @notice Get ERC20 decimals
-    function decimals() public view override returns (uint8) {
+    /// @notice Decimals of the underlying collateral token (mirrors the vault).
+    function decimals() public view returns (uint8) {
         return IERC20Metadata(address(vault)).decimals();
     }
 }

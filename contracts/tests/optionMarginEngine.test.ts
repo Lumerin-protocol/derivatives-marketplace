@@ -67,64 +67,21 @@ describe("OptionMarginEngine", () => {
     });
   });
 
-  // ── Deposit / Withdraw ────────────────────────────────────────────────
+  // ── Collateral integration ────────────────────────────────────────────
+  // Deposit/withdraw are exercised on the vault directly (collateral-margin
+  // owns those tests). Here we only verify the engine reads the user's vault
+  // balance through `getCollateral`.
 
-  describe("deposit / withdraw", () => {
-    it("deposit increases collateral (WAD-scaled)", async () => {
-      const { engine, traders } =
+  describe("collateral integration", () => {
+    it("getCollateral mirrors vault balance (WAD-scaled)", async () => {
+      const { engine, vault, traders } =
         await networkHelpers.loadFixture(deployMarginEngineFixture);
 
       const amount = 10_000_000n; // 10 USDC
-      await engine.write.deposit([amount], {
-        account: traders.trader1.account,
-      });
+      await vault.write.deposit([amount], { account: traders.trader1.account });
 
-      const bal = await engine.read.getCollateral([
-        traders.trader1.account.address,
-      ]);
+      const bal = await engine.read.getCollateral([traders.trader1.account.address]);
       assert.equal(bal, toWad(amount));
-    });
-
-    it("withdraw decreases collateral", async () => {
-      const { engine, traders } =
-        await networkHelpers.loadFixture(deployMarginEngineFixture);
-
-      const dep = 10_000_000n;
-      const wd = 3_000_000n;
-      await engine.write.deposit([dep], {
-        account: traders.trader1.account,
-      });
-      await engine.write.withdraw([wd], {
-        account: traders.trader1.account,
-      });
-
-      const bal = await engine.read.getCollateral([
-        traders.trader1.account.address,
-      ]);
-      assert.equal(bal, toWad(dep - wd));
-    });
-
-    it("withdraw reverts if insufficient collateral", async () => {
-      const { engine, traders } =
-        await networkHelpers.loadFixture(deployMarginEngineFixture);
-
-      await engine.write.deposit([1_000_000n], {
-        account: traders.trader1.account,
-      });
-      await assert.rejects(
-        engine.write.withdraw([2_000_000n], {
-          account: traders.trader1.account,
-        }),
-      );
-    });
-
-    it("deposit reverts on zero amount", async () => {
-      const { engine, traders } =
-        await networkHelpers.loadFixture(deployMarginEngineFixture);
-
-      await assert.rejects(
-        engine.write.deposit([0n], { account: traders.trader1.account }),
-      );
     });
   });
 
@@ -350,12 +307,12 @@ describe("OptionMarginEngine", () => {
 
   describe("health checks", () => {
     it("healthy with enough collateral", async () => {
-      const { engine, traders, seriesId, accounts } =
+      const { engine, vault, traders, seriesId, accounts } =
         await networkHelpers.loadFixture(deployMarginEngineFixture);
 
       await engine.write.initializeIV([seriesId]);
 
-      await engine.write.deposit([50_000_000_000n], {
+      await vault.write.deposit([50_000_000_000n], {
         account: traders.trader1.account,
       }); // 50k USDC
       await engine.write.updatePosition(
@@ -370,13 +327,13 @@ describe("OptionMarginEngine", () => {
     });
 
     it("unhealthy with insufficient collateral", async () => {
-      const { engine, traders, seriesId, accounts } =
+      const { engine, vault, traders, seriesId, accounts } =
         await networkHelpers.loadFixture(deployMarginEngineFixture);
 
       await engine.write.initializeIV([seriesId]);
 
       // Deposit a tiny amount
-      await engine.write.deposit([1_000n], {
+      await vault.write.deposit([1_000n], {
         account: traders.trader1.account,
       }); // $0.001
       await engine.write.updatePosition(
@@ -391,7 +348,7 @@ describe("OptionMarginEngine", () => {
     });
 
     it("canPlaceOrder respects reserved + IM + additional", async () => {
-      const { engine, traders, seriesId, accounts } =
+      const { engine, vault, traders, seriesId } =
         await networkHelpers.loadFixture(deployMarginEngineFixture);
 
       await engine.write.initializeIV([seriesId]);
@@ -400,7 +357,7 @@ describe("OptionMarginEngine", () => {
       // Deposit just enough for one order's IM
       const wadUnit = 10n ** 12n;
       const usdcNeeded = orderIM / wadUnit + 1n;
-      await engine.write.deposit([usdcNeeded], {
+      await vault.write.deposit([usdcNeeded], {
         account: traders.trader1.account,
       });
 
@@ -479,11 +436,11 @@ describe("OptionMarginEngine", () => {
     });
 
     it("withdrawal fails when reserved margin occupies collateral", async () => {
-      const { engine, traders, accounts } =
+      const { engine, vault, traders, accounts } =
         await networkHelpers.loadFixture(deployMarginEngineFixture);
 
       // Deposit 10 USDC = 10e6
-      await engine.write.deposit([10_000_000n], {
+      await vault.write.deposit([10_000_000n], {
         account: traders.trader1.account,
       });
 
@@ -494,9 +451,10 @@ describe("OptionMarginEngine", () => {
         { account: accounts.owner.account },
       );
 
-      // Trying to withdraw 1 USDC should fail because collateral - withdraw < reserved
+      // Trying to withdraw 1 USDC should fail: vault checks portfolio IM via
+      // PortfolioMarginEngine, which sums options IM (incl. reserved) + perps IM.
       await assert.rejects(
-        engine.write.withdraw([1_000_000n], {
+        vault.write.withdraw([1_000_000n], {
           account: traders.trader1.account,
         }),
       );

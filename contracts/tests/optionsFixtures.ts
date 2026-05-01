@@ -108,10 +108,12 @@ async function deployVaultAndPME(
     encodeFunctionData({
       abi: pmeImpl.abi,
       functionName: "initialize",
-      args: [vault.address, perpsMock.address, engineAddress],
+      args: [vault.address],
     }),
   ]);
   const pme = await viem.getContractAt("PortfolioMarginEngine", pmeProxy.address);
+  await pme.write.setPerps([perpsMock.address]);
+  await pme.write.setOptions([engineAddress]);
 
   await vault.write.setMarginEngine([pme.address]);
   await vault.write.setAuthorizedCaller([engineAddress, true]);
@@ -184,10 +186,12 @@ export async function deployMarginEngineFixture(conn: NetworkConnection) {
     encodeFunctionData({
       abi: pmeImpl.abi,
       functionName: "initialize",
-      args: [vault.address, perpsMock.address, engine.address],
+      args: [vault.address],
     }),
   ]);
   const pme = await viem.getContractAt("PortfolioMarginEngine", pmeProxy.address);
+  await pme.write.setPerps([perpsMock.address], { account: owner.account });
+  await pme.write.setOptions([engine.address], { account: owner.account });
 
   // Wire vault ↔ engine ↔ PME
   await vault.write.setMarginEngine([pme.address]);
@@ -243,13 +247,10 @@ export async function deployMatchingRouterFixture(conn: NetworkConnection) {
   await book.write.setRouter([router.address], { account: owner.account });
   await engine.write.setRouter([router.address], { account: owner.account });
 
-  // Fund traders with collateral via engine.deposit (vault is already approved)
+  // Fund traders with collateral via vault.deposit (vault is already approved)
   const depositAmount = 50_000_000_000n; // 50k USDC
   for (const w of [traders.trader1, traders.trader2]) {
-    const eng = await viem.getContractAt("OptionMarginEngine", engine.address, {
-      client: { wallet: w },
-    });
-    await eng.write.deposit([depositAmount]);
+    await vault.write.deposit([depositAmount], { account: w.account });
   }
 
   return { ...data, router, depositAmount };
@@ -331,10 +332,12 @@ export async function deploySettlementFixture(conn: NetworkConnection) {
     encodeFunctionData({
       abi: pmeImpl.abi,
       functionName: "initialize",
-      args: [vault.address, perpsMock.address, engine.address],
+      args: [vault.address],
     }),
   ]);
   const pme = await viem.getContractAt("PortfolioMarginEngine", pmeProxy.address);
+  await pme.write.setPerps([perpsMock.address], { account: owner.account });
+  await pme.write.setOptions([engine.address], { account: owner.account });
 
   // ── MatchingRouter ────────────────────────────────────────────────────
   const routerImpl = await viem.deployContract("OptionMatchingRouter", []);
@@ -407,15 +410,12 @@ export async function deploySettlementFixture(conn: NetworkConnection) {
     await usdc.write.transfer([w.account.address, topUp], { account: owner.account });
     const usdcAs = await viem.getContractAt("USDCMock", usdc.address, { client: { wallet: w } });
     await usdcAs.write.approve([vault.address, maxUint256]);
-    const eng = await viem.getContractAt("OptionMarginEngine", engine.address, {
-      client: { wallet: w },
-    });
-    await eng.write.deposit([depositAmount]);
+    await vault.write.deposit([depositAmount], { account: w.account });
   }
 
-  // Owner funds insurance fund
+  // Owner funds insurance fund directly via the vault
   await usdc.write.approve([vault.address, maxUint256], { account: owner.account });
-  await engine.write.depositToInsuranceFund([INSURANCE_DEPOSIT], { account: owner.account });
+  await vault.write.depositInsuranceFund([INSURANCE_DEPOSIT], { account: owner.account });
 
   return {
     registry,

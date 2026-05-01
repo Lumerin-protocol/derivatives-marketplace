@@ -6,7 +6,6 @@ import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils
 import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import { AggregatorV3Interface } from "./interfaces/AggregatorV3Interface.sol";
@@ -23,7 +22,6 @@ import { FixedPointMathLib } from "./libs/FixedPointMathLib.sol";
 ///         maintains EWMA IV, computes stress-scenario IM/MM margins,
 ///         and provides health checks for liquidation readiness.
 contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeable, IOptionsEnginePortfolioView {
-    using SafeERC20 for IERC20;
     using EnumerableSet for EnumerableSet.UintSet;
 
     // ── Constants ───────────────────────────────────────────────────────────
@@ -54,12 +52,10 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     error NotRouter();
     error NotSettlement();
     error InsufficientCollateral();
-    error WithdrawalWouldBreachMargin();
     error MaxSeriesExceeded(address user);
     error OracleStale();
     error InvalidOracle();
     error ZeroAddress();
-    error ZeroAmount();
     error SeriesNotInitialized(uint64 seriesId);
     error IVNotInitialized(uint64 seriesId);
     error AccountHealthy(address account);
@@ -69,8 +65,6 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
 
     // ── Events ──────────────────────────────────────────────────────────────
 
-    event CollateralDeposited(address indexed user, uint256 amount, uint256 newBalance);
-    event CollateralWithdrawn(address indexed user, uint256 amount, uint256 newBalance);
     event PositionUpdated(address indexed user, uint64 indexed seriesId, int128 newNetQuantity);
     event ImpliedVolUpdated(uint64 indexed seriesId, uint256 newIV, uint256 tradeIV);
     event MarginReserved(address indexed user, uint256 amount, uint256 totalReserved);
@@ -82,8 +76,7 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     event Liquidated(
         address indexed account, address indexed liquidator, uint256 fee, uint64 indexed seriesId, uint128 amount
     );
-    event InsuranceFundDeposited(address indexed depositor, uint256 wadAmount, uint256 totalFund);
-    event BadDebtRecorded(uint256 badDebt, uint256 coveredByInsurance);
+    event BadDebtRecorded(address indexed user, uint256 badDebt, uint256 coveredByInsurance);
     event PositionSettled(uint64 indexed seriesId, address indexed user, int256 pnlWad);
     event PerpsDexUpdated(address indexed perpsDex);
 
@@ -222,37 +215,6 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
         portfolioMargin = IPortfolioMarginEngine(_pm);
     }
 
-    /// @notice Deposit collateral into the shared vault insurance fund account (anyone can contribute).
-    ///         Caller must have approved the vault. Owner must set `vault.insuranceFund`.
-    function depositToInsuranceFund(uint256 amount) external {
-        if (amount == 0) revert ZeroAmount();
-        address fund = vault.INSURANCE_FUND_ADDR();
-        if (fund == address(0)) revert InsuranceFundNotConfigured();
-        vault.depositFor(_msgSender(), fund, amount);
-        emit InsuranceFundDeposited(_msgSender(), _toWad(amount), _toWad(vault.insuranceFundBalance()));
-    }
-
-    // ── Collateral ──────────────────────────────────────────────────────────
-
-    /// @notice Deposit collateral. Caller must have approved the vault.
-    function deposit(uint256 amount) external {
-        if (amount == 0) revert ZeroAmount();
-        vault.depositFor(_msgSender(), _msgSender(), amount);
-        emit CollateralDeposited(_msgSender(), amount, _userBalance(_msgSender()));
-    }
-
-    /// @notice Withdraw collateral. Reverts if withdrawal would breach IM + reserved.
-    function withdraw(uint256 amount) external {
-        if (amount == 0) revert ZeroAmount();
-        uint256 bal = vault.balanceOf(_msgSender());
-        if (bal < amount) revert InsufficientCollateral();
-        uint256 newBalance = bal - amount;
-        uint256 requiredTokens = _fromWad(computeAccountIM(_msgSender()) + _reservedMargin[_msgSender()]);
-        if (newBalance < requiredTokens) revert WithdrawalWouldBreachMargin();
-        vault.withdrawTo(_msgSender(), _msgSender(), amount);
-        emit CollateralWithdrawn(_msgSender(), amount, _userBalance(_msgSender()));
-    }
-
     // ── Position updates (called by router on fill) ─────────────────────────
 
     /// @notice Update a user's position after a fill.
@@ -263,28 +225,31 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     // ── Settlement (called by OptionSettlement) ─────────────────────────────
 
     /// @notice Settle a user's position: apply PnL, zero out position, remove from active series.
-    ///         For longs (pnlWad > 0): credit payoff to collateral.
-    ///         For shorts (pnlWad < 0): debit payoff; insurance fund covers bad debt.
+    ///         For longs (pnlWad > 0): pay user from the insurance fund (capped at fund balance).
+    ///         For shorts (pnlWad < 0): collect from user into the insurance fund (capped at user balance).
+    /// @dev Any shortfall in either direction is reported via `BadDebtRecorded`.
     function settlePosition(address user, uint64 seriesId, int256 pnlWad) external onlySettlement {
         if (_positions[user][seriesId].netQuantity == 0) return;
 
+        address fund = _insuranceFundAccount();
         uint256 pnlTokens = _fromWad(pnlWad > 0 ? uint256(pnlWad) : uint256(-pnlWad));
         if (pnlWad > 0) {
-            vault.credit(user, pnlTokens);
+            uint256 fundBal = vault.balanceOf(fund);
+            uint256 payout = pnlTokens > fundBal ? fundBal : pnlTokens;
+            if (payout > 0) {
+                vault.internalTransfer(fund, user, payout);
+            }
+            if (payout < pnlTokens) {
+                emit BadDebtRecorded(user, pnlTokens - payout, payout);
+            }
         } else if (pnlWad < 0) {
             uint256 bal = vault.balanceOf(user);
-            if (bal >= pnlTokens) {
-                vault.debit(user, pnlTokens);
-            } else {
-                if (bal > 0) vault.debit(user, bal);
-                uint256 badDebt = pnlTokens - bal;
-                address fund = vault.INSURANCE_FUND_ADDR();
-                uint256 fundBal = fund == address(0) ? 0 : vault.balanceOf(fund);
-                uint256 covered = badDebt > fundBal ? fundBal : badDebt;
-                if (covered > 0) {
-                    vault.debit(fund, covered);
-                }
-                emit BadDebtRecorded(uint256(-pnlWad), _toWad(covered));
+            uint256 paid = pnlTokens > bal ? bal : pnlTokens;
+            if (paid > 0) {
+                vault.internalTransfer(user, fund, paid);
+            }
+            if (paid < pnlTokens) {
+                emit BadDebtRecorded(user, pnlTokens - paid, paid);
             }
         }
 
@@ -292,6 +257,13 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
         _userActiveSeries[user].remove(uint256(seriesId));
 
         emit PositionSettled(seriesId, user, pnlWad);
+    }
+
+    /// @dev Shared reserve / PnL ledger: vault `INSURANCE_FUND_ADDR` receipt account.
+    function _insuranceFundAccount() private view returns (address) {
+        address fund = vault.INSURANCE_FUND_ADDR();
+        if (fund == address(0)) revert InsuranceFundNotConfigured();
+        return fund;
     }
 
     // ── Liquidation ────────────────────────────────────────────────────────
@@ -454,9 +426,9 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
         return _getForwardPriceWad();
     }
 
-    /// @notice Insurance fund size in WAD (vault `insuranceFund` receipt balance).
+    /// @notice Insurance fund size in WAD (vault `INSURANCE_FUND_ADDR` receipt balance).
     function getInsuranceFund() external view returns (uint256) {
-        return _toWad(vault.insuranceFundBalance());
+        return _toWad(vault.balanceOf(vault.INSURANCE_FUND_ADDR()));
     }
 
     /// @notice Aggregate signed net Greeks across all active option positions.

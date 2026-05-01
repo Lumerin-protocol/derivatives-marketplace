@@ -5,19 +5,11 @@ import { Black76Lib } from "../libs/Black76Lib.sol";
 
 /// @dev Test harness exposing Black76Lib internals as external calls.
 contract Black76Harness {
-    function callPrice(uint256 F, uint256 K, uint256 sigma, uint256 tSec)
-        external
-        pure
-        returns (uint256)
-    {
+    function callPrice(uint256 F, uint256 K, uint256 sigma, uint256 tSec) external pure returns (uint256) {
         return Black76Lib.callPrice(F, K, sigma, tSec);
     }
 
-    function putPrice(uint256 F, uint256 K, uint256 sigma, uint256 tSec)
-        external
-        pure
-        returns (uint256)
-    {
+    function putPrice(uint256 F, uint256 K, uint256 sigma, uint256 tSec) external pure returns (uint256) {
         return Black76Lib.putPrice(F, K, sigma, tSec);
     }
 

@@ -6,7 +6,7 @@ import { waitFor } from "../../contracts/fixtures/helpers.ts";
 import { waitForStack, deploySubgraph, SUBGRAPH_URL } from "../setup/subgraph.ts";
 import { startKeeper, type KeeperProcess } from "../setup/keeper.ts";
 import { deployWithLiquidatablePositionFixture } from "../../contracts/fixtures/viem.ts";
-import { hashPowerPerpsDexAbi } from "../../contracts/abi/abi.ts";
+import { HashPowerPerpsDEXAbi as hashPowerPerpsDexAbi } from "../../contracts/abi/HashPowerPerpsDEX.ts";
 
 // ── Shared state ──────────────────────────────────────────────────────────────
 

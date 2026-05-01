@@ -36,3 +36,9 @@ export function createClients(config: MakerConfig) {
 
   return { publicClient, walletClient, account, chain };
 }
+
+export type PublicClient = ReturnType<typeof createClients>["publicClient"];
+export type WalletClient = ReturnType<typeof createClients>["walletClient"];
+export type Account = ReturnType<typeof createClients>["account"];
+export type Chain = ReturnType<typeof createClients>["chain"];
+

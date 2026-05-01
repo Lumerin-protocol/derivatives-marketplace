@@ -1,4 +1,4 @@
-export const HashPowerPerpsDEXAbi = [
+[
   {
     "inputs": [
       {
@@ -1453,4 +1453,4 @@ export const HashPowerPerpsDEXAbi = [
     "stateMutability": "view",
     "type": "function"
   }
-] as const;
+]

@@ -10,7 +10,7 @@
     "dev": "node --env-file=../.env src/index.ts | pino-pretty",
     "dev:dry": "MAKER_DRY_RUN=true node --env-file=../.env src/index.ts | pino-pretty",
     "start": "node --env-file=../.env src/index.ts",
-    "pretest": "cd ../contracts && pnpm hardhat compile && cp ./abi/abi.ts ../market-maker/src/abi.ts",
+    "pretest": "cd ../contracts && pnpm hardhat compile",
     "test": "node --test --test-force-exit --test-concurrency=1 'tests/**/*.test.ts'",
     "test:coverage": "node --test --experimental-test-coverage --test-force-exit --test-concurrency=1 'tests/**/*.test.ts'",
     "test:watch": "node --test --watch --test-concurrency=1 'tests/**/*.test.ts'",

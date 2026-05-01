@@ -153,7 +153,8 @@ library Black76Lib {
             Greeks memory g = greeks(F, K, sigma, tSec, isCall);
             if (g.vega < NR_PRECISION) {
                 // Vega too small for NR — bisect
-                if (diff > 0) hi = sigma; else lo = sigma;
+                if (diff > 0) hi = sigma;
+                else lo = sigma;
                 sigma = (lo + hi) / 2;
                 continue;
             }
@@ -162,10 +163,12 @@ library Black76Lib {
             int256 newSigma = int256(sigma) - step;
 
             if (newSigma <= int256(MIN_VOL) || newSigma >= int256(MAX_VOL)) {
-                if (diff > 0) hi = sigma; else lo = sigma;
+                if (diff > 0) hi = sigma;
+                else lo = sigma;
                 sigma = (lo + hi) / 2;
             } else {
-                if (diff > 0) hi = uint256(newSigma); else lo = uint256(newSigma);
+                if (diff > 0) hi = uint256(newSigma);
+                else lo = uint256(newSigma);
                 sigma = uint256(newSigma);
             }
         }
@@ -199,11 +202,7 @@ library Black76Lib {
     }
 
     /// @dev Standard put from call via put-call parity: put = call + K/F - 1.
-    function _standardPutFromCall(uint256 moneyness, uint256 stdCallPrice)
-        private
-        pure
-        returns (uint256 stdPutPrice)
-    {
+    function _standardPutFromCall(uint256 moneyness, uint256 stdCallPrice) private pure returns (uint256 stdPutPrice) {
         unchecked {
             uint256 sum = stdCallPrice + moneyness;
             return sum >= WAD ? sum - WAD : 0;

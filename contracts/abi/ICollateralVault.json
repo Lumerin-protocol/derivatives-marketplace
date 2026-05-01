@@ -1,4 +1,4 @@
-export const ICollateralVaultAbi = [
+[
   {
     "anonymous": false,
     "inputs": [
@@ -272,4 +272,4 @@ export const ICollateralVaultAbi = [
     "stateMutability": "nonpayable",
     "type": "function"
   }
-] as const;
+]

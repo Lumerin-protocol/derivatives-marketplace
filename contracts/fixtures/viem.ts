@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { type Address, encodeFunctionData, getContract, maxUint256, parseUnits } from "viem";
-import { hashPowerPerpsDexAbi, usdcMockAbi, priceOracleMockAbi } from "../abi/abi.ts";
+import { HashPowerPerpsDEXAbi as hashPowerPerpsDexAbi } from "../abi/HashPowerPerpsDEX.ts";
+import { USDCMockAbi as usdcMockAbi } from "../abi/USDCMock.ts";
+import { PriceOracleMockAbi as priceOracleMockAbi } from "../abi/PriceOracleMock.ts";
 import {
   HARDHAT_ACCOUNTS,
   createTestPublicClient,

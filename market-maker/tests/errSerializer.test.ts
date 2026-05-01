@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createPublicClient, http } from "viem";
 import { hardhat } from "viem/chains";
-import { hashPowerPerpsDexAbi } from "../src/abi.ts";
+import { HashPowerPerpsDEXAbi as hashPowerPerpsDexAbi } from "../../contracts/abi/HashPowerPerpsDEX.ts";
 import { serializeError } from "../src/errSerializer.ts";
 
 describe("serializeError", () => {

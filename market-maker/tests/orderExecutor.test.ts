@@ -2,7 +2,7 @@ import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { decodeFunctionData } from "viem";
 import { OrderExecutor } from "../src/orderExecutor.ts";
-import { hashPowerPerpsDexAbi } from "../src/abi.ts";
+import { HashPowerPerpsDEXAbi as hashPowerPerpsDexAbi } from "../../contracts/abi/HashPowerPerpsDEX.ts";
 import type { MakerConfig } from "../src/config.ts";
 import type { Quoter, DesiredQuotes } from "../src/quoter.ts";
 import type { BookTracker, OwnOrder } from "../src/bookTracker.ts";

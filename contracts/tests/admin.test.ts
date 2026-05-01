@@ -142,7 +142,7 @@ describe("HashPowerPerpsDEX - Admin Functions", function () {
   });
 
   describe("depositInsuranceFund", function () {
-    it("should allow owner to deposit to insurance fund", async function () {
+    it("anyone can top up the insurance fund", async function () {
       const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { vault } = contracts;
       const { owner } = accounts;
@@ -150,13 +150,13 @@ describe("HashPowerPerpsDEX - Admin Functions", function () {
       const amount = parseUnits("1000", 6);
       const reserveBefore = await vault.read.insuranceFundBalance();
 
-      await vault.write.depositInsuranceFund([owner.account.address, amount], { account: owner.account });
+      await vault.write.depositInsuranceFund([amount], { account: owner.account });
 
       const reserveAfter = await vault.read.insuranceFundBalance();
       assert.equal(reserveAfter - reserveBefore, amount);
     });
 
-    it("should transfer tokens from source to vault", async function () {
+    it("pulls tokens from the caller", async function () {
       const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { vault, usdcMock } = contracts;
       const { owner } = accounts;
@@ -165,25 +165,13 @@ describe("HashPowerPerpsDEX - Admin Functions", function () {
       const ownerBalanceBefore = await usdcMock.read.balanceOf([owner.account.address]);
       const vaultBalanceBefore = await usdcMock.read.balanceOf([vault.address]);
 
-      await vault.write.depositInsuranceFund([owner.account.address, amount], { account: owner.account });
+      await vault.write.depositInsuranceFund([amount], { account: owner.account });
 
       const ownerBalanceAfter = await usdcMock.read.balanceOf([owner.account.address]);
       const vaultBalanceAfter = await usdcMock.read.balanceOf([vault.address]);
 
       assert.equal(ownerBalanceBefore - ownerBalanceAfter, amount);
       assert.equal(vaultBalanceAfter - vaultBalanceBefore, amount);
-    });
-
-    it("should revert when non-owner tries to deposit", async function () {
-      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
-      const { vault } = contracts;
-      const { buyer } = accounts;
-
-      await viem.assertions.revertWithCustomError(
-        vault.write.depositInsuranceFund([buyer.account.address, parseUnits("100", 6)], { account: buyer.account }),
-        vault,
-        "OwnableUnauthorizedAccount",
-      );
     });
   });
 

@@ -1,4 +1,4 @@
-export const contractErrors = [
+[
   {
     "inputs": [],
     "name": "InvalidPrice",
@@ -309,4 +309,4 @@ export const contractErrors = [
     "name": "ERC20InsufficientAllowance",
     "type": "error"
   }
-] as const;
+]

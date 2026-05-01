@@ -1,11 +1,11 @@
-import type { PublicClient } from "viem";
+import type { PublicClient } from "./client.ts";
 import type { MakerConfig } from "./config.ts";
 import type { OracleTracker } from "./oracleTracker.ts";
 import type { GasTracker } from "./gasTracker.ts";
 import type { InventoryManager } from "./inventoryManager.ts";
 import type { RiskManager } from "./riskManager.ts";
 import type pino from "pino";
-import { hashPowerPerpsDexAbi } from "./abi.ts";
+import { HashPowerPerpsDEXAbi as hashPowerPerpsDexAbi } from "../../contracts/abi/HashPowerPerpsDEX.ts";
 import { roundDownToTick, roundUpToTick, BPS_SCALE, calculateNotional } from "./math.ts";
 
 export interface QuoteLevel {

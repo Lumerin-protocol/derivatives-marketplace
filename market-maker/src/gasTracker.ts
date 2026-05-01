@@ -1,7 +1,8 @@
-import type { PublicClient } from "viem";
+import type { PublicClient } from "./client.ts";
 import type { MakerConfig } from "./config.ts";
 import type pino from "pino";
-import { hashPowerPerpsDexAbi, aggregatorV3InterfaceAbi } from "./abi.ts";
+import { HashPowerPerpsDEXAbi as hashPowerPerpsDexAbi } from "../../contracts/abi/HashPowerPerpsDEX.ts";
+import { AggregatorV3InterfaceAbi as aggregatorV3InterfaceAbi } from "../../contracts/abi/AggregatorV3Interface.ts";
 import { RollingWindow } from "./math.ts";
 
 export class GasTracker {

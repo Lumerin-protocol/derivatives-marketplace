@@ -36,3 +36,7 @@ export function createClients(config: Config) {
 
   return { publicClient, walletClient, account };
 }
+
+export type PublicClient = ReturnType<typeof createClients>["publicClient"];
+export type WalletClient = ReturnType<typeof createClients>["walletClient"];
+export type Account = ReturnType<typeof createClients>["account"];

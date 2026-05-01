@@ -1,4 +1,4 @@
-export const ICollateralVaultAbi = [
+[
   {
     "anonymous": false,
     "inputs": [
@@ -48,19 +48,6 @@ export const ICollateralVaultAbi = [
     ],
     "name": "Transfer",
     "type": "event"
-  },
-  {
-    "inputs": [],
-    "name": "INSURANCE_FUND_ADDR",
-    "outputs": [
-      {
-        "internalType": "address",
-        "name": "",
-        "type": "address"
-      }
-    ],
-    "stateMutability": "pure",
-    "type": "function"
   },
   {
     "inputs": [
@@ -131,61 +118,41 @@ export const ICollateralVaultAbi = [
   },
   {
     "inputs": [],
-    "name": "collateralToken",
+    "name": "decimals",
     "outputs": [
       {
-        "internalType": "contract IERC20",
+        "internalType": "uint8",
         "name": "",
-        "type": "address"
+        "type": "uint8"
       }
     ],
     "stateMutability": "view",
     "type": "function"
   },
   {
-    "inputs": [
+    "inputs": [],
+    "name": "name",
+    "outputs": [
       {
-        "internalType": "address",
-        "name": "from",
-        "type": "address"
-      },
-      {
-        "internalType": "address",
-        "name": "to",
-        "type": "address"
-      },
-      {
-        "internalType": "uint256",
-        "name": "amount",
-        "type": "uint256"
+        "internalType": "string",
+        "name": "",
+        "type": "string"
       }
     ],
-    "name": "internalTransfer",
-    "outputs": [],
-    "stateMutability": "nonpayable",
+    "stateMutability": "view",
     "type": "function"
   },
   {
-    "inputs": [
+    "inputs": [],
+    "name": "symbol",
+    "outputs": [
       {
-        "internalType": "address",
-        "name": "from",
-        "type": "address"
-      },
-      {
-        "internalType": "address",
-        "name": "to",
-        "type": "address"
-      },
-      {
-        "internalType": "uint256",
-        "name": "amount",
-        "type": "uint256"
+        "internalType": "string",
+        "name": "",
+        "type": "string"
       }
     ],
-    "name": "internalTransferWithMarginCheck",
-    "outputs": [],
-    "stateMutability": "nonpayable",
+    "stateMutability": "view",
     "type": "function"
   },
   {
@@ -253,23 +220,5 @@ export const ICollateralVaultAbi = [
     ],
     "stateMutability": "nonpayable",
     "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "recipient",
-        "type": "address"
-      },
-      {
-        "internalType": "uint256",
-        "name": "amount",
-        "type": "uint256"
-      }
-    ],
-    "name": "withdrawTo",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
   }
-] as const;
+]
