@@ -183,6 +183,25 @@ contract HashPowerPerpsDEX is
     /// @notice Authorize upgrade (only owner)
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
 
+    /// @notice One-shot post-upgrade migration to wire up the collateral vault
+    ///         and (optionally) the portfolio margin engine added in v2.
+    /// @dev Intended to be invoked atomically via `upgradeToAndCall`:
+    ///      `proxy.upgradeToAndCall(newImpl, abi.encodeCall(this.initializeV2, (vault, pm)))`.
+    /// @param _vault The shared collateral vault. Its `collateralToken()` becomes the underlying ERC20.
+    /// @param _pm The portfolio margin engine (may be `address(0)` to set later via `setPortfolioMargin`).
+    function initializeV2(ICollateralVault _vault, IPortfolioMarginEngine _pm) external reinitializer(2) onlyOwner {
+        if (address(_vault) == address(0)) {
+            revert InsufficientCollateral();
+        }
+
+        vault = _vault;
+        portfolioMargin = _pm;
+
+        IERC20Metadata vaultToken = IERC20Metadata(address(_vault.collateralToken()));
+        collateralToken = vaultToken;
+        tokenDecimals = vaultToken.decimals();
+    }
+
     // ── Vault integration ───────────────────────────────────────────────────
 
     /// @notice Set the portfolio margin engine for cross-product margin checks.
