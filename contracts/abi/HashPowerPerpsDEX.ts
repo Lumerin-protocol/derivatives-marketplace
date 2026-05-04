@@ -1062,6 +1062,24 @@ export const HashPowerPerpsDEXAbi = [
   {
     "inputs": [
       {
+        "internalType": "contract ICollateralVault",
+        "name": "_vault",
+        "type": "address"
+      },
+      {
+        "internalType": "contract IPortfolioMarginEngine",
+        "name": "_pm",
+        "type": "address"
+      }
+    ],
+    "name": "initializeV2",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "address",
         "name": "_user",
         "type": "address"
