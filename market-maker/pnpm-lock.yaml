@@ -12,7 +12,7 @@ importers:
         specifier: ^10.3.1
         version: 10.3.1
       viem:
-        specifier: ^2.48.4
+        specifier: ^2.48.8
         version: 2.48.8(typescript@5.9.3)
     devDependencies:
       '@types/node':
