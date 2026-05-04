@@ -63,6 +63,8 @@ export function setupPerps(): void {
   perps.contractAddress = Bytes.empty();
   perps.collateralToken = Bytes.empty();
   perps.priceOracle = Bytes.empty();
+  perps.collateralVault = Bytes.empty();
+  perps.portfolioMarginEngine = Bytes.empty();
   perps.quantityDecimals = 6;
   perps.minimumPriceIncrement = BigInt.zero();
   perps.marginPercent = 0;
@@ -95,7 +97,7 @@ const MOCK_TX_HASH = Bytes.fromHexString(
 ) as Bytes;
 
 /**
- * CollateralEvent/Liquidation/etc. id from matchstick mock defaults.
+ * Liquidation/etc. id from matchstick mock defaults.
  * createEventId = txHash.concatI32(logIndex).
  */
 export function mockEventId(logIndex: i32 = 1): string {

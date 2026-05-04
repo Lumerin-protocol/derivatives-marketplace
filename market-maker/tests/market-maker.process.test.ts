@@ -4,7 +4,8 @@ import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { getContract, parseUnits, type Hex } from "viem";
 
-import { hashPowerPerpsDexAbi, priceOracleMockAbi } from "../src/abi.ts";
+import { HashPowerPerpsDEXAbi as hashPowerPerpsDexAbi } from "../../contracts/abi/HashPowerPerpsDEX.ts";
+import { PriceOracleMockAbi as priceOracleMockAbi } from "../../contracts/abi/PriceOracleMock.ts";
 import {
   startHardhatNode,
   waitFor,

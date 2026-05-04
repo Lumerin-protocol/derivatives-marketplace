@@ -1,5 +1,6 @@
-import type { PublicClient, WalletClient, Account } from "viem";
-import { hashPowerPerpsDexAbi, aggregatorV3InterfaceAbi } from "./abi.ts";
+import type { PublicClient, WalletClient, Account } from "./client.ts";
+import { HashPowerPerpsDEXAbi as hashPowerPerpsDexAbi } from "../../contracts/abi/HashPowerPerpsDEX.ts";
+import { AggregatorV3InterfaceAbi as aggregatorV3InterfaceAbi } from "../../contracts/abi/AggregatorV3Interface.ts";
 import type { Config } from "./config.ts";
 import type { PositionTracker, UserState } from "./positionTracker.ts";
 import type pino from "pino";
@@ -47,7 +48,11 @@ export class Liquidator {
           abi: hashPowerPerpsDexAbi as any,
           functionName: "liquidationFee",
         },
-        { address: this.config.perpsAddress, abi: hashPowerPerpsDexAbi as any, functionName: "decimals" },
+        {
+          address: this.config.perpsAddress,
+          abi: hashPowerPerpsDexAbi as any,
+          functionName: "decimals",
+        },
         ...(this.config.ethPriceFeedAddress
           ? [
               {
@@ -226,7 +231,13 @@ export class Liquidator {
 
         if (netProfit < this.config.minProfitMargin) {
           this.logger.info(
-            { ...logCtx, liquidationFee: this.liquidationFee, gasCostCollateral, netProfit, minProfitMargin: this.config.minProfitMargin },
+            {
+              ...logCtx,
+              liquidationFee: this.liquidationFee,
+              gasCostCollateral,
+              netProfit,
+              minProfitMargin: this.config.minProfitMargin,
+            },
             "Skipping — below minimum profit margin",
           );
           continue;
@@ -234,7 +245,15 @@ export class Liquidator {
 
         if (this.config.dryRun) {
           this.logger.info(
-            { ...logCtx, gasEstimate, gasCostWei, gasCostCollateral, ethPrice, liquidationFee: this.liquidationFee, netProfit },
+            {
+              ...logCtx,
+              gasEstimate,
+              gasCostWei,
+              gasCostCollateral,
+              ethPrice,
+              liquidationFee: this.liquidationFee,
+              netProfit,
+            },
             "DRY RUN — would liquidate",
           );
           continue;
@@ -276,7 +295,13 @@ export class Liquidator {
 
       const receipt = await this.publicClient.waitForTransactionReceipt({ hash: txHash });
       this.logger.info(
-        { txHash, status: receipt.status, gasUsed: receipt.gasUsed, blockNumber: receipt.blockNumber, count: users.length },
+        {
+          txHash,
+          status: receipt.status,
+          gasUsed: receipt.gasUsed,
+          blockNumber: receipt.blockNumber,
+          count: users.length,
+        },
         "Batch liquidation confirmed",
       );
 
@@ -314,7 +339,13 @@ export class Liquidator {
 
       const receipt = await this.publicClient.waitForTransactionReceipt({ hash: txHash });
       this.logger.info(
-        { user: user.address, txHash, status: receipt.status, gasUsed: receipt.gasUsed, blockNumber: receipt.blockNumber },
+        {
+          user: user.address,
+          txHash,
+          status: receipt.status,
+          gasUsed: receipt.gasUsed,
+          blockNumber: receipt.blockNumber,
+        },
         "Liquidation confirmed",
       );
 

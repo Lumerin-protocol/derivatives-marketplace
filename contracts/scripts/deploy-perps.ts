@@ -41,7 +41,7 @@ async function main() {
 
   // Verify price oracle
   const priceOracle = await viem.getContractAt(
-    "contracts/AggregatorV3Interface.sol:AggregatorV3Interface",
+    "AggregatorV3Interface",
     env.PRICE_ORACLE_ADDRESS as `0x${string}`,
   );
   const [, answer, , updatedAt] = await priceOracle.read.latestRoundData();
@@ -63,10 +63,7 @@ async function main() {
   await logPrompt("Proceed?");
   console.log("Deploying HashPowerPerpsDEX implementation...");
   const args = [BigInt(env.MINIMUM_PRICE_INCREMENT)] as const;
-  const perpsImpl = await viem.deployContract(
-    "contracts/HashPowerPerpsDEX.sol:HashPowerPerpsDEX",
-    args,
-  );
+  const perpsImpl = await viem.deployContract("HashPowerPerpsDEX", args);
   logStep("Deployed", addrUrl(pc, perpsImpl.address));
 
   console.log("Verifying HashPowerPerpsDEX implementation...");

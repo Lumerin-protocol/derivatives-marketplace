@@ -1,7 +1,34 @@
-import { createPublicClient, createWalletClient, http, webSocket, defineChain } from "viem";
+import {
+  createPublicClient,
+  createWalletClient,
+  http,
+  webSocket,
+  defineChain,
+  getContract,
+} from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import type { MakerConfig } from "./config.ts";
-import { arbitrum, arbitrumSepolia, base, baseSepolia, hardhat as hardhatBase } from "viem/chains";
+import {
+  arbitrum,
+  arbitrumSepolia,
+  base,
+  baseSepolia,
+  hardhat as hardhatBase,
+} from "viem/chains";
+
+export { getContract };
+
+// ── Test client helpers ─────────────────────────────────────────────────────
+
+const testTransport = http("http://127.0.0.1:8545");
+
+export function createTestPublicClient() {
+  return createPublicClient({
+    transport: testTransport,
+    chain: hardhat,
+    pollingInterval: 100,
+  });
+}
 
 export const hardhat = defineChain({
   ...hardhatBase,
@@ -36,3 +63,8 @@ export function createClients(config: MakerConfig) {
 
   return { publicClient, walletClient, account, chain };
 }
+
+export type PublicClient = ReturnType<typeof createClients>["publicClient"];
+export type WalletClient = ReturnType<typeof createClients>["walletClient"];
+export type Account = ReturnType<typeof createClients>["account"];
+export type Chain = ReturnType<typeof createClients>["chain"];

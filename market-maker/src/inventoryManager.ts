@@ -1,7 +1,8 @@
-import type { PublicClient } from "viem";
+import type { PublicClient } from "./client.ts";
 import type { MakerConfig } from "./config.ts";
 import type pino from "pino";
-import { hashPowerPerpsDexAbi, multicall3Abi } from "./abi.ts";
+import { HashPowerPerpsDEXAbi as hashPowerPerpsDexAbi } from "../../contracts/abi/HashPowerPerpsDEX.ts";
+import { Multicall3Abi as multicall3Abi } from "../../contracts/abi/Multicall3.ts";
 import { bigAbs } from "./math.ts";
 import { erc20Abi } from "viem";
 

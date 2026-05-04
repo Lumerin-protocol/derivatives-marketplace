@@ -1,7 +1,7 @@
-import type { PublicClient } from "viem";
+import type { PublicClient } from "./client.ts";
 import type { MakerConfig } from "./config.ts";
 import type pino from "pino";
-import { hashPowerPerpsDexAbi } from "./abi.ts";
+import { HashPowerPerpsDEXAbi as hashPowerPerpsDexAbi } from "../../contracts/abi/HashPowerPerpsDEX.ts";
 import { RollingWindow } from "./math.ts";
 
 export class OracleTracker {

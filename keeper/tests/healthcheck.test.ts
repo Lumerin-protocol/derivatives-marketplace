@@ -6,7 +6,7 @@ import pino from "pino";
 import { HealthCheck } from "../src/healthcheck.ts";
 import { PositionTracker } from "../src/positionTracker.ts";
 import { Liquidator } from "../src/liquidator.ts";
-import { hashPowerPerpsDexAbi } from "../src/abi.ts";
+import { HashPowerPerpsDEXAbi as hashPowerPerpsDexAbi } from "../../contracts/abi/HashPowerPerpsDEX.ts";
 import {
   startHardhatNode,
   createKeeperConfig,

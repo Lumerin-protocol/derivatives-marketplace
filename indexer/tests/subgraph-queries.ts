@@ -32,9 +32,6 @@ export const UserQuery = gql`
   query User($address: ID!) {
     user(id: $address) {
       address
-      collateralBalance
-      totalDeposited
-      totalWithdrawn
       netQuantity
       aggregatedEntryPrice
       orderCount
@@ -166,7 +163,6 @@ export const TopTradersQuery = gql`
       realizedPnl
       tradeCount
       netQuantity
-      collateralBalance
     }
   }
 `;
@@ -184,7 +180,6 @@ export const OpenPositionsQuery = gql`
       address
       netQuantity
       aggregatedEntryPrice
-      collateralBalance
       realizedPnl
     }
   }

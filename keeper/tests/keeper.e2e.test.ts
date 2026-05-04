@@ -18,7 +18,8 @@ import {
   deployWithCollateralFixture,
   deployWithLiquidatablePositionFixture,
 } from "../../contracts/fixtures/viem.ts";
-import { hashPowerPerpsDexAbi, priceOracleMockAbi } from "../src/abi.ts";
+import { HashPowerPerpsDEXAbi as hashPowerPerpsDexAbi } from "../../contracts/abi/HashPowerPerpsDEX.ts";
+import { PriceOracleMockAbi as priceOracleMockAbi } from "../../contracts/abi/PriceOracleMock.ts";
 
 const silentLogger = pino({ level: "silent" });
 

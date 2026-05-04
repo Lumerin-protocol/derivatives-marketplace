@@ -423,7 +423,7 @@ describe("HashPowerPerpsDEX - Funding Fees", function () {
 
     it("should settle funding before liquidation", async function () {
       const { contracts, accounts, config, utils } = await networkHelpers.loadFixture(deployPerpsFixture);
-      const { perps, priceOracle } = contracts;
+      const { perps, priceOracle, vault } = contracts;
       const { seller, buyer, buyer2, owner } = accounts;
 
       await perps.write.setFundingParameters([100n, 86400n], { account: owner.account });
@@ -433,8 +433,8 @@ describe("HashPowerPerpsDEX - Funding Fees", function () {
       const tick = config.minimumPriceIncrement;
 
       const minCollateral = utils.getMinimumCollateral(initialPrice, qty);
-      await perps.write.addCollateral([minCollateral], { account: seller.account });
-      await perps.write.addCollateral([minCollateral * 2n], { account: buyer.account });
+      await vault.write.deposit([minCollateral], { account: seller.account });
+      await vault.write.deposit([minCollateral * 2n], { account: buyer.account });
 
       await perps.write.createOrder([initialPrice, -qty], { account: seller.account });
       await perps.write.createOrder([initialPrice, qty], { account: buyer.account });

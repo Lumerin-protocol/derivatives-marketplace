@@ -1,7 +1,8 @@
-import type { Log, PublicClient, WatchContractEventReturnType } from "viem";
+import type { Log, WatchContractEventReturnType } from "viem";
+import type { PublicClient } from "./client.ts";
 import type { MakerConfig } from "./config.ts";
 import type pino from "pino";
-import { hashPowerPerpsDexAbi } from "./abi.ts";
+import { HashPowerPerpsDEXAbi as hashPowerPerpsDexAbi } from "../../contracts/abi/HashPowerPerpsDEX.ts";
 
 export interface OwnOrder {
   orderId: `0x${string}`;

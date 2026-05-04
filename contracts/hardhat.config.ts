@@ -1,10 +1,31 @@
 import { defineConfig } from "hardhat/config";
 import hardhatToolboxViem from "@nomicfoundation/hardhat-toolbox-viem";
-import dotenv from "dotenv";
-dotenv.config({ path: "../.env" });
+import codegenPlugin from "./plugins/codegen/index.ts";
+import { tryLoadEnvFile } from "./lib/env.ts";
+
+tryLoadEnvFile("./../.env");
+tryLoadEnvFile(".env");
 
 export default defineConfig({
-  plugins: [hardhatToolboxViem],
+  plugins: [hardhatToolboxViem, codegenPlugin],
+  codegen: {
+    contracts: [
+      "HashPowerPerpsDEX",
+      "ICollateralVault",
+      "IPortfolioMarginEngine",
+      "IERC20",
+      "IERC20Metadata",
+      "IERC20Permit",
+      "IERC5267",
+      "UpgradeableBeacon",
+      "ERC1967Proxy",
+      "CollateralVault",
+      "AggregatorV3Interface",
+      "Multicall3",
+      "PriceOracleMock",
+      "USDCMock",
+    ],
+  },
   paths: {
     tests: "tests",
   },
@@ -17,7 +38,14 @@ export default defineConfig({
       "@openzeppelin/contracts/interfaces/IERC5267.sol",
       "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol",
       "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol",
-      "hashprice-oracle/contracts/contracts/BTCPriceOracleMock.sol",
+      "collateral-margin/contracts/contracts/CollateralVault.sol",
+      "collateral-margin/contracts/contracts/PortfolioMarginEngine.sol",
+      "collateral-margin/contracts/contracts/interfaces/ICollateralVault.sol",
+      "collateral-margin/contracts/contracts/interfaces/IPortfolioMarginEngine.sol",
+      "collateral-margin/contracts/contracts/interfaces/IHashPowerPerpsDEX.sol",
+      "collateral-margin/contracts/contracts/interfaces/IOptionsEnginePortfolioView.sol",
+      "collateral-margin/contracts/contracts/mocks/PerpsDEXMock.sol",
+      "collateral-margin/contracts/contracts/mocks/OptionsEngineMock.sol",
     ],
     settings: {
       optimizer: {

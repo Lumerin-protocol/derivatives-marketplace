@@ -1,7 +1,11 @@
 import type { PublicClient, WalletClient, Account, Chain } from "viem";
 import { erc20Abi } from "viem";
 import type pino from "pino";
-import { ierc20PermitAbi, ierc5267Abi, hashPowerPerpsDexAbi } from "./abi.ts";
+import { IERC20PermitAbi as ierc20PermitAbi } from "../../contracts/abi/IERC20Permit.ts";
+import { IERC5267Abi as ierc5267Abi } from "../../contracts/abi/IERC5267.ts";
+import { HashPowerPerpsDEXAbi as hashPowerPerpsDexAbi } from "../../contracts/abi/HashPowerPerpsDEX.ts";
+import { CollateralVaultAbi as collateralVaultAbi } from "../../contracts/abi/CollateralVault.ts";
+import type { PublicClient, WalletClient, Account, Chain } from "./client.ts";
 import type { InventoryManager } from "./inventoryManager.ts";
 
 const permitTypes = {
@@ -15,8 +19,9 @@ const permitTypes = {
 } as const;
 
 /**
- * Deposits the wallet's token balance into the perps contract as collateral
- * using ERC-2612 permit (no prior approval needed).
+ * Deposits the wallet's token balance into the CollateralVault as collateral
+ * using ERC-2612 permit (no prior approval needed). The spender on the permit
+ * is the vault itself, since the vault pulls the underlying token in `depositForPermit`.
  */
 export async function topUpCollateral(opts: {
   publicClient: PublicClient;
@@ -101,7 +106,7 @@ export async function topUpCollateral(opts: {
     domain,
     types: permitTypes,
     primaryType: "Permit",
-    message: { owner, spender: perpsAddress, value: amount, nonce, deadline },
+    message: { owner, spender: vaultAddress, value: amount, nonce, deadline },
   });
 
   const r = `0x${signature.slice(2, 66)}` as `0x${string}`;
@@ -109,10 +114,10 @@ export async function topUpCollateral(opts: {
   const v = Number.parseInt(signature.slice(130, 132), 16);
 
   const hash = await walletClient.writeContract({
-    address: perpsAddress,
-    abi: hashPowerPerpsDexAbi,
-    functionName: "addCollateralWithPermit",
-    args: [amount, deadline, v, r, s],
+    address: vaultAddress,
+    abi: collateralVaultAbi,
+    functionName: "depositForPermit",
+    args: [owner, amount, deadline, v, r, s],
     account,
     chain,
   });

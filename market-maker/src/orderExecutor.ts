@@ -1,4 +1,5 @@
-import { type PublicClient, type WalletClient, type Account, type Chain, encodeFunctionData } from "viem";
+import { encodeFunctionData } from "viem";
+import type { PublicClient, WalletClient, Account, Chain } from "./client.ts";
 import type { MakerConfig } from "./config.ts";
 import type { Quoter, DesiredQuotes, QuoteLevel } from "./quoter.ts";
 import type { BookTracker, OwnOrder } from "./bookTracker.ts";
@@ -6,7 +7,7 @@ import type { GasTracker } from "./gasTracker.ts";
 import type { RiskManager } from "./riskManager.ts";
 import type { OracleTracker } from "./oracleTracker.ts";
 import type pino from "pino";
-import { hashPowerPerpsDexAbi } from "./abi.ts";
+import { HashPowerPerpsDEXAbi as hashPowerPerpsDexAbi } from "../../contracts/abi/HashPowerPerpsDEX.ts";
 import { bigAbs } from "./math.ts";
 
 export class OrderExecutor {
