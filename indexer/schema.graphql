@@ -7,6 +7,8 @@ type Perps @entity(immutable: false) {
   contractAddress: Bytes!
   collateralToken: Bytes!
   priceOracle: Bytes!
+  collateralVault: Bytes!
+  portfolioMarginEngine: Bytes!
 
   # Constants
   quantityDecimals: Int!
@@ -49,11 +51,6 @@ type User @entity(immutable: false) {
   id: Bytes! # user address
   address: Bytes!
 
-  # Collateral
-  collateralBalance: BigInt!
-  totalDeposited: BigInt!
-  totalWithdrawn: BigInt!
-
   # Position state (current net position)
   netQuantity: BigInt!
   aggregatedEntryPrice: BigInt!
@@ -74,7 +71,6 @@ type User @entity(immutable: false) {
   orders: [Order!]! @derivedFrom(field: "user")
   trades: [Trade!]! @derivedFrom(field: "user")
   fills: [Fill!]! @derivedFrom(field: "user")
-  collateralEvents: [CollateralEvent!]! @derivedFrom(field: "user")
   fundingSettlements: [FundingSettlement!]! @derivedFrom(field: "user")
   badDebts: [BadDebtEvent!]! @derivedFrom(field: "user")
   liquidationsAsUser: [Liquidation!]! @derivedFrom(field: "user")
@@ -160,19 +156,6 @@ type Liquidation @entity(immutable: true) {
   positionSize: BigInt! # signed
   pnl: BigInt! # signed
   liquidatorFee: BigInt!
-
-  # Metadata
-  timestamp: BigInt!
-  blockNumber: BigInt!
-  transactionHash: Bytes!
-}
-
-# Collateral event (deposit or withdrawal)
-type CollateralEvent @entity(immutable: true) {
-  id: Bytes! # tx hash + log index
-  user: User!
-  amount: BigInt!
-  isDeposit: Boolean!
 
   # Metadata
   timestamp: BigInt!

@@ -1,6 +1,8 @@
 # Perps Indexer
 
-A Graph Protocol subgraph that indexes the `HashPowerPerpsDEX` contract, turning on-chain events into a queryable GraphQL API for orders, trades, positions, collateral, and liquidation data.
+A Graph Protocol subgraph that indexes the `HashPowerPerpsDEX` contract, turning on-chain events into a queryable GraphQL API for orders, trades, positions, and liquidation data.
+
+> Collateral balances and deposit/withdrawal history are not tracked here — those live on the shared `CollateralVault` and are indexed by the collateral-margin subgraph.
 
 ## Schema
 
@@ -9,13 +11,12 @@ A Graph Protocol subgraph that indexes the `HashPowerPerpsDEX` contract, turning
 | Entity | Mutability | Description |
 | --- | --- | --- |
 | **Perps** | mutable | Singleton (id=0). Contract config, pool balances, and global stats (total users/orders/trades/volume/liquidations). |
-| **User** | mutable | Per-address account: collateral balance, net position, order/trade counts, realized PnL, and relations to all other entities. |
+| **User** | mutable | Per-address account: net position, order/trade counts, realized PnL, and relations to all other entities. |
 | **Order** | mutable | An order on the book. Tracks price, quantity, buy/sell side, status (`ACTIVE` / `FILLED` / `CANCELLED` / `PARTIAL`), and fill progress. |
 | **Trade** | immutable | A matched trade between a buyer and seller with price, quantity, volume, and the maker order reference. |
 | **PositionSnapshot** | immutable | Position state after each trade: trade price/quantity and resulting net position with entry price. |
 | **PositionClose** | immutable | Emitted when a position is fully or partially closed: quantity closed and realized PnL. |
 | **Liquidation** | immutable | Liquidation event: user, liquidator, position size, PnL, and liquidator fee. |
-| **CollateralEvent** | immutable | Deposit or withdrawal of collateral. |
 | **PriceLevel** | mutable | Aggregated order book level: total quantity and order count at a given price and side (bid/ask). |
 
 ### Event Handlers
@@ -24,7 +25,6 @@ The subgraph listens to all `HashPowerPerpsDEX` contract events:
 
 - **Order events** — `OrderCreated`, `OrderFilled`, `OrderCancelled`, `OrderUpdated`, `OrderMatched`
 - **Position events** — `PositionTrade`, `PositionClosed`, `PositionLiquidated`
-- **Collateral events** — `CollateralAdded`, `CollateralRemoved`
 - **Config events** — `OrderFeeUpdated`, `MarginPercentUpdated`, `MaintenanceMarginPercentUpdated`, `LiquidationFeeUpdated`, `MinimumPriceIncrementUpdated`
 - **Lifecycle events** — `Initialized`
 
@@ -140,7 +140,6 @@ The ABI is read from `../contracts/abi/HashPowerPerpsDEX.json`, so the contracts
 ```graphql
 {
   user(id: "0x...") {
-    collateralBalance
     netQuantity
     aggregatedEntryPrice
     realizedPnl
@@ -186,7 +185,6 @@ The ABI is read from `../contracts/abi/HashPowerPerpsDEX.json`, so the contracts
     address
     netQuantity
     aggregatedEntryPrice
-    collateralBalance
     realizedPnl
   }
 }

@@ -25,7 +25,6 @@ dataSources:
         - PositionSnapshot
         - PositionClose
         - Liquidation
-        - CollateralEvent
         - PriceLevel
         - FundingUpdate
         - FundingSettlement
@@ -45,11 +44,6 @@ dataSources:
           handler: handleOrderMatched
         - event: PositionLiquidated(indexed address,indexed address,int256,int256,uint256)
           handler: handlePositionLiquidated
-        # Collateral events
-        - event: CollateralAdded(indexed address,uint256)
-          handler: handleCollateralAdded
-        - event: CollateralRemoved(indexed address,uint256)
-          handler: handleCollateralRemoved
         # Funding events
         - event: FundingUpdated(int256,int256,uint256)
           handler: handleFundingUpdated

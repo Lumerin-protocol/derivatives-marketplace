@@ -1,4 +1,10 @@
-import { BigInt, Address, Bytes, dataSource, log } from "@graphprotocol/graph-ts";
+import {
+  BigInt,
+  Address,
+  Bytes,
+  dataSource,
+  log,
+} from "@graphprotocol/graph-ts";
 import {
   Initialized,
   OrderCreated,
@@ -6,8 +12,6 @@ import {
   OrderUpdated,
   OrderMatched,
   PositionLiquidated,
-  CollateralAdded,
-  CollateralRemoved,
   MatchFeeUpdated,
   MarginPercentUpdated,
   MaintenanceMarginPercentUpdated,
@@ -26,7 +30,6 @@ import {
   Trade,
   Fill,
   Liquidation,
-  CollateralEvent,
   PriceLevel,
   FundingUpdate,
   FundingSettlement,
@@ -45,6 +48,8 @@ function getOrCreatePerps(): Perps {
     perps.contractAddress = dataSource.address();
     perps.collateralToken = Bytes.empty();
     perps.priceOracle = Bytes.empty();
+    perps.collateralVault = Bytes.empty();
+    perps.portfolioMarginEngine = Bytes.empty();
     perps.marginPercent = 0;
     perps.quantityDecimals = 0;
     perps.maintenanceMarginPercent = 0;
@@ -145,6 +150,16 @@ function loadPerpsFromContract(perps: Perps): void {
   if (!minimumMarginPerOrder.reverted) {
     perps.minimumMarginPerOrder = minimumMarginPerOrder.value;
   }
+
+  const vault = contract.try_vault();
+  if (!vault.reverted) {
+    perps.collateralVault = vault.value;
+  }
+
+  const portfolioMargin = contract.try_portfolioMargin();
+  if (!portfolioMargin.reverted) {
+    perps.portfolioMarginEngine = portfolioMargin.value;
+  }
 }
 
 function getOrCreateUser(address: Address, timestamp: BigInt): User {
@@ -152,9 +167,6 @@ function getOrCreateUser(address: Address, timestamp: BigInt): User {
   if (!user) {
     user = new User(address);
     user.address = address;
-    user.collateralBalance = BigInt.zero();
-    user.totalDeposited = BigInt.zero();
-    user.totalWithdrawn = BigInt.zero();
     user.netQuantity = BigInt.zero();
     user.aggregatedEntryPrice = BigInt.zero();
     user.currentPositionSessionId = "";
@@ -191,7 +203,9 @@ function getOrCreatePriceLevel(price: BigInt, isBid: boolean): PriceLevel {
 // ============ Event Handlers ============
 
 export function handleInitialized(event: Initialized): void {
-  log.info("HashPowerPerpsDEX initialized with version: {}", [event.params.version.toString()]);
+  log.info("HashPowerPerpsDEX initialized with version: {}", [
+    event.params.version.toString(),
+  ]);
 
   const perps = getOrCreatePerps();
   perps.initializedAt = event.block.timestamp;
@@ -486,7 +500,8 @@ function processUserMatch(
 
   const wasFlat = oldNetQuantity.equals(zero);
   const isNowFlat = newNetQuantity.equals(zero);
-  const positionFlipped = !wasFlat && !isNowFlat && !isSameSign(oldNetQuantity, newNetQuantity);
+  const positionFlipped =
+    !wasFlat && !isNowFlat && !isSameSign(oldNetQuantity, newNetQuantity);
   const isPositionClosed = isNowFlat || positionFlipped;
   const isPositionOpened = wasFlat || positionFlipped;
 
@@ -495,7 +510,9 @@ function processUserMatch(
     const absOld = absBigInt(oldNetQuantity);
     const settledAbs = minBigInt(absOld, absBigInt(tradeQty));
     const priceDiff = tradePrice.minus(oldEntryPrice);
-    const signedSettledQty = oldNetQuantity.gt(zero) ? settledAbs : settledAbs.neg();
+    const signedSettledQty = oldNetQuantity.gt(zero)
+      ? settledAbs
+      : settledAbs.neg();
     realizedPnl = priceDiff.times(signedSettledQty).div(quantityScale);
   }
 
@@ -594,7 +611,13 @@ function handleFlip(
       oldSession.save();
 
       const closeQty = tradeQty.gt(zero) ? absOld : absOld.neg();
-      const trade = getOrCreateTrade(txHash, user.id, oldSession.id, timestamp, blockNumber);
+      const trade = getOrCreateTrade(
+        txHash,
+        user.id,
+        oldSession.id,
+        timestamp,
+        blockNumber,
+      );
       const closeFill = new Fill(baseTradeId.concatI32(sideIndex * 2));
       closeFill.trade = trade.id;
       closeFill.user = user.id;
@@ -627,7 +650,10 @@ function handleFlip(
   user.realizedPnl = user.realizedPnl.plus(realizedPnl);
 
   // 2. Open new session
-  const newSessionId = positionSessionId(blockNumber, logIndex.toI32() * 2 + sideIndex);
+  const newSessionId = positionSessionId(
+    blockNumber,
+    logIndex.toI32() * 2 + sideIndex,
+  );
   const newSession = new PositionSession(newSessionId);
   newSession.status = "OPEN";
   newSession.user = user.id;
@@ -644,7 +670,13 @@ function handleFlip(
 
   user.currentPositionSessionId = newSessionId;
 
-  const trade = getOrCreateTrade(txHash, user.id, newSessionId, timestamp, blockNumber);
+  const trade = getOrCreateTrade(
+    txHash,
+    user.id,
+    newSessionId,
+    timestamp,
+    blockNumber,
+  );
   const openFill = new Fill(baseTradeId.concatI32(sideIndex * 2 + 1));
   openFill.trade = trade.id;
   openFill.user = user.id;
@@ -723,7 +755,11 @@ function handleNonFlip(
     session = loaded;
   }
 
-  session.entryPrice = newEntryPrice;
+  // On full close the contract emits newEntryPrice = 0; preserve the historical entry price
+  // so the closed session still reflects what the position was opened/scaled at.
+  if (!isPositionClosed) {
+    session.entryPrice = newEntryPrice;
+  }
   session.lastTradeAt = timestamp;
 
   const absAfter = absBigInt(newNetQuantity);
@@ -757,7 +793,13 @@ function handleNonFlip(
 
   session.save();
 
-  const trade = getOrCreateTrade(txHash, user.id, session.id, timestamp, blockNumber);
+  const trade = getOrCreateTrade(
+    txHash,
+    user.id,
+    session.id,
+    timestamp,
+    blockNumber,
+  );
   const fill = new Fill(baseTradeId.concatI32(sideIndex));
   fill.trade = trade.id;
   fill.user = user.id;
@@ -797,7 +839,10 @@ export function handlePositionLiquidated(event: PositionLiquidated): void {
   ]);
 
   const user = getOrCreateUser(event.params.user, event.block.timestamp);
-  const liquidator = getOrCreateUser(event.params.liquidator, event.block.timestamp);
+  const liquidator = getOrCreateUser(
+    event.params.liquidator,
+    event.block.timestamp,
+  );
 
   // Create liquidation record
   const liqId = createEventId(event.transaction.hash, event.logIndex);
@@ -839,58 +884,6 @@ export function handlePositionLiquidated(event: PositionLiquidated): void {
   perps.save();
 }
 
-export function handleCollateralAdded(event: CollateralAdded): void {
-  log.info("Collateral added: user {} amount {}", [
-    event.params.user.toHexString(),
-    event.params.amount.toString(),
-  ]);
-
-  const user = getOrCreateUser(event.params.user, event.block.timestamp);
-
-  // Create collateral event
-  const eventId = createEventId(event.transaction.hash, event.logIndex);
-  const collateralEvent = new CollateralEvent(eventId);
-  collateralEvent.user = user.id;
-  collateralEvent.amount = event.params.amount;
-  collateralEvent.isDeposit = true;
-  collateralEvent.timestamp = event.block.timestamp;
-  collateralEvent.blockNumber = event.block.number;
-  collateralEvent.transactionHash = event.transaction.hash;
-  collateralEvent.save();
-
-  // Update user
-  user.collateralBalance = user.collateralBalance.plus(event.params.amount);
-  user.totalDeposited = user.totalDeposited.plus(event.params.amount);
-  user.lastActivityAt = event.block.timestamp;
-  user.save();
-}
-
-export function handleCollateralRemoved(event: CollateralRemoved): void {
-  log.info("Collateral removed: user {} amount {}", [
-    event.params.user.toHexString(),
-    event.params.amount.toString(),
-  ]);
-
-  const user = getOrCreateUser(event.params.user, event.block.timestamp);
-
-  // Create collateral event
-  const eventId = createEventId(event.transaction.hash, event.logIndex);
-  const collateralEvent = new CollateralEvent(eventId);
-  collateralEvent.user = user.id;
-  collateralEvent.amount = event.params.amount;
-  collateralEvent.isDeposit = false;
-  collateralEvent.timestamp = event.block.timestamp;
-  collateralEvent.blockNumber = event.block.number;
-  collateralEvent.transactionHash = event.transaction.hash;
-  collateralEvent.save();
-
-  // Update user
-  user.collateralBalance = user.collateralBalance.minus(event.params.amount);
-  user.totalWithdrawn = user.totalWithdrawn.plus(event.params.amount);
-  user.lastActivityAt = event.block.timestamp;
-  user.save();
-}
-
 // ============ Funding Event Handlers ============
 
 export function handleFundingUpdated(event: FundingUpdated): void {
@@ -903,7 +896,8 @@ export function handleFundingUpdated(event: FundingUpdated): void {
   const eventId = createEventId(event.transaction.hash, event.logIndex);
   const fundingUpdate = new FundingUpdate(eventId);
   fundingUpdate.fundingRate = event.params.fundingRate;
-  fundingUpdate.cumulativeFundingPerUnit = event.params.cumulativeFundingPerUnit;
+  fundingUpdate.cumulativeFundingPerUnit =
+    event.params.cumulativeFundingPerUnit;
   fundingUpdate.timestamp = event.params.timestamp;
   fundingUpdate.blockNumber = event.block.number;
   fundingUpdate.transactionHash = event.transaction.hash;
@@ -944,9 +938,13 @@ export function handleFundingSettled(event: FundingSettled): void {
   settlement.save();
 
   if (event.params.amount.gt(BigInt.zero())) {
-    user.totalFundingReceived = user.totalFundingReceived.plus(event.params.amount);
+    user.totalFundingReceived = user.totalFundingReceived.plus(
+      event.params.amount,
+    );
   } else {
-    user.totalFundingPaid = user.totalFundingPaid.plus(event.params.amount.neg());
+    user.totalFundingPaid = user.totalFundingPaid.plus(
+      event.params.amount.neg(),
+    );
   }
   user.lastActivityAt = event.block.timestamp;
   user.save();
@@ -990,7 +988,9 @@ export function handleMatchFeeUpdated(event: MatchFeeUpdated): void {
 }
 
 export function handleMarginPercentUpdated(event: MarginPercentUpdated): void {
-  log.info("Margin percent updated: {}", [event.params.newMarginPercent.toString()]);
+  log.info("Margin percent updated: {}", [
+    event.params.newMarginPercent.toString(),
+  ]);
   const perps = getOrCreatePerps();
   perps.marginPercent = event.params.newMarginPercent;
   perps.lastUpdatedAt = event.block.timestamp;
@@ -1009,15 +1009,21 @@ export function handleMaintenanceMarginPercentUpdated(
   perps.save();
 }
 
-export function handleLiquidationFeeUpdated(event: LiquidationFeeUpdated): void {
-  log.info("Liquidation fee updated: {}", [event.params.newLiquidationFee.toString()]);
+export function handleLiquidationFeeUpdated(
+  event: LiquidationFeeUpdated,
+): void {
+  log.info("Liquidation fee updated: {}", [
+    event.params.newLiquidationFee.toString(),
+  ]);
   const perps = getOrCreatePerps();
   perps.liquidationFee = event.params.newLiquidationFee;
   perps.lastUpdatedAt = event.block.timestamp;
   perps.save();
 }
 
-export function handleFundingParametersUpdated(event: FundingParametersUpdated): void {
+export function handleFundingParametersUpdated(
+  event: FundingParametersUpdated,
+): void {
   log.info("Funding parameters updated: maxBps {} period {}", [
     event.params.maxBps.toString(),
     event.params.period.toString(),
@@ -1029,7 +1035,9 @@ export function handleFundingParametersUpdated(event: FundingParametersUpdated):
   perps.save();
 }
 
-export function handleMinimumMarginPerOrderUpdated(event: MinimumMarginPerOrderUpdated): void {
+export function handleMinimumMarginPerOrderUpdated(
+  event: MinimumMarginPerOrderUpdated,
+): void {
   log.info("Minimum margin per order updated: {}", [
     event.params.newMinimumMarginPerOrder.toString(),
   ]);

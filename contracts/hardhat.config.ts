@@ -22,6 +22,8 @@ export default defineConfig({
       "CollateralVault",
       "AggregatorV3Interface",
       "Multicall3",
+      "PriceOracleMock",
+      "USDCMock",
     ],
   },
   paths: {

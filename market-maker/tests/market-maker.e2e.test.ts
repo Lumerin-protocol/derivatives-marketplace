@@ -1,6 +1,7 @@
 import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { getContract, parseUnits } from "viem";
+import { parseUnits } from "viem";
+import { getContract } from "../src/client.ts";
 import pino from "pino";
 
 import { OracleTracker } from "../src/oracleTracker.ts";
@@ -15,7 +16,13 @@ import type { MakerConfig } from "../src/config.ts";
 import { HashPowerPerpsDEXAbi as hashPowerPerpsDexAbi } from "../../contracts/abi/HashPowerPerpsDEX.ts";
 import { PriceOracleMockAbi as priceOracleMockAbi } from "../../contracts/abi/PriceOracleMock.ts";
 import { hardhat } from "../src/client.ts";
-import { startHardhatNode, createMakerConfig, loadFixture, type HardhatNode } from "./helpers.ts";
+import {
+  startHardhatNode,
+  createMakerConfig,
+  loadFixture,
+  type HardhatNode,
+} from "./helpers.ts";
+import { createTestPublicClient } from "../src/client.ts";
 import { deployWithCollateralFixture } from "../../contracts/fixtures/viem.ts";
 
 const silentLogger = pino({ level: "silent" });
@@ -51,16 +58,29 @@ function createStack(
   const { clients, contracts } = deployment;
   const config = createMakerConfig(contracts.perpsAddress, configOverrides);
 
-  const { publicClient } = clients;
+  const publicClient = createTestPublicClient();
   const mmWallet = clients.buyer2Wallet;
   const mmAddress = mmWallet.account.address;
 
   const oracle = new OracleTracker(publicClient, config, silentLogger);
   const gas = new GasTracker(publicClient, config, silentLogger);
   const book = new BookTracker(publicClient, config, mmAddress, silentLogger);
-  const inventory = new InventoryManager(publicClient, config, mmAddress, silentLogger);
+  const inventory = new InventoryManager(
+    publicClient,
+    config,
+    mmAddress,
+    silentLogger,
+  );
   const risk = new RiskManager(config, inventory, gas, oracle, silentLogger);
-  const quoter = new Quoter(publicClient, config, oracle, gas, inventory, risk, silentLogger);
+  const quoter = new Quoter(
+    publicClient,
+    config,
+    oracle,
+    gas,
+    inventory,
+    risk,
+    silentLogger,
+  );
   const executor = new OrderExecutor(
     publicClient,
     mmWallet,
@@ -74,9 +94,27 @@ function createStack(
     oracle,
     silentLogger,
   );
-  const health = new HealthCheck(config, oracle, inventory, book, gas, risk, silentLogger);
+  const health = new HealthCheck(
+    config,
+    oracle,
+    inventory,
+    book,
+    gas,
+    risk,
+    silentLogger,
+  );
 
-  return { config, oracle, gas, book, inventory, risk, quoter, executor, health };
+  return {
+    config,
+    oracle,
+    gas,
+    book,
+    inventory,
+    risk,
+    quoter,
+    executor,
+    health,
+  };
 }
 
 async function initStack(stack: MakerStack): Promise<void> {
@@ -116,9 +154,13 @@ describe("MM quoting", () => {
   });
 
   it("should read real oracle price", async () => {
-    assert.ok(stack.oracle.currentPrice > 0n, "oracle price should be positive");
+    assert.ok(
+      stack.oracle.currentPrice > 0n,
+      "oracle price should be positive",
+    );
 
-    const onChainPrice = await deployment.clients.publicClient.readContract({
+    const publicClient = createTestPublicClient();
+    const onChainPrice = await publicClient.readContract({
       address: deployment.contracts.perpsAddress,
       abi: hashPowerPerpsDexAbi,
       functionName: "getMarketPrice",
@@ -139,7 +181,10 @@ describe("MM quoting", () => {
     (stack.book as unknown as { lastResyncAt: number }).lastResyncAt = 0;
     await stack.book.refresh();
 
-    assert.ok(stack.book.ownOrders.size > 0, "MM should have resting orders on the book");
+    assert.ok(
+      stack.book.ownOrders.size > 0,
+      "MM should have resting orders on the book",
+    );
   });
 
   it("should place bids below and asks above oracle price", async () => {
@@ -148,11 +193,17 @@ describe("MM quoting", () => {
 
     const oraclePrice = stack.oracle.currentPrice;
     for (const bid of desired.bids) {
-      assert.ok(bid.price < oraclePrice, `bid ${bid.price} should be below oracle ${oraclePrice}`);
+      assert.ok(
+        bid.price < oraclePrice,
+        `bid ${bid.price} should be below oracle ${oraclePrice}`,
+      );
       assert.ok(bid.quantity > 0n, "bid quantity should be positive");
     }
     for (const ask of desired.asks) {
-      assert.ok(ask.price > oraclePrice, `ask ${ask.price} should be above oracle ${oraclePrice}`);
+      assert.ok(
+        ask.price > oraclePrice,
+        `ask ${ask.price} should be above oracle ${oraclePrice}`,
+      );
       assert.ok(ask.quantity < 0n, "ask quantity should be negative");
     }
   });
@@ -181,13 +232,20 @@ describe("MM quoting", () => {
 
     (stack.book as unknown as { lastResyncAt: number }).lastResyncAt = 0;
     await stack.book.refresh();
-    assert.ok(stack.book.ownOrders.size > 0, "should have orders before cancel");
+    assert.ok(
+      stack.book.ownOrders.size > 0,
+      "should have orders before cancel",
+    );
 
     await stack.executor.cancelAll();
 
     (stack.book as unknown as { lastResyncAt: number }).lastResyncAt = 0;
     await stack.book.refresh();
-    assert.equal(stack.book.ownOrders.size, 0, "all orders should be cancelled");
+    assert.equal(
+      stack.book.ownOrders.size,
+      0,
+      "all orders should be cancelled",
+    );
   });
 
   it("should not place orders in dry-run mode", async () => {
@@ -200,7 +258,11 @@ describe("MM quoting", () => {
 
     (stack.book as unknown as { lastResyncAt: number }).lastResyncAt = 0;
     await stack.book.refresh();
-    assert.equal(stack.book.ownOrders.size, 0, "dry run should not place real orders");
+    assert.equal(
+      stack.book.ownOrders.size,
+      0,
+      "dry run should not place real orders",
+    );
   });
 });
 
@@ -240,14 +302,19 @@ describe("MM fill handling", () => {
 
     await (
       perps as unknown as {
-        write: { createOrder: (args: [bigint, bigint], opts: unknown) => Promise<void> };
+        write: {
+          createOrder: (args: [bigint, bigint], opts: unknown) => Promise<void>;
+        };
       }
     ).write.createOrder([bestAsk.price, takerQty], {
       account: deployment.clients.buyerWallet.account,
     });
 
     await stack.inventory.update();
-    assert.ok(stack.inventory.netQuantity < 0n, "MM should be short after selling to taker");
+    assert.ok(
+      stack.inventory.netQuantity < 0n,
+      "MM should be short after selling to taker",
+    );
     assert.ok(stack.inventory.hasPosition, "MM should have a position");
   });
 
@@ -260,7 +327,9 @@ describe("MM fill handling", () => {
     const takerQty = parseUnits("1", deployment.config.quantityDecimals);
     await (
       perps as unknown as {
-        write: { createOrder: (args: [bigint, bigint], opts: unknown) => Promise<void> };
+        write: {
+          createOrder: (args: [bigint, bigint], opts: unknown) => Promise<void>;
+        };
       }
     ).write.createOrder([bestAsk.price, takerQty], {
       account: deployment.clients.buyerWallet.account,
@@ -288,7 +357,10 @@ describe("MM requote on price change", () => {
 
   beforeEach(async () => {
     deployment = await loadFixture(deployWithCollateralFixture);
-    stack = createStack(deployment, { requoteCooldownMs: 0, requoteThresholdTicks: 1 });
+    stack = createStack(deployment, {
+      requoteCooldownMs: 0,
+      requoteThresholdTicks: 1,
+    });
     await initStack(stack);
   });
 
@@ -319,8 +391,14 @@ describe("MM requote on price change", () => {
     await stack.oracle.update();
     const desired2 = stack.quoter.computeQuotes();
 
-    assert.ok(desired2.bids[0].price > bid1, "bid should move up with higher oracle");
-    assert.ok(desired2.asks[0].price > ask1, "ask should move up with higher oracle");
+    assert.ok(
+      desired2.bids[0].price > bid1,
+      "bid should move up with higher oracle",
+    );
+    assert.ok(
+      desired2.asks[0].price > ask1,
+      "ask should move up with higher oracle",
+    );
   });
 });
 
@@ -357,7 +435,10 @@ describe("MM risk controls", () => {
   });
 
   it("should block bid side when at max long position", async () => {
-    stack = createStack(deployment, { maxPositionSize: 1n, maxUtilizationPct: 90 });
+    stack = createStack(deployment, {
+      maxPositionSize: 1n,
+      maxUtilizationPct: 90,
+    });
     await initStack(stack);
 
     // Simulate a long position by setting inventory
@@ -370,7 +451,10 @@ describe("MM risk controls", () => {
   });
 
   it("should block ask side when at max short position", async () => {
-    stack = createStack(deployment, { maxPositionSize: 1n, maxUtilizationPct: 90 });
+    stack = createStack(deployment, {
+      maxPositionSize: 1n,
+      maxUtilizationPct: 90,
+    });
     await initStack(stack);
 
     stack.inventory.netQuantity = -1n;
@@ -403,7 +487,11 @@ describe("MM risk controls", () => {
 
     (stack.book as unknown as { lastResyncAt: number }).lastResyncAt = 0;
     await stack.book.refresh();
-    assert.equal(stack.book.ownOrders.size, 0, "all orders cancelled after halt");
+    assert.equal(
+      stack.book.ownOrders.size,
+      0,
+      "all orders cancelled after halt",
+    );
   });
 });
 
@@ -432,8 +520,14 @@ describe("MM health endpoint", () => {
 
     const body = await res.json();
     assert.equal(body.status, "running");
-    assert.ok(BigInt(body.market.oraclePrice) > 0n, "oraclePrice should be positive");
-    assert.ok(BigInt(body.inventory.collateralBalance) > 0n, "collateral should be positive");
+    assert.ok(
+      BigInt(body.market.oraclePrice) > 0n,
+      "oraclePrice should be positive",
+    );
+    assert.ok(
+      BigInt(body.inventory.collateralBalance) > 0n,
+      "collateral should be positive",
+    );
     assert.equal(body.gas.gasSpiking, false);
     assert.equal(body.config.dryRun, false);
     assert.ok(typeof body.uptimeSeconds === "number");
@@ -513,7 +607,10 @@ describe("MM full tick cycle", () => {
 
     (stack.book as unknown as { lastResyncAt: number }).lastResyncAt = 0;
     await stack.book.refresh();
-    assert.ok(stack.book.ownOrders.size > 0, "should have orders after multiple ticks");
+    assert.ok(
+      stack.book.ownOrders.size > 0,
+      "should have orders after multiple ticks",
+    );
   });
 
   it("should survive oracle price going to zero gracefully", async () => {
