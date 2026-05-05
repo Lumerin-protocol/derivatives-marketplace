@@ -23,7 +23,7 @@ perpskeeper_service = {
 
 # Configure MarketMaker Service
 marketmaker_service = {
-  create                   = true
+  create                   = false
   ghcr_repo                = "ghcr.io/lumerin-protocol/perps-market-maker"
   ghcr_imagetag            = "dev-latest"
   svc_name                 = "perps-mktmkr"
