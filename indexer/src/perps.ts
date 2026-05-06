@@ -735,6 +735,10 @@ function handleNonFlip(
     session = new PositionSession(id);
     session.status = "OPEN";
     session.user = user.id;
+    // Always initialize entryPrice for newly created sessions.
+    // This also covers flat-to-flat/self-match flows where the session
+    // is opened and closed within the same event.
+    session.entryPrice = newEntryPrice;
     session.openedAt = timestamp;
     session.closePrice = zero;
     session.closedQuantity = zero;
