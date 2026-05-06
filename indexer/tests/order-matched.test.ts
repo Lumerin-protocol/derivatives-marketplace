@@ -150,6 +150,51 @@ describe("handleOrderMatched", () => {
     assert.fieldEquals("Fill", takerFillId, "trade", takerTradeId);
   });
 
+  test("handles self-match flat-to-flat without missing session entryPrice", () => {
+    const selfTrader = userAddress(7);
+    const price = BigInt.fromI32(3000000);
+    const qty = BigInt.fromI32(1000000);
+    const txHash = orderId(700);
+    const logIndex = BigInt.fromI32(56);
+
+    const event = createOrderMatchedEvent(
+      orderId(701),
+      selfTrader,
+      selfTrader,
+      price,
+      qty,
+      BigInt.zero(),
+      BigInt.zero(),
+      BigInt.zero(),
+      BigInt.zero(),
+      BigInt.zero(),
+      BigInt.zero(),
+    );
+    event.logIndex = logIndex;
+    event.transaction.hash = txHash;
+    handleOrderMatched(event);
+
+    const takerSessionId = positionSessionId(
+      event.block.number,
+      event.logIndex.toI32() * 2,
+    );
+    const makerSessionId = positionSessionId(
+      event.block.number,
+      event.logIndex.toI32() * 2 + 1,
+    );
+
+    assert.fieldEquals("PositionSession", takerSessionId, "status", "CLOSE");
+    assert.fieldEquals("PositionSession", takerSessionId, "entryPrice", "0");
+    assert.fieldEquals("PositionSession", makerSessionId, "status", "CLOSE");
+    assert.fieldEquals("PositionSession", makerSessionId, "entryPrice", "0");
+
+    assert.fieldEquals("User", selfTrader.toHexString(), "netQuantity", "0");
+    assert.fieldEquals("User", selfTrader.toHexString(), "aggregatedEntryPrice", "0");
+    assert.fieldEquals("User", selfTrader.toHexString(), "currentPositionSessionId", "");
+    assert.entityCount("Trade", 1);
+    assert.entityCount("Fill", 2);
+  });
+
   test("computes realized PnL when closing a long position", () => {
     const maker1 = userAddress(1);
     const trader = userAddress(2);
