@@ -41,6 +41,7 @@ describe("handleOrderCreated", () => {
     assert.fieldEquals("Order", id.toHexString(), "quantity", event.params.quantity.toString());
     assert.fieldEquals("Order", id.toHexString(), "originalQuantity", event.params.quantity.toString());
     assert.fieldEquals("Order", id.toHexString(), "filledQuantity", "0");
+    assert.fieldEquals("Order", id.toHexString(), "averageFillPrice", "0");
     assert.fieldEquals("Order", id.toHexString(), "user", address.toHexString());
     assert.fieldEquals("Order", id.toHexString(), "createdAt", event.block.timestamp.toString());
     assert.fieldEquals("Order", id.toHexString(), "updatedAt", event.block.timestamp.toString());
@@ -66,6 +67,19 @@ describe("handleOrderCreated", () => {
     assert.fieldEquals("User", address.toHexString(), "address", address.toHexString());
     assert.fieldEquals("User", address.toHexString(), "createdAt", event.block.timestamp.toString());
     assert.fieldEquals("User", address.toHexString(), "lastActivityAt", event.block.timestamp.toString());
+    assert.fieldEquals("User", address.toHexString(), "lastCreatedOrderId", id.toHexString());
+  });
+
+  test("lastCreatedOrderId always points at the user's most recent order", () => {
+    const address = userAddress(1);
+    const first = orderId(1);
+    const second = orderId(2);
+
+    handleOrderCreated(createOrderCreatedEvent(first, address, BigInt.fromI32(3000000), BigInt.fromI32(1000000)));
+    assert.fieldEquals("User", address.toHexString(), "lastCreatedOrderId", first.toHexString());
+
+    handleOrderCreated(createOrderCreatedEvent(second, address, BigInt.fromI32(3100000), BigInt.fromI32(-500000)));
+    assert.fieldEquals("User", address.toHexString(), "lastCreatedOrderId", second.toHexString());
   });
 
   test("creates sell order and ask price level", () => {

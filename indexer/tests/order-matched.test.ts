@@ -4,7 +4,16 @@ import { newTypedMockEventWithParams } from "matchstick-as/assembly/defaults";
 import { handleOrderMatched } from "../src/perps";
 import { OrderMatched } from "../generated/HashPowerPerpsDEX/HashPowerPerpsDEX";
 import { assert } from "matchstick-as/assembly/index";
-import { userAddress, orderId, paramAddr, paramBytes, paramUint, paramInt, setupDataSourceMock, setupPerps } from "./helpers";
+import {
+  userAddress,
+  orderId,
+  paramAddr,
+  paramBytes,
+  paramUint,
+  paramInt,
+  setupDataSourceMock,
+  setupPerps,
+} from "./helpers";
 import { positionSessionId, createEventId } from "../src/ids";
 
 function createOrderMatchedEvent(
@@ -51,9 +60,17 @@ describe("handleOrderMatched", () => {
 
     // Taker buys (+qty), maker sells (-qty)
     const event = createOrderMatchedEvent(
-      mOid, maker, taker, price,
-      qty, BigInt.zero(), BigInt.zero(),
-      qty.neg(), qty, price, price,
+      mOid,
+      maker,
+      taker,
+      price,
+      qty,
+      BigInt.zero(),
+      BigInt.zero(),
+      qty.neg(),
+      qty,
+      price,
+      price,
     );
     handleOrderMatched(event);
 
@@ -82,12 +99,18 @@ describe("handleOrderMatched", () => {
     assert.fieldEquals("Fill", takerFillId, "aggregatedEntryPriceAfter", price.toString());
     assert.fieldEquals("Fill", takerFillId, "realizedPnl", "0");
     assert.fieldEquals("Fill", takerFillId, "tradingFee", "0");
+    assert.fieldEquals("Fill", takerFillId, "side", "TAKER");
     assert.fieldEquals("Fill", takerFillId, "user", taker.toHexString());
     assert.fieldEquals("Fill", takerFillId, "counterparty", maker.toHexString());
-    assert.fieldEquals("Fill", takerFillId, "makerOrderId", mOid.toHexString());
+    assert.fieldEquals("Fill", takerFillId, "counterpartyOrder", mOid.toHexString());
     assert.fieldEquals("Fill", takerFillId, "timestamp", event.block.timestamp.toString());
     assert.fieldEquals("Fill", takerFillId, "blockNumber", event.block.number.toString());
-    assert.fieldEquals("Fill", takerFillId, "transactionHash", event.transaction.hash.toHexString());
+    assert.fieldEquals(
+      "Fill",
+      takerFillId,
+      "transactionHash",
+      event.transaction.hash.toHexString(),
+    );
 
     // Maker fill (seller, -qty)
     assert.fieldEquals("Fill", makerFillId, "fillPrice", price.toString());
@@ -96,9 +119,10 @@ describe("handleOrderMatched", () => {
     assert.fieldEquals("Fill", makerFillId, "aggregatedEntryPriceAfter", price.toString());
     assert.fieldEquals("Fill", makerFillId, "realizedPnl", "0");
     assert.fieldEquals("Fill", makerFillId, "tradingFee", "0");
+    assert.fieldEquals("Fill", makerFillId, "side", "MAKER");
     assert.fieldEquals("Fill", makerFillId, "user", maker.toHexString());
     assert.fieldEquals("Fill", makerFillId, "counterparty", taker.toHexString());
-    assert.fieldEquals("Fill", makerFillId, "makerOrderId", mOid.toHexString());
+    assert.fieldEquals("Fill", makerFillId, "order", mOid.toHexString());
 
     // Session IDs
     const takerSessionId = positionSessionId(event.block.number, event.logIndex.toI32() * 2);
@@ -117,7 +141,12 @@ describe("handleOrderMatched", () => {
     assert.fieldEquals("Trade", takerTradeId, "fillCount", "1");
     assert.fieldEquals("Trade", takerTradeId, "timestamp", event.block.timestamp.toString());
     assert.fieldEquals("Trade", takerTradeId, "blockNumber", event.block.number.toString());
-    assert.fieldEquals("Trade", takerTradeId, "transactionHash", event.transaction.hash.toHexString());
+    assert.fieldEquals(
+      "Trade",
+      takerTradeId,
+      "transactionHash",
+      event.transaction.hash.toHexString(),
+    );
 
     // Trade assertions (maker)
     const makerTradeId = event.transaction.hash.concat(maker).toHexString();
@@ -139,8 +168,18 @@ describe("handleOrderMatched", () => {
     assert.fieldEquals("PositionSession", takerSessionId, "realizedPnl", "0");
     assert.fieldEquals("PositionSession", takerSessionId, "tradingFees", "0");
     assert.fieldEquals("PositionSession", takerSessionId, "fundingFees", "0");
-    assert.fieldEquals("PositionSession", takerSessionId, "openedAt", event.block.timestamp.toString());
-    assert.fieldEquals("PositionSession", takerSessionId, "lastTradeAt", event.block.timestamp.toString());
+    assert.fieldEquals(
+      "PositionSession",
+      takerSessionId,
+      "openedAt",
+      event.block.timestamp.toString(),
+    );
+    assert.fieldEquals(
+      "PositionSession",
+      takerSessionId,
+      "lastTradeAt",
+      event.block.timestamp.toString(),
+    );
 
     // User currentPositionSessionId
     assert.fieldEquals("User", taker.toHexString(), "currentPositionSessionId", takerSessionId);
@@ -174,14 +213,8 @@ describe("handleOrderMatched", () => {
     event.transaction.hash = txHash;
     handleOrderMatched(event);
 
-    const takerSessionId = positionSessionId(
-      event.block.number,
-      event.logIndex.toI32() * 2,
-    );
-    const makerSessionId = positionSessionId(
-      event.block.number,
-      event.logIndex.toI32() * 2 + 1,
-    );
+    const takerSessionId = positionSessionId(event.block.number, event.logIndex.toI32() * 2);
+    const makerSessionId = positionSessionId(event.block.number, event.logIndex.toI32() * 2 + 1);
 
     assert.fieldEquals("PositionSession", takerSessionId, "status", "CLOSE");
     assert.fieldEquals("PositionSession", takerSessionId, "entryPrice", "0");
@@ -205,9 +238,17 @@ describe("handleOrderMatched", () => {
 
     // Open: trader (taker) buys +qty at entryPrice
     const openEvent = createOrderMatchedEvent(
-      orderId(1), maker1, trader, entryPrice,
-      qty, BigInt.zero(), BigInt.zero(),
-      qty.neg(), qty, entryPrice, entryPrice,
+      orderId(1),
+      maker1,
+      trader,
+      entryPrice,
+      qty,
+      BigInt.zero(),
+      BigInt.zero(),
+      qty.neg(),
+      qty,
+      entryPrice,
+      entryPrice,
     );
     openEvent.logIndex = BigInt.fromI32(1);
     openEvent.transaction.hash = orderId(100);
@@ -217,9 +258,17 @@ describe("handleOrderMatched", () => {
 
     // Close: trader (taker) sells -qty at exitPrice
     const closeEvent = createOrderMatchedEvent(
-      orderId(2), maker2, trader, exitPrice,
-      qty.neg(), BigInt.zero(), BigInt.zero(),
-      qty, BigInt.zero(), exitPrice, BigInt.zero(),
+      orderId(2),
+      maker2,
+      trader,
+      exitPrice,
+      qty.neg(),
+      BigInt.zero(),
+      BigInt.zero(),
+      qty,
+      BigInt.zero(),
+      exitPrice,
+      BigInt.zero(),
     );
     closeEvent.logIndex = BigInt.fromI32(2);
     closeEvent.transaction.hash = orderId(101);
@@ -241,9 +290,17 @@ describe("handleOrderMatched", () => {
 
     // First fill: taker buys 1 unit at 3000000
     const event1 = createOrderMatchedEvent(
-      orderId(1), maker1, taker, price1,
-      qty, BigInt.zero(), BigInt.zero(),
-      qty.neg(), qty, price1, price1,
+      orderId(1),
+      maker1,
+      taker,
+      price1,
+      qty,
+      BigInt.zero(),
+      BigInt.zero(),
+      qty.neg(),
+      qty,
+      price1,
+      price1,
     );
     event1.logIndex = BigInt.fromI32(1);
     event1.transaction.hash = orderId(100);
@@ -251,9 +308,17 @@ describe("handleOrderMatched", () => {
 
     // Second fill: taker buys 1 unit at 3200000, avg entry = 3100000
     const event2 = createOrderMatchedEvent(
-      orderId(2), maker2, taker, price2,
-      qty, BigInt.zero(), BigInt.zero(),
-      qty.neg(), qty.plus(qty), price2, avgPrice,
+      orderId(2),
+      maker2,
+      taker,
+      price2,
+      qty,
+      BigInt.zero(),
+      BigInt.zero(),
+      qty.neg(),
+      qty.plus(qty),
+      price2,
+      avgPrice,
     );
     event2.logIndex = BigInt.fromI32(2);
     event2.transaction.hash = orderId(101);
@@ -276,18 +341,34 @@ describe("handleOrderMatched", () => {
     const txHash = orderId(100);
 
     const event1 = createOrderMatchedEvent(
-      orderId(1), maker1, taker, price,
-      qty1, BigInt.zero(), BigInt.zero(),
-      qty1.neg(), qty1, price, price,
+      orderId(1),
+      maker1,
+      taker,
+      price,
+      qty1,
+      BigInt.zero(),
+      BigInt.zero(),
+      qty1.neg(),
+      qty1,
+      price,
+      price,
     );
     event1.logIndex = BigInt.fromI32(1);
     event1.transaction.hash = txHash;
     handleOrderMatched(event1);
 
     const event2 = createOrderMatchedEvent(
-      orderId(2), maker2, taker, price,
-      qty2, BigInt.zero(), BigInt.zero(),
-      qty2.neg(), qty1.plus(qty2), price, price,
+      orderId(2),
+      maker2,
+      taker,
+      price,
+      qty2,
+      BigInt.zero(),
+      BigInt.zero(),
+      qty2.neg(),
+      qty1.plus(qty2),
+      price,
+      price,
     );
     event2.logIndex = BigInt.fromI32(2);
     event2.transaction.hash = txHash;
@@ -309,9 +390,17 @@ describe("handleOrderMatched", () => {
     const qty = BigInt.fromI32(1000000);
 
     const openEvent = createOrderMatchedEvent(
-      orderId(1), maker1, trader, entryPrice,
-      qty, BigInt.zero(), BigInt.zero(),
-      qty.neg(), qty, entryPrice, entryPrice,
+      orderId(1),
+      maker1,
+      trader,
+      entryPrice,
+      qty,
+      BigInt.zero(),
+      BigInt.zero(),
+      qty.neg(),
+      qty,
+      entryPrice,
+      entryPrice,
     );
     openEvent.logIndex = BigInt.fromI32(1);
     openEvent.transaction.hash = orderId(100);
@@ -320,14 +409,27 @@ describe("handleOrderMatched", () => {
     const sessionId = positionSessionId(openEvent.block.number, openEvent.logIndex.toI32() * 2);
     assert.fieldEquals("PositionSession", sessionId, "status", "OPEN");
     assert.fieldEquals("PositionSession", sessionId, "entryPrice", entryPrice.toString());
-    assert.fieldEquals("PositionSession", sessionId, "openedAt", openEvent.block.timestamp.toString());
+    assert.fieldEquals(
+      "PositionSession",
+      sessionId,
+      "openedAt",
+      openEvent.block.timestamp.toString(),
+    );
     assert.fieldEquals("PositionSession", sessionId, "user", trader.toHexString());
     assert.fieldEquals("User", trader.toHexString(), "currentPositionSessionId", sessionId);
 
     const closeEvent = createOrderMatchedEvent(
-      orderId(2), maker2, trader, exitPrice,
-      qty.neg(), BigInt.zero(), BigInt.zero(),
-      qty, BigInt.zero(), exitPrice, BigInt.zero(),
+      orderId(2),
+      maker2,
+      trader,
+      exitPrice,
+      qty.neg(),
+      BigInt.zero(),
+      BigInt.zero(),
+      qty,
+      BigInt.zero(),
+      exitPrice,
+      BigInt.zero(),
     );
     closeEvent.logIndex = BigInt.fromI32(2);
     closeEvent.transaction.hash = orderId(101);
@@ -340,7 +442,12 @@ describe("handleOrderMatched", () => {
     assert.fieldEquals("PositionSession", sessionId, "closePrice", exitPrice.toString());
     assert.fieldEquals("PositionSession", sessionId, "maxQuantity", qty.toString());
     assert.fieldEquals("PositionSession", sessionId, "tradingFees", "0");
-    assert.fieldEquals("PositionSession", sessionId, "lastTradeAt", closeEvent.block.timestamp.toString());
+    assert.fieldEquals(
+      "PositionSession",
+      sessionId,
+      "lastTradeAt",
+      closeEvent.block.timestamp.toString(),
+    );
 
     assert.fieldEquals("User", trader.toHexString(), "currentPositionSessionId", "");
 
@@ -361,9 +468,17 @@ describe("handleOrderMatched", () => {
 
     // Open: trader (taker) sells -qty at entryPrice → short
     const openEvent = createOrderMatchedEvent(
-      orderId(1), maker1, trader, entryPrice,
-      qty.neg(), BigInt.zero(), BigInt.zero(),
-      qty, qty.neg(), entryPrice, entryPrice,
+      orderId(1),
+      maker1,
+      trader,
+      entryPrice,
+      qty.neg(),
+      BigInt.zero(),
+      BigInt.zero(),
+      qty,
+      qty.neg(),
+      entryPrice,
+      entryPrice,
     );
     openEvent.logIndex = BigInt.fromI32(1);
     openEvent.transaction.hash = orderId(100);
@@ -373,9 +488,17 @@ describe("handleOrderMatched", () => {
 
     // Close: trader (taker) buys +qty at exitPrice → flat
     const closeEvent = createOrderMatchedEvent(
-      orderId(2), maker2, trader, exitPrice,
-      qty, BigInt.zero(), BigInt.zero(),
-      qty.neg(), BigInt.zero(), exitPrice, BigInt.zero(),
+      orderId(2),
+      maker2,
+      trader,
+      exitPrice,
+      qty,
+      BigInt.zero(),
+      BigInt.zero(),
+      qty.neg(),
+      BigInt.zero(),
+      exitPrice,
+      BigInt.zero(),
     );
     closeEvent.logIndex = BigInt.fromI32(2);
     closeEvent.transaction.hash = orderId(101);
@@ -386,7 +509,8 @@ describe("handleOrderMatched", () => {
     assert.fieldEquals("User", trader.toHexString(), "realizedPnl", "100000");
 
     const closeFillId = createEventId(closeEvent.transaction.hash, closeEvent.logIndex)
-      .concatI32(0).toHexString();
+      .concatI32(0)
+      .toHexString();
     assert.fieldEquals("Fill", closeFillId, "realizedPnl", "100000");
 
     const closeTradeId = closeEvent.transaction.hash.concat(trader).toHexString();
@@ -407,9 +531,17 @@ describe("handleOrderMatched", () => {
 
     // Open: trader buys +qty at entryPrice
     const openEvent = createOrderMatchedEvent(
-      orderId(1), maker1, trader, entryPrice,
-      qty, BigInt.zero(), BigInt.zero(),
-      qty.neg(), qty, entryPrice, entryPrice,
+      orderId(1),
+      maker1,
+      trader,
+      entryPrice,
+      qty,
+      BigInt.zero(),
+      BigInt.zero(),
+      qty.neg(),
+      qty,
+      entryPrice,
+      entryPrice,
     );
     openEvent.logIndex = BigInt.fromI32(1);
     openEvent.transaction.hash = orderId(100);
@@ -417,9 +549,17 @@ describe("handleOrderMatched", () => {
 
     // Close: trader sells -qty at exitPrice (loss)
     const closeEvent = createOrderMatchedEvent(
-      orderId(2), maker2, trader, exitPrice,
-      qty.neg(), BigInt.zero(), BigInt.zero(),
-      qty, BigInt.zero(), exitPrice, BigInt.zero(),
+      orderId(2),
+      maker2,
+      trader,
+      exitPrice,
+      qty.neg(),
+      BigInt.zero(),
+      BigInt.zero(),
+      qty,
+      BigInt.zero(),
+      exitPrice,
+      BigInt.zero(),
     );
     closeEvent.logIndex = BigInt.fromI32(2);
     closeEvent.transaction.hash = orderId(101);
@@ -429,7 +569,8 @@ describe("handleOrderMatched", () => {
     assert.fieldEquals("User", trader.toHexString(), "realizedPnl", "-100000");
 
     const closeFillId = createEventId(closeEvent.transaction.hash, closeEvent.logIndex)
-      .concatI32(0).toHexString();
+      .concatI32(0)
+      .toHexString();
     assert.fieldEquals("Fill", closeFillId, "realizedPnl", "-100000");
 
     const closeTradeId = closeEvent.transaction.hash.concat(trader).toHexString();
@@ -450,9 +591,17 @@ describe("handleOrderMatched", () => {
 
     // Open: trader buys 2 units at entryPrice
     const openEvent = createOrderMatchedEvent(
-      orderId(1), maker1, trader, entryPrice,
-      qty, BigInt.zero(), BigInt.zero(),
-      qty.neg(), qty, entryPrice, entryPrice,
+      orderId(1),
+      maker1,
+      trader,
+      entryPrice,
+      qty,
+      BigInt.zero(),
+      BigInt.zero(),
+      qty.neg(),
+      qty,
+      entryPrice,
+      entryPrice,
     );
     openEvent.logIndex = BigInt.fromI32(1);
     openEvent.transaction.hash = orderId(100);
@@ -460,9 +609,17 @@ describe("handleOrderMatched", () => {
 
     // Partial close: trader sells 1 unit at exitPrice
     const closeEvent = createOrderMatchedEvent(
-      orderId(2), maker2, trader, exitPrice,
-      halfQty.neg(), BigInt.zero(), BigInt.zero(),
-      halfQty, halfQty, exitPrice, entryPrice,
+      orderId(2),
+      maker2,
+      trader,
+      exitPrice,
+      halfQty.neg(),
+      BigInt.zero(),
+      BigInt.zero(),
+      halfQty,
+      halfQty,
+      exitPrice,
+      entryPrice,
     );
     closeEvent.logIndex = BigInt.fromI32(2);
     closeEvent.transaction.hash = orderId(101);
@@ -479,7 +636,8 @@ describe("handleOrderMatched", () => {
     assert.fieldEquals("PositionSession", sessionId, "closePrice", exitPrice.toString());
 
     const closeFillId = createEventId(closeEvent.transaction.hash, closeEvent.logIndex)
-      .concatI32(0).toHexString();
+      .concatI32(0)
+      .toHexString();
     assert.fieldEquals("Fill", closeFillId, "realizedPnl", "100000");
   });
 
@@ -493,9 +651,17 @@ describe("handleOrderMatched", () => {
 
     // Open: trader buys +1 unit at entryPrice
     const openEvent = createOrderMatchedEvent(
-      orderId(1), maker1, trader, entryPrice,
-      qty, BigInt.zero(), BigInt.zero(),
-      qty.neg(), qty, entryPrice, entryPrice,
+      orderId(1),
+      maker1,
+      trader,
+      entryPrice,
+      qty,
+      BigInt.zero(),
+      BigInt.zero(),
+      qty.neg(),
+      qty,
+      entryPrice,
+      entryPrice,
     );
     openEvent.logIndex = BigInt.fromI32(1);
     openEvent.transaction.hash = orderId(100);
@@ -506,9 +672,17 @@ describe("handleOrderMatched", () => {
 
     // Flip: trader sells 2 units at flipPrice → goes from +1 to -1
     const flipEvent = createOrderMatchedEvent(
-      orderId(2), maker2, trader, flipPrice,
-      qty.times(BigInt.fromI32(-2)), BigInt.zero(), BigInt.zero(),
-      qty.times(BigInt.fromI32(2)), qty.neg(), flipPrice, flipPrice,
+      orderId(2),
+      maker2,
+      trader,
+      flipPrice,
+      qty.times(BigInt.fromI32(-2)),
+      BigInt.zero(),
+      BigInt.zero(),
+      qty.times(BigInt.fromI32(2)),
+      qty.neg(),
+      flipPrice,
+      flipPrice,
     );
     flipEvent.logIndex = BigInt.fromI32(2);
     flipEvent.transaction.hash = orderId(101);
@@ -551,18 +725,34 @@ describe("handleOrderMatched", () => {
 
     // Round 1: open long at 3000000, close at 3100000 → +100000
     const open1 = createOrderMatchedEvent(
-      orderId(1), maker1, trader, BigInt.fromI32(3000000),
-      qty, BigInt.zero(), BigInt.zero(),
-      qty.neg(), qty, BigInt.fromI32(3000000), BigInt.fromI32(3000000),
+      orderId(1),
+      maker1,
+      trader,
+      BigInt.fromI32(3000000),
+      qty,
+      BigInt.zero(),
+      BigInt.zero(),
+      qty.neg(),
+      qty,
+      BigInt.fromI32(3000000),
+      BigInt.fromI32(3000000),
     );
     open1.logIndex = BigInt.fromI32(1);
     open1.transaction.hash = orderId(100);
     handleOrderMatched(open1);
 
     const close1 = createOrderMatchedEvent(
-      orderId(2), maker2, trader, BigInt.fromI32(3100000),
-      qty.neg(), BigInt.zero(), BigInt.zero(),
-      qty, BigInt.zero(), BigInt.fromI32(3100000), BigInt.zero(),
+      orderId(2),
+      maker2,
+      trader,
+      BigInt.fromI32(3100000),
+      qty.neg(),
+      BigInt.zero(),
+      BigInt.zero(),
+      qty,
+      BigInt.zero(),
+      BigInt.fromI32(3100000),
+      BigInt.zero(),
     );
     close1.logIndex = BigInt.fromI32(2);
     close1.transaction.hash = orderId(101);
@@ -572,18 +762,34 @@ describe("handleOrderMatched", () => {
 
     // Round 2: open long at 3200000, close at 3000000 → -200000
     const open2 = createOrderMatchedEvent(
-      orderId(3), maker3, trader, BigInt.fromI32(3200000),
-      qty, BigInt.zero(), BigInt.zero(),
-      qty.neg(), qty, BigInt.fromI32(3200000), BigInt.fromI32(3200000),
+      orderId(3),
+      maker3,
+      trader,
+      BigInt.fromI32(3200000),
+      qty,
+      BigInt.zero(),
+      BigInt.zero(),
+      qty.neg(),
+      qty,
+      BigInt.fromI32(3200000),
+      BigInt.fromI32(3200000),
     );
     open2.logIndex = BigInt.fromI32(3);
     open2.transaction.hash = orderId(102);
     handleOrderMatched(open2);
 
     const close2 = createOrderMatchedEvent(
-      orderId(4), maker4, trader, BigInt.fromI32(3000000),
-      qty.neg(), BigInt.zero(), BigInt.zero(),
-      qty, BigInt.zero(), BigInt.fromI32(3000000), BigInt.zero(),
+      orderId(4),
+      maker4,
+      trader,
+      BigInt.fromI32(3000000),
+      qty.neg(),
+      BigInt.zero(),
+      BigInt.zero(),
+      qty,
+      BigInt.zero(),
+      BigInt.fromI32(3000000),
+      BigInt.zero(),
     );
     close2.logIndex = BigInt.fromI32(4);
     close2.transaction.hash = orderId(103);
@@ -605,9 +811,17 @@ describe("handleOrderMatched", () => {
 
     // Open: trader buys 2 units at 3000000
     const openEvent = createOrderMatchedEvent(
-      orderId(1), maker1, trader, entryPrice,
-      qty, BigInt.zero(), BigInt.zero(),
-      qty.neg(), qty, entryPrice, entryPrice,
+      orderId(1),
+      maker1,
+      trader,
+      entryPrice,
+      qty,
+      BigInt.zero(),
+      BigInt.zero(),
+      qty.neg(),
+      qty,
+      entryPrice,
+      entryPrice,
     );
     openEvent.logIndex = BigInt.fromI32(1);
     openEvent.transaction.hash = orderId(100);
@@ -615,9 +829,17 @@ describe("handleOrderMatched", () => {
 
     // Close fill 1 (same tx): sell 1 unit at 3100000
     const close1 = createOrderMatchedEvent(
-      orderId(2), maker2, trader, BigInt.fromI32(3100000),
-      halfQty.neg(), BigInt.zero(), BigInt.zero(),
-      halfQty, halfQty, BigInt.fromI32(3100000), entryPrice,
+      orderId(2),
+      maker2,
+      trader,
+      BigInt.fromI32(3100000),
+      halfQty.neg(),
+      BigInt.zero(),
+      BigInt.zero(),
+      halfQty,
+      halfQty,
+      BigInt.fromI32(3100000),
+      entryPrice,
     );
     close1.logIndex = BigInt.fromI32(2);
     close1.transaction.hash = closeTxHash;
@@ -625,9 +847,17 @@ describe("handleOrderMatched", () => {
 
     // Close fill 2 (same tx): sell 1 unit at 3200000
     const close2 = createOrderMatchedEvent(
-      orderId(3), maker3, trader, BigInt.fromI32(3200000),
-      halfQty.neg(), BigInt.zero(), BigInt.zero(),
-      halfQty, BigInt.zero(), BigInt.fromI32(3200000), BigInt.zero(),
+      orderId(3),
+      maker3,
+      trader,
+      BigInt.fromI32(3200000),
+      halfQty.neg(),
+      BigInt.zero(),
+      BigInt.zero(),
+      halfQty,
+      BigInt.zero(),
+      BigInt.fromI32(3200000),
+      BigInt.zero(),
     );
     close2.logIndex = BigInt.fromI32(3);
     close2.transaction.hash = closeTxHash;
@@ -650,9 +880,17 @@ describe("handleOrderMatched", () => {
     const makerFee = BigInt.fromI32(-2000);
 
     const event = createOrderMatchedEvent(
-      orderId(1), maker, taker, price,
-      qty, makerFee, takerFee,
-      qty.neg(), qty, price, price,
+      orderId(1),
+      maker,
+      taker,
+      price,
+      qty,
+      makerFee,
+      takerFee,
+      qty.neg(),
+      qty,
+      price,
+      price,
     );
     event.logIndex = BigInt.fromI32(1);
     event.transaction.hash = orderId(100);
