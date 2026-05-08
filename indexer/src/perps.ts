@@ -176,6 +176,7 @@ function getOrCreateUser(address: Address, timestamp: BigInt): User {
     user.realizedPnl = BigInt.zero();
     user.totalFundingPaid = BigInt.zero();
     user.totalFundingReceived = BigInt.zero();
+    user.lastCreatedOrderId = Bytes.empty();
     user.createdAt = timestamp;
     user.lastActivityAt = timestamp;
 
@@ -233,6 +234,7 @@ export function handleOrderCreated(event: OrderCreated): void {
   order.isBuy = isBuy;
   order.status = "ACTIVE";
   order.filledQuantity = BigInt.zero();
+  order.averageFillPrice = BigInt.zero();
   order.createdAt = event.block.timestamp;
   order.updatedAt = event.block.timestamp;
   order.blockNumber = event.block.number;
@@ -242,6 +244,9 @@ export function handleOrderCreated(event: OrderCreated): void {
   // Update user
   user.orderCount++;
   user.activeOrderCount++;
+  // Remember this orderId so handleOrderMatched can attribute taker-side fills to it
+  // (OrderMatched only carries makerOrderId; the taker's OrderCreated always fires first).
+  user.lastCreatedOrderId = event.params.orderId;
   user.lastActivityAt = event.block.timestamp;
   user.save();
 
@@ -375,6 +380,9 @@ export function handleOrderMatched(event: OrderMatched): void {
   const perps = getOrCreatePerps();
   const quantityScale = BigInt.fromI32(10).pow(u8(perps.quantityDecimals));
 
+  const makerOid = event.params.makerOrderId;
+  const takerOid = takerUser.lastCreatedOrderId;
+
   processUserMatch(
     takerUser,
     takerQty,
@@ -383,7 +391,9 @@ export function handleOrderMatched(event: OrderMatched): void {
     event.params.takerNetQtyAfter,
     event.params.takerEntryPriceAfter,
     makerUser.id,
-    event.params.makerOrderId,
+    takerOid,
+    makerOid,
+    "TAKER",
     event.transaction.hash,
     event.logIndex,
     event.block.number,
@@ -399,7 +409,9 @@ export function handleOrderMatched(event: OrderMatched): void {
     event.params.makerNetQtyAfter,
     event.params.makerEntryPriceAfter,
     takerUser.id,
-    event.params.makerOrderId,
+    makerOid,
+    takerOid,
+    "MAKER",
     event.transaction.hash,
     event.logIndex,
     event.block.number,
@@ -486,7 +498,9 @@ function processUserMatch(
   newNetQuantity: BigInt,
   newEntryPrice: BigInt,
   counterpartyId: Bytes,
-  makerOrderId: Bytes,
+  userOrderId: Bytes,
+  counterpartyOrderId: Bytes,
+  side: string,
   txHash: Bytes,
   logIndex: BigInt,
   blockNumber: BigInt,
@@ -530,7 +544,9 @@ function processUserMatch(
       oldNetQuantity,
       oldEntryPrice,
       counterpartyId,
-      makerOrderId,
+      userOrderId,
+      counterpartyOrderId,
+      side,
       baseTradeId,
       txHash,
       blockNumber,
@@ -549,7 +565,9 @@ function processUserMatch(
       newEntryPrice,
       oldNetQuantity,
       counterpartyId,
-      makerOrderId,
+      userOrderId,
+      counterpartyOrderId,
+      side,
       isPositionOpened,
       isPositionClosed,
       baseTradeId,
@@ -561,10 +579,39 @@ function processUserMatch(
     );
   }
 
+  updateOrderFillStats(userOrderId, tradePrice, absBigInt(tradeQty));
+
   user.netQuantity = newNetQuantity;
   user.aggregatedEntryPrice = newEntryPrice;
   user.lastActivityAt = timestamp;
   user.save();
+}
+
+/** Update an order's running averageFillPrice (VWAP) and filledQuantity from one match. */
+function updateOrderFillStats(
+  orderId: Bytes,
+  fillPrice: BigInt,
+  absFillQty: BigInt,
+): void {
+  const order = Order.load(orderId);
+  if (!order) {
+    log.warning("Order not found for fill stats update: {}", [
+      orderId.toHexString(),
+    ]);
+    return;
+  }
+  const oldFilled = order.filledQuantity;
+  const newFilled = oldFilled.plus(absFillQty);
+  if (newFilled.gt(BigInt.zero())) {
+    order.averageFillPrice = order.averageFillPrice
+      .times(oldFilled)
+      .plus(fillPrice.times(absFillQty))
+      .div(newFilled);
+  }
+  // Track filledQuantity incrementally here so it stays correct even before
+  // OrderUpdated arrives (taker-side OrderUpdated fires once after all matches).
+  order.filledQuantity = newFilled;
+  order.save();
 }
 
 /** Flip: close old session + create close trade, then open new session + create open trade. */
@@ -579,7 +626,9 @@ function handleFlip(
   oldNetQuantity: BigInt,
   oldEntryPrice: BigInt,
   counterpartyId: Bytes,
-  makerOrderId: Bytes,
+  userOrderId: Bytes,
+  counterpartyOrderId: Bytes,
+  side: string,
   baseTradeId: Bytes,
   txHash: Bytes,
   blockNumber: BigInt,
@@ -620,9 +669,11 @@ function handleFlip(
       );
       const closeFill = new Fill(baseTradeId.concatI32(sideIndex * 2));
       closeFill.trade = trade.id;
+      closeFill.side = side;
       closeFill.user = user.id;
       closeFill.counterparty = counterpartyId;
-      closeFill.makerOrderId = makerOrderId;
+      closeFill.order = userOrderId;
+      closeFill.counterpartyOrder = counterpartyOrderId;
       closeFill.positionSession = oldSession.id;
       closeFill.fillPrice = tradePrice;
       closeFill.fillQuantity = closeQty;
@@ -679,9 +730,11 @@ function handleFlip(
   );
   const openFill = new Fill(baseTradeId.concatI32(sideIndex * 2 + 1));
   openFill.trade = trade.id;
+  openFill.side = side;
   openFill.user = user.id;
   openFill.counterparty = counterpartyId;
-  openFill.makerOrderId = makerOrderId;
+  openFill.order = userOrderId;
+  openFill.counterpartyOrder = counterpartyOrderId;
   openFill.positionSession = newSession.id;
   openFill.fillPrice = tradePrice;
   openFill.fillQuantity = newNetQuantity;
@@ -717,7 +770,9 @@ function handleNonFlip(
   newEntryPrice: BigInt,
   oldNetQuantity: BigInt,
   counterpartyId: Bytes,
-  makerOrderId: Bytes,
+  userOrderId: Bytes,
+  counterpartyOrderId: Bytes,
+  side: string,
   isPositionOpened: bool,
   isPositionClosed: bool,
   baseTradeId: Bytes,
@@ -806,9 +861,11 @@ function handleNonFlip(
   );
   const fill = new Fill(baseTradeId.concatI32(sideIndex));
   fill.trade = trade.id;
+  fill.side = side;
   fill.user = user.id;
   fill.counterparty = counterpartyId;
-  fill.makerOrderId = makerOrderId;
+  fill.order = userOrderId;
+  fill.counterpartyOrder = counterpartyOrderId;
   fill.positionSession = session.id;
   fill.fillPrice = tradePrice;
   fill.fillQuantity = tradeQty;

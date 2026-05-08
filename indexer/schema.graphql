@@ -67,6 +67,9 @@ type User @entity(immutable: false) {
   tradeCount: Int!
   realizedPnl: BigInt!
 
+  "Transient: orderId of the user's most recent OrderCreated event. Used by the indexer to attribute taker-side fills (since OrderMatched only carries makerOrderId). Not intended for client queries."
+  lastCreatedOrderId: Bytes!
+
   # Relations
   orders: [Order!]! @derivedFrom(field: "user")
   trades: [Trade!]! @derivedFrom(field: "user")
@@ -93,6 +96,11 @@ type Order @entity(immutable: false) {
   # Status
   status: OrderStatus!
   filledQuantity: BigInt!
+  "Volume-weighted average price across all fills against this order. Zero if no fills."
+  averageFillPrice: BigInt!
+
+  # Relations
+  fills: [Fill!]! @derivedFrom(field: "order")
 
   # Metadata
   createdAt: BigInt!
@@ -132,9 +140,14 @@ type Trade @entity(immutable: false) {
 type Fill @entity(immutable: true) {
   id: Bytes! # tx hash + log index + side suffix
   trade: Trade!
+  "Whether `user` was the maker (resting order) or the taker (incoming order) in this match."
+  side: FillSide!
   user: User!
   counterparty: User!
-  makerOrderId: Bytes!
+  "The user's own order in this match (taker order when `side` is TAKER, maker order when `side` is MAKER)."
+  order: Order!
+  "The counterparty's order in this match. The resting/maker order when `side` is TAKER; the incoming/taker order when `side` is MAKER."
+  counterpartyOrder: Order!
   positionSession: PositionSession!
   fillPrice: BigInt!
   fillQuantity: BigInt! # signed: positive = bought/long, negative = sold/short
@@ -146,6 +159,11 @@ type Fill @entity(immutable: true) {
   timestamp: BigInt!
   blockNumber: BigInt!
   transactionHash: Bytes!
+}
+
+enum FillSide {
+  MAKER
+  TAKER
 }
 
 # Liquidation event
