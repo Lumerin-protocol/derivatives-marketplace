@@ -41,14 +41,18 @@ contract HashPowerPerpsDEX is
     uint8 public constant QUANTITY_DECIMALS = 6;
     uint256 public constant MAX_PRICE_LEVELS_PER_SIDE = 200; // Max active price levels per side (bid/ask)
     uint256 public immutable minimumPriceIncrement; // Minimum price increment for orders
-    string public constant VERSION = "2.0.0";
+    string public constant VERSION = "2.1.0";
 
     // State variables
     IERC20 public collateralToken;
     AggregatorV3Interface public priceOracle;
     uint8 public marginPercent; // Initial margin requirement as percentage (e.g., 10 = 10%)
     uint8 public maintenanceMarginPercent; // Maintenance margin percentage (e.g., 5 = 5%)
-    uint256 public liquidationFee; // Liquidation fee in collateral token units
+    /// @notice Flat liquidation fee in collateral token units. Paid once per call to a
+    ///         permissionless liquidation entry point: per cancelled order in
+    ///         `liquidateOrder` / `liquidateOrders`, and per closed position in
+    ///         `liquidatePosition`. Also acts as the minimum taker fee in `_calculateMatchFee`.
+    uint256 public liquidationFee;
     uint8 private tokenDecimals;
     uint8 private oracleDecimals;
     uint256 private nonce; // Nonce for order IDs
@@ -125,6 +129,10 @@ contract HashPowerPerpsDEX is
     event PositionLiquidated(
         address indexed user, address indexed liquidator, int256 positionSize, int256 pnl, uint256 liquidatorFee
     );
+    /// @notice Emitted when a resting order is force-cancelled by a permissionless liquidator.
+    /// @dev `OrderCancelled` is also emitted from the same path so order-lifecycle indexers
+    ///      keep working unchanged.
+    event OrderLiquidated(bytes32 indexed orderId, address indexed user, address indexed liquidator, uint256 fee);
     event BadDebt(address indexed user, uint256 amount); // The user does not have enough collateral to cover the loss
     event FundingUpdated(int256 fundingRate, int256 cumulativeFundingPerUnit, uint256 timestamp);
     event FundingSettled(address indexed user, int256 amount);
@@ -142,6 +150,8 @@ contract HashPowerPerpsDEX is
     error OrderNotBelongToSender();
     error MaxOrdersPerParticipantReached();
     error NotLiquidatable();
+    error OrdersStillOpen(); // liquidatePosition called while user has open orders
+    error OrderNotBelongToUser(); // liquidateOrder/liquidateOrders called with an id not owned by the specified user
     error InsufficientReservePool(); // The reserve pool does not have enough collateral to cover user profit
     error InvalidFundingParameters();
     error OrderMarginTooLow(); // Order margin is below minimumMarginPerOrder
@@ -585,9 +595,10 @@ contract HashPowerPerpsDEX is
         }
     }
 
-    /// @notice Check if a user's position can be liquidated
-    /// @param _user Address of the user
-    /// @return True if the user can be liquidated
+    /// @notice Check if a user's position can be liquidated.
+    /// @dev Returns true iff the user has a position AND is below MM. Note: this view does NOT
+    ///      check the orders-must-be-clear rule enforced by `liquidatePosition`/`liquidateBatch`.
+    ///      Callers that want the full preflight should also check `getUserOrders(user).length == 0`.
     function isLiquidatable(address _user) public view returns (bool) {
         Position memory position = positions[_user];
         if (position.netQuantity == 0) return false;
@@ -595,9 +606,18 @@ contract HashPowerPerpsDEX is
         return balanceOf(_user) < portfolioMargin.computePortfolioMM(_user);
     }
 
-    /// @notice Liquidate one or more underwater positions in a single transaction
-    /// @param _users Array of addresses to liquidate
-    /// @dev Skips users that are not liquidatable; reverts if none were liquidated
+    /// @dev True iff the user is below the portfolio MM predicate. Used for permissionless
+    ///      `liquidateOrder*` / `liquidatePosition` entry points (those don't need a position
+    ///      to be present — orders alone can break MM).
+    function _underwater(address _user) internal view returns (bool) {
+        return balanceOf(_user) < portfolioMargin.computePortfolioMM(_user);
+    }
+
+    /// @notice Liquidate one or more underwater positions in a single transaction. Skips users
+    ///         that are not liquidatable OR still have open orders (orders must be cleared via
+    ///         `liquidateOrders` first); reverts if none were liquidated.
+    /// @dev Same orders-first-then-position invariant as `liquidatePosition` — it just no-ops
+    ///      offending users instead of reverting per-user.
     function liquidateBatch(address[] calldata _users) external {
         _updateGlobalFunding();
 
@@ -614,12 +634,92 @@ contract HashPowerPerpsDEX is
         }
     }
 
-    /// @dev Core liquidation logic. Returns true if the user was liquidated, false if not liquidatable.
-    function _liquidate(address _user) internal returns (bool) {
-        if (!isLiquidatable(_user)) {
-            return false;
+    /// @notice Force-close a single underwater user's position. Permissionless; pays
+    ///         `liquidationFee` from the user's vault to `msg.sender`.
+    /// @dev Strict orders-first invariant: reverts with `OrdersStillOpen` if the user has any
+    ///      open orders. The keeper must clear them via `liquidateOrders` first (composed
+    ///      atomically off-chain via Multicall3).
+    function liquidatePosition(address _user) external {
+        _updateGlobalFunding();
+        _settleFunding(_user);
+
+        if (positions[_user].netQuantity == 0) revert NotLiquidatable();
+        if (!_underwater(_user)) revert NotLiquidatable();
+        if (participantOrderIdsIndex[_user].length() != 0) revert OrdersStillOpen();
+
+        _doLiquidatePosition(_user);
+    }
+
+    /// @notice Force-cancel a single resting order owned by an underwater user. Permissionless;
+    ///         pays `liquidationFee` from the user's vault to `msg.sender`.
+    function liquidateOrder(address _user, bytes32 _orderId) external {
+        _updateGlobalFunding();
+
+        if (!_underwater(_user)) revert NotLiquidatable();
+
+        Order memory order = orders[_orderId];
+        if (order.participant != _user) revert OrderNotBelongToUser();
+
+        _doLiquidateOrder(_user, _orderId, order);
+    }
+
+    /// @notice Batch-cancel resting orders owned by an underwater user. Permissionless; pays
+    ///         `liquidationFee` per cancelled order. Stops early once the user becomes
+    ///         healthy mid-batch (so liquidators can't drain fees by overspecifying ids).
+    /// @dev Reverts with `NotLiquidatable` if zero orders were cancelled (caller mis-targeted).
+    function liquidateOrders(address _user, bytes32[] calldata _orderIds) external {
+        _updateGlobalFunding();
+
+        uint256 cancelled = 0;
+        for (uint256 i = 0; i < _orderIds.length; i++) {
+            if (!_underwater(_user)) break;
+
+            bytes32 orderId = _orderIds[i];
+            Order memory order = orders[orderId];
+            if (order.participant != _user) revert OrderNotBelongToUser();
+
+            _doLiquidateOrder(_user, orderId, order);
+            cancelled++;
         }
 
+        if (cancelled == 0) revert NotLiquidatable();
+    }
+
+    /// @dev Core liquidation logic. Returns true iff the user was liquidated.
+    ///      Skips users that are healthy or still have open orders (orders-first invariant).
+    function _liquidate(address _user) internal returns (bool) {
+        if (!isLiquidatable(_user)) return false;
+        if (participantOrderIdsIndex[_user].length() != 0) return false;
+        _doLiquidatePosition(_user);
+        return true;
+    }
+
+    /// @dev Cancels a single order on behalf of a (verified-underwater) user and pays the
+    ///      flat liquidation fee. Caller must have already verified `_underwater(_user)` and
+    ///      that `_order.participant == _user`.
+    function _doLiquidateOrder(address _user, bytes32 _orderId, Order memory _order) private {
+        bool isBid = _order.quantity > 0;
+        _getOrderValue(isBid)[_user] -= _calculateValue(_order.price, _abs(_order.quantity));
+        _removeOrder(_orderId, _user, _order.price, isBid);
+        _removePriceLevelIfEmpty(_order.price, isBid);
+
+        uint256 fee = liquidationFee;
+        uint256 paid;
+        if (fee > 0) {
+            uint256 userBalance = balanceOf(_user);
+            paid = fee < userBalance ? fee : userBalance;
+            if (paid > 0) {
+                _move(_user, _msgSender(), paid);
+            }
+        }
+
+        emit OrderCancelled(_orderId, _user);
+        emit OrderLiquidated(_orderId, _user, _msgSender(), paid);
+    }
+
+    /// @dev Closes the user's position, settles PnL against the insurance fund, and pays the
+    ///      position liquidation fee. Caller must have verified all predicates.
+    function _doLiquidatePosition(address _user) private {
         Position memory position = positions[_user];
         uint256 currentPrice = getMarketPrice();
 
@@ -665,7 +765,6 @@ contract HashPowerPerpsDEX is
         usersWithPositions.remove(_user);
 
         emit PositionLiquidated(_user, _msgSender(), closedQuantity, pnl, liquidatorFee);
-        return true;
     }
 
     /// @notice Settle a reduced portion of a position (when offsetting)
@@ -1210,7 +1309,9 @@ contract HashPowerPerpsDEX is
         oracleDecimals = _oracle.decimals();
     }
 
-    /// @notice Set the liquidation fee (in collateral token units)
+    /// @notice Set the flat liquidation fee (in collateral token units). Paid per cancelled
+    ///         order in `liquidateOrder` / `liquidateOrders` and per closed position in
+    ///         `liquidatePosition`.
     function setLiquidationFee(uint256 _liquidationFee) external onlyOwner {
         liquidationFee = _liquidationFee;
         emit LiquidationFeeUpdated(_liquidationFee);

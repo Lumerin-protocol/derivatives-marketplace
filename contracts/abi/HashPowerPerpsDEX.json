@@ -128,6 +128,16 @@
     "type": "error"
   },
   {
+    "inputs": [],
+    "name": "OrderNotBelongToUser",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "OrdersStillOpen",
+    "type": "error"
+  },
+  {
     "inputs": [
       {
         "internalType": "address",
@@ -379,6 +389,37 @@
       }
     ],
     "name": "OrderCreated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "orderId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "liquidator",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "fee",
+        "type": "uint256"
+      }
+    ],
+    "name": "OrderLiquidated",
     "type": "event"
   },
   {
@@ -1118,6 +1159,55 @@
       }
     ],
     "name": "liquidateBatch",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "_orderId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "liquidateOrder",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      },
+      {
+        "internalType": "bytes32[]",
+        "name": "_orderIds",
+        "type": "bytes32[]"
+      }
+    ],
+    "name": "liquidateOrders",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      }
+    ],
+    "name": "liquidatePosition",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"

@@ -451,6 +451,14 @@ describe("HashPowerPerpsDEX - Funding Fees", function () {
       const isLiquidatable = await perps.read.isLiquidatable([seller.account.address]);
       assert.ok(isLiquidatable);
 
+      // Strict orders-first invariant: must cancel resting orders before the position can be liquidated.
+      const sellerOrders = await perps.read.getUserOrders([seller.account.address]);
+      if (sellerOrders.length > 0) {
+        await perps.write.liquidateOrders([seller.account.address, sellerOrders], {
+          account: buyer2.account,
+        });
+      }
+
       await perps.write.liquidateBatch([[seller.account.address]], { account: buyer2.account });
 
       const position = await perps.read.getUserPosition([seller.account.address]);

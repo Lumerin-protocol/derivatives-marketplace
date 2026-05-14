@@ -1,37 +1,60 @@
 import fs from "node:fs";
 import { requireEnvsSet } from "../lib/env.ts";
 import hre from "hardhat";
-import { encodeFunctionData } from "viem";
+import { type Address, encodeFunctionData, getAddress, isAddress, zeroAddress } from "viem";
 import { writeAndWait } from "../lib/writeContract.ts";
 import { verifyContract } from "../lib/verify.ts";
 import { txUrl, addrUrl } from "../lib/explorer.ts";
 import { logTitle, logInfo, logStep, logSuccess, logPrompt } from "../lib/log.ts";
 
+function readOptionalAddress(name: string): Address | undefined {
+  const raw = process.env[name];
+  if (!raw || raw === zeroAddress) return undefined;
+  if (!isAddress(raw)) throw new Error(`${name} is not a valid address: ${raw}`);
+  return raw;
+}
+
 async function main() {
   logTitle("HashPowerPerpsDEX Deployment");
   const { viem } = await hre.network.connect();
 
+  // `marginPercent` / `maintenanceMarginPercent` are no longer set at
+  // initialize time — the cross-product PortfolioMarginEngine drives margin via
+  // its `imSpotShock` / `mmSpotShock` parameters. The perps contract now reads
+  // its underlying ERC20 (and decimals) from the vault.
   const env = requireEnvsSet(
-    "COLLATERAL_TOKEN_ADDRESS",
+    "VAULT_ADDRESS",
     "PRICE_ORACLE_ADDRESS",
-    "MARGIN_PERCENT",
-    "MAINTENANCE_MARGIN_PERCENT",
     "TAKER_FEE_BPS",
     "MAKER_FEE_BPS",
     "LIQUIDATION_FEE",
     "MINIMUM_PRICE_INCREMENT",
   );
-  const SAFE_OWNER_ADDRESS = process.env.SAFE_OWNER_ADDRESS;
+  const SAFE_OWNER_ADDRESS = readOptionalAddress("SAFE_OWNER_ADDRESS");
+  // Optional: wire the perps DEX into the cross-product PortfolioMarginEngine
+  // (perps.setPortfolioMargin + PME.setPerps + Vault.setAuthorizedCaller). When
+  // the deployer doesn't own the PME or the vault the script logs the calldata
+  // for the current owner Safe instead of executing the call.
+  const MARGIN_ENGINE_ADDRESS = readOptionalAddress("MARGIN_ENGINE_ADDRESS");
 
   const [deployer] = await viem.getWalletClients();
   const pc = await viem.getPublicClient();
   logInfo("deployer", { Address: addrUrl(pc, deployer.account.address) });
 
-  // Verify collateral token
+  // Verify collateral vault & infer collateral token from it
+  const vault = await viem.getContractAt("CollateralVault", env.VAULT_ADDRESS as Address);
+  const vaultOwner = await vault.read.owner();
+  const deployerIsVaultOwner = getAddress(vaultOwner) === getAddress(deployer.account.address);
+  const collateralTokenAddress = await vault.read.collateralToken();
   const collateralToken = await viem.getContractAt(
     "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol:IERC20Metadata",
-    env.COLLATERAL_TOKEN_ADDRESS as `0x${string}`,
+    collateralTokenAddress,
   );
+  logInfo("vault", {
+    Address: addrUrl(pc, vault.address),
+    Owner: vaultOwner,
+    "Deployer can wire vault": deployerIsVaultOwner ? "yes" : "no (wire via current owner)",
+  });
   logInfo("collateral", {
     Address: collateralToken.address,
     Symbol: await collateralToken.read.symbol(),
@@ -42,7 +65,7 @@ async function main() {
   // Verify price oracle
   const priceOracle = await viem.getContractAt(
     "AggregatorV3Interface",
-    env.PRICE_ORACLE_ADDRESS as `0x${string}`,
+    env.PRICE_ORACLE_ADDRESS as Address,
   );
   const [, answer, , updatedAt] = await priceOracle.read.latestRoundData();
   logInfo("oracle", {
@@ -73,26 +96,19 @@ async function main() {
   // Deploy HashPowerPerpsDEX proxy
   logInfo("Deploy HashPowerPerpsDEX proxy", {
     implementation: perpsImpl.address,
-    collateralToken: env.COLLATERAL_TOKEN_ADDRESS,
+    vault: vault.address,
     priceOracle: env.PRICE_ORACLE_ADDRESS,
-    marginPercent: `${env.MARGIN_PERCENT}%`,
-    maintenanceMarginPercent: `${env.MAINTENANCE_MARGIN_PERCENT}%`,
   });
   await logPrompt("Proceed?");
   console.log("Deploying HashPowerPerpsDEX proxy...");
   const encodedInitFn = encodeFunctionData({
     abi: perpsImpl.abi,
     functionName: "initialize",
-    args: [
-      env.COLLATERAL_TOKEN_ADDRESS as `0x${string}`,
-      env.PRICE_ORACLE_ADDRESS as `0x${string}`,
-      Number(env.MARGIN_PERCENT),
-      Number(env.MAINTENANCE_MARGIN_PERCENT),
-    ],
+    args: [env.PRICE_ORACLE_ADDRESS as Address, vault.address],
   });
 
   const perpsProxy = await viem.deployContract("ERC1967Proxy", [
-    perpsImpl.address as `0x${string}`,
+    perpsImpl.address as Address,
     encodedInitFn,
   ]);
   logStep("Deployed", addrUrl(pc, perpsProxy.address));
@@ -121,6 +137,56 @@ async function main() {
   const liquidationFeeReceipt = await writeAndWait(deployer, liquidationFeeRes);
   logStep("Done", txUrl(pc, liquidationFeeReceipt.transactionHash));
 
+  // Wire the PortfolioMarginEngine (optional)
+  if (MARGIN_ENGINE_ADDRESS) {
+    const pme = await viem.getContractAt("PortfolioMarginEngine", MARGIN_ENGINE_ADDRESS);
+    const pmeOwner = await pme.read.owner();
+    const deployerIsPmeOwner = getAddress(pmeOwner) === getAddress(deployer.account.address);
+
+    logInfo("HashPowerPerpsDEX.setPortfolioMargin", { marginEngine: MARGIN_ENGINE_ADDRESS });
+    await logPrompt("Proceed?");
+    {
+      const sim = await perps.simulate.setPortfolioMargin([MARGIN_ENGINE_ADDRESS]);
+      const receipt = await writeAndWait(deployer, sim);
+      logStep("Done", txUrl(pc, receipt.transactionHash));
+    }
+
+    if (deployerIsPmeOwner) {
+      logInfo("PME.setPerps", { perps: perps.address });
+      await logPrompt("Proceed?");
+      const sim = await pme.simulate.setPerps([perps.address]);
+      const receipt = await writeAndWait(deployer, sim);
+      logStep("Done", txUrl(pc, receipt.transactionHash));
+    } else {
+      const data = encodeFunctionData({
+        abi: pme.abi,
+        functionName: "setPerps",
+        args: [perps.address],
+      });
+      logInfo("PME wiring (run as PME owner)", { "PME address": pme.address, "PME owner": pmeOwner });
+      logStep(`PME.setPerps(${perps.address})`, data);
+    }
+
+    if (deployerIsVaultOwner) {
+      logInfo("Vault.setAuthorizedCaller(perps)", { caller: perps.address });
+      await logPrompt("Proceed?");
+      const sim = await vault.simulate.setAuthorizedCaller([perps.address, true]);
+      const receipt = await writeAndWait(deployer, sim);
+      logStep("Done", txUrl(pc, receipt.transactionHash));
+    } else {
+      const data = encodeFunctionData({
+        abi: vault.abi,
+        functionName: "setAuthorizedCaller",
+        args: [perps.address, true],
+      });
+      logInfo("Vault wiring (run as vault owner)", {
+        "Vault address": vault.address,
+        "Vault owner": vaultOwner,
+      });
+      logStep(`Vault.setAuthorizedCaller(${perps.address}, true)`, data);
+    }
+  }
+
   // Transfer ownership if SAFE_OWNER_ADDRESS is set
   if (SAFE_OWNER_ADDRESS) {
     logInfo("Transfer ownership", { owner: SAFE_OWNER_ADDRESS });
@@ -133,8 +199,6 @@ async function main() {
 
   console.log();
   logInfo("config", {
-    margin: `${env.MARGIN_PERCENT}%`,
-    maintenance: `${env.MAINTENANCE_MARGIN_PERCENT}%`,
     liqFee: env.LIQUIDATION_FEE,
     tick: env.MINIMUM_PRICE_INCREMENT,
     takerFeeBps: env.TAKER_FEE_BPS,

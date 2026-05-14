@@ -177,6 +177,11 @@ export const contractErrors = [
   },
   {
     "inputs": [],
+    "name": "OrderNotBelongToUser",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "MarginBreach",
     "type": "error"
   },
@@ -335,6 +340,11 @@ export const contractErrors = [
       }
     ],
     "name": "ERC20InvalidApprover",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "OrdersStillOpen",
     "type": "error"
   },
   {
