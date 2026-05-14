@@ -103,6 +103,17 @@ export const HashPowerPerpsDEXAbi = [
     "type": "error"
   },
   {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "index",
+        "type": "uint256"
+      }
+    ],
+    "name": "MulticallSubCallOutOfGas",
+    "type": "error"
+  },
+  {
     "inputs": [],
     "name": "NotInitializing",
     "type": "error"
@@ -1153,19 +1164,6 @@ export const HashPowerPerpsDEXAbi = [
   {
     "inputs": [
       {
-        "internalType": "address[]",
-        "name": "_users",
-        "type": "address[]"
-      }
-    ],
-    "name": "liquidateBatch",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
         "internalType": "address",
         "name": "_user",
         "type": "address"
@@ -1177,24 +1175,6 @@ export const HashPowerPerpsDEXAbi = [
       }
     ],
     "name": "liquidateOrder",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "_user",
-        "type": "address"
-      },
-      {
-        "internalType": "bytes32[]",
-        "name": "_orderIds",
-        "type": "bytes32[]"
-      }
-    ],
-    "name": "liquidateOrders",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -1300,6 +1280,30 @@ export const HashPowerPerpsDEXAbi = [
     ],
     "name": "multicall",
     "outputs": [
+      {
+        "internalType": "bytes[]",
+        "name": "results",
+        "type": "bytes[]"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes[]",
+        "name": "data",
+        "type": "bytes[]"
+      }
+    ],
+    "name": "multicallStopOnFailure",
+    "outputs": [
+      {
+        "internalType": "bool[]",
+        "name": "successes",
+        "type": "bool[]"
+      },
       {
         "internalType": "bytes[]",
         "name": "results",

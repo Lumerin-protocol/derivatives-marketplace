@@ -88,9 +88,11 @@ async function main() {
   });
   await logPrompt("Proceed?");
   console.log("Deploying new implementation...");
-  const newImpl = await viem.deployContract("HashPowerPerpsDEX", [
-    BigInt(env.MINIMUM_PRICE_INCREMENT),
-  ]);
+  const newImpl = await viem.deployContract(
+    "HashPowerPerpsDEX",
+    [BigInt(env.MINIMUM_PRICE_INCREMENT)],
+    { confirmations: 5 },
+  );
   logStep("Deployed", addrUrl(pc, newImpl.address));
 
   console.log("Verifying new implementation...");

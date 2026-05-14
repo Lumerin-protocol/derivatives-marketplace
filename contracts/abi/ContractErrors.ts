@@ -60,6 +60,17 @@ export const contractErrors = [
   {
     "inputs": [
       {
+        "internalType": "uint256",
+        "name": "index",
+        "type": "uint256"
+      }
+    ],
+    "name": "MulticallSubCallOutOfGas",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "string",
         "name": "str",
         "type": "string"

@@ -37,7 +37,7 @@ graph TD
   Contract -. "events<br/>(OrderMatched)" .-> MM
   MM -- "getMarketPrice()" --> Contract
 
-  Keeper -- "liquidateBatch()" --> Contract
+  Keeper -- "multicallStopOnFailure(<br/>liquidatePosition / liquidateOrder)" --> Contract
   Contract -. "events<br/>(Transfer, OrderMatched,<br/>PositionLiquidated)" .-> Keeper
 
   Collateral -. "ERC-20 transfers" .-> Contract
