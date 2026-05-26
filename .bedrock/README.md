@@ -4,7 +4,9 @@ Terraform/Terragrunt infrastructure for deploying the Lumerin Derivatives Market
 
 ## Overview
 
-Infrastructure as Code for the derivatives-marketplace repository, co-located with application code and CI/CD pipeline. Currently deploys the liquidation keeper service across dev/stg/lmn environments.
+Infrastructure as Code for the derivatives-marketplace repository, co-located with application code and CI/CD pipeline.
+
+**Perps keeper (ECS):** Deprecated as of 2026-Q2. Unified cross-venue liquidation runs from [collateral-margin](https://github.com/Lumerin-protocol/collateral-margin) (`svc-col-mar-keeper-*` on the shared `ecs-derivatives-marketplace-*` cluster). Set `perpskeeper_service.create = false` in bedrock tfvars and apply to remove legacy resources.
 
 ## Architecture
 
