@@ -1,68 +1,16 @@
-name: Keeper E2E Tests
+name: Keeper E2E Tests (deprecated)
+
+# Legacy keeper tests for the derivatives-marketplace/keeper package.
+# Active keeper code and CI live in Lumerin-protocol/collateral-margin.
 
 on:
-  push:
-    branches: [main, dev, stg]
-    paths:
-      - 'keeper/**'
-      - 'contracts/contracts/**'
-      - 'contracts/abi/**'
-      - '.github/workflows/keeper-e2e.yml'
-
-  pull_request:
-    paths:
-      - 'keeper/**'
-      - 'contracts/contracts/**'
-      - 'contracts/abi/**'
-      - '.github/workflows/keeper-e2e.yml'
-
   workflow_dispatch:
 
-concurrency:
-  group: keeper-e2e-${{ github.ref }}
-  cancel-in-progress: true
-
-defaults:
-  run:
-    shell: bash
-
 jobs:
-  test:
-    name: Keeper E2E Tests
+  deprecated:
+    name: Deprecated
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.28.1
-          run_install: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-          cache-dependency-path: |
-            contracts/pnpm-lock.yaml
-            keeper/pnpm-lock.yaml
-
-      - name: Install contract dependencies
-        working-directory: ./contracts
-        run: pnpm install --frozen-lockfile
-
-      - name: Install keeper dependencies
-        working-directory: ./keeper
-        run: pnpm install --frozen-lockfile
-
-      - name: Compile contracts & copy ABIs
-        working-directory: ./keeper
-        run: pnpm pretest
-
-      - name: Run E2E tests
-        working-directory: ./keeper
-        run: pnpm test
+      - run: |
+          echo "::error::Keeper E2E for this repo is retired. See collateral-margin/keeper and keeper-test.yml."
+          exit 1
