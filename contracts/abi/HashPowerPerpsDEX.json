@@ -103,6 +103,17 @@
     "type": "error"
   },
   {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "index",
+        "type": "uint256"
+      }
+    ],
+    "name": "MulticallSubCallOutOfGas",
+    "type": "error"
+  },
+  {
     "inputs": [],
     "name": "NotInitializing",
     "type": "error"
@@ -125,6 +136,16 @@
   {
     "inputs": [],
     "name": "OrderNotBelongToSender",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "OrderNotBelongToUser",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "OrdersStillOpen",
     "type": "error"
   },
   {
@@ -379,6 +400,37 @@
       }
     ],
     "name": "OrderCreated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "orderId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "liquidator",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "fee",
+        "type": "uint256"
+      }
+    ],
+    "name": "OrderLiquidated",
     "type": "event"
   },
   {
@@ -1112,12 +1164,30 @@
   {
     "inputs": [
       {
-        "internalType": "address[]",
-        "name": "_users",
-        "type": "address[]"
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "_orderId",
+        "type": "bytes32"
       }
     ],
-    "name": "liquidateBatch",
+    "name": "liquidateOrder",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      }
+    ],
+    "name": "liquidatePosition",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -1210,6 +1280,30 @@
     ],
     "name": "multicall",
     "outputs": [
+      {
+        "internalType": "bytes[]",
+        "name": "results",
+        "type": "bytes[]"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes[]",
+        "name": "data",
+        "type": "bytes[]"
+      }
+    ],
+    "name": "multicallStopOnFailure",
+    "outputs": [
+      {
+        "internalType": "bool[]",
+        "name": "successes",
+        "type": "bool[]"
+      },
       {
         "internalType": "bytes[]",
         "name": "results",

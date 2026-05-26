@@ -4,6 +4,59 @@ import { AggregatorV3InterfaceAbi as aggregatorV3InterfaceAbi } from "../../cont
 import type { Config } from "./config.ts";
 import type { PositionTracker, UserState } from "./positionTracker.ts";
 import type pino from "pino";
+import { encodeFunctionData, type Address, type Hex } from "viem";
+
+/**
+ * Per-user gas overhead for the two extra delegatecall frames added by the
+ * `multicallStopOnFailure(multicallStopOnFailure(liquidatePosition))` nesting.
+ * Used as a floor when sizing the batch tx gas — see {@link buildBatchGasLimit}.
+ */
+const NESTED_MULTICALL_OVERHEAD_PER_USER = 50_000n;
+
+/**
+ * Encode a `liquidatePosition` sub-call wrapped in a single-entry inner
+ * `multicallStopOnFailure`. The inner converts a per-user revert
+ * (`NotLiquidatable`, `OrdersStillOpen`, etc.) into a successful return,
+ * so the caller's outer multicall can skip and continue to the next user.
+ *
+ * Composition: `outer = multicallStopOnFailure([encodeInnerLiquidatePosition(u_i) for u_i in users])`.
+ */
+function encodeInnerLiquidatePosition(user: Address): Hex {
+  return encodeFunctionData({
+    abi: hashPowerPerpsDexAbi,
+    functionName: "multicallStopOnFailure",
+    args: [
+      [
+        encodeFunctionData({
+          abi: hashPowerPerpsDexAbi,
+          functionName: "liquidatePosition",
+          args: [user],
+        }),
+      ],
+    ],
+  });
+}
+
+/**
+ * Sum per-user `liquidatePosition` gas estimates plus a fixed per-user
+ * overhead for the nested-multicall framing, then apply a 20% safety buffer.
+ *
+ * `eth_estimateGas` over the outer multicall can silently under-estimate
+ * (an OOG inside an inner multicall reverts the inner with a non-empty
+ * selector, which the outer treats as a normal stop instead of as gas
+ * starvation), so we don't trust it on its own — we use this floor.
+ */
+function buildBatchGasLimit(perUserEstimates: readonly bigint[]): bigint {
+  const sum = perUserEstimates.reduce((acc, g) => acc + g, 0n);
+  const overhead = NESTED_MULTICALL_OVERHEAD_PER_USER * BigInt(perUserEstimates.length);
+  return ((sum + overhead) * 12n) / 10n;
+}
+
+interface ValidatedCandidate {
+  user: UserState;
+  /** Gas estimate for the unwrapped per-user `liquidatePosition` call. */
+  gasEstimate: bigint;
+}
 
 export class Liquidator {
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -162,7 +215,12 @@ export class Liquidator {
       const validated = await this.validateCandidates(candidates, currentPrice);
       if (validated.length === 0) return;
 
-      await this.executeBatchLiquidation(validated, currentPrice);
+      const [first, ...rest] = validated;
+      if (first !== undefined && rest.length === 0) {
+        await this.executeSingleLiquidation(first, currentPrice);
+      } else {
+        await this.executeBatchLiquidation(validated, currentPrice);
+      }
     } catch (err) {
       this.logger.error({ err }, "Price check failed");
     }
@@ -197,13 +255,13 @@ export class Liquidator {
   private async validateCandidates(
     candidates: UserState[],
     currentPrice: bigint,
-  ): Promise<UserState[]> {
+  ): Promise<ValidatedCandidate[]> {
     const [gasPrice, ethPrice] = await Promise.all([
       this.publicClient.getGasPrice(),
       this.getEthPrice(),
     ]);
 
-    const validated: UserState[] = [];
+    const validated: ValidatedCandidate[] = [];
 
     for (const user of candidates) {
       const logCtx = this.logContext(user, currentPrice);
@@ -212,16 +270,16 @@ export class Liquidator {
         await this.publicClient.simulateContract({
           address: this.config.perpsAddress,
           abi: hashPowerPerpsDexAbi,
-          functionName: "liquidateBatch",
-          args: [[user.address]],
+          functionName: "liquidatePosition",
+          args: [user.address],
           account: this.account,
         });
 
         const gasEstimate = await this.publicClient.estimateContractGas({
           address: this.config.perpsAddress,
           abi: hashPowerPerpsDexAbi,
-          functionName: "liquidateBatch",
-          args: [[user.address]],
+          functionName: "liquidatePosition",
+          args: [user.address],
           account: this.account,
         });
 
@@ -259,11 +317,14 @@ export class Liquidator {
           continue;
         }
 
-        validated.push(user);
+        validated.push({ user, gasEstimate });
       } catch (error) {
         const errorStr = String(error);
-        if (errorStr.includes("NotLiquidatable")) {
-          this.logger.warn(logCtx, "Simulation reverted: NotLiquidatable (state drift)");
+        if (errorStr.includes("NotLiquidatable") || errorStr.includes("OrdersStillOpen")) {
+          this.logger.warn(
+            { ...logCtx, reason: errorStr.includes("OrdersStillOpen") ? "OrdersStillOpen" : "NotLiquidatable" },
+            "Simulation reverted (state drift)",
+          );
         } else {
           this.logger.error({ logCtx }, "Liquidation validation failed");
         }
@@ -275,23 +336,36 @@ export class Liquidator {
 
   // ── Liquidation execution ───────────────────────────────────────────────
 
-  private async executeBatchLiquidation(users: UserState[], currentPrice: bigint): Promise<void> {
-    const addresses = users.map((u) => u.address);
+  /**
+   * Bundle N validated users into a single tx via nested
+   * `multicallStopOnFailure(multicallStopOnFailure(liquidatePosition))`.
+   * The inner multicall absorbs per-user reverts (state drift between
+   * validation and execution) so the outer one keeps going. Falls back
+   * to per-user calls on tx-level failure.
+   */
+  private async executeBatchLiquidation(
+    validated: ValidatedCandidate[],
+    currentPrice: bigint,
+  ): Promise<void> {
+    const addresses = validated.map((v) => v.user.address);
+    const innerCalls = addresses.map(encodeInnerLiquidatePosition);
+    const gas = buildBatchGasLimit(validated.map((v) => v.gasEstimate));
 
     try {
       const txHash = await this.walletClient.writeContract({
         address: this.config.perpsAddress,
         abi: hashPowerPerpsDexAbi,
-        functionName: "liquidateBatch",
-        args: [addresses],
+        functionName: "multicallStopOnFailure",
+        args: [innerCalls],
         account: this.account,
+        gas,
       });
 
       this.logger.info(
-        { count: users.length, users: addresses, txHash },
+        { count: validated.length, users: addresses, gas, txHash },
         "Batch liquidation tx submitted",
       );
-      this._liquidationsExecuted += users.length;
+      this._liquidationsExecuted += validated.length;
 
       const receipt = await this.publicClient.waitForTransactionReceipt({ hash: txHash });
       this.logger.info(
@@ -300,38 +374,43 @@ export class Liquidator {
           status: receipt.status,
           gasUsed: receipt.gasUsed,
           blockNumber: receipt.blockNumber,
-          count: users.length,
+          count: validated.length,
         },
         "Batch liquidation confirmed",
       );
 
       if (receipt.status === "success") {
-        for (const user of users) {
-          await this.tracker.syncUser(user.address);
+        for (const v of validated) {
+          await this.tracker.syncUser(v.user.address);
         }
       }
     } catch (error) {
       this.logger.warn(
-        { count: users.length, users: addresses, error },
+        { count: validated.length, users: addresses, error },
         "Batch liquidation failed, falling back to individual calls",
       );
 
-      for (const user of users) {
-        await this.executeSingleLiquidation(user, currentPrice);
+      for (const v of validated) {
+        await this.executeSingleLiquidation(v, currentPrice);
       }
     }
   }
 
-  private async executeSingleLiquidation(user: UserState, currentPrice: bigint): Promise<void> {
+  private async executeSingleLiquidation(
+    validated: ValidatedCandidate,
+    currentPrice: bigint,
+  ): Promise<void> {
+    const { user, gasEstimate } = validated;
     const logCtx = this.logContext(user, currentPrice);
 
     try {
       const txHash = await this.walletClient.writeContract({
         address: this.config.perpsAddress,
         abi: hashPowerPerpsDexAbi,
-        functionName: "liquidateBatch",
-        args: [[user.address]],
+        functionName: "liquidatePosition",
+        args: [user.address],
         account: this.account,
+        gas: (gasEstimate * 12n) / 10n,
       });
 
       this.logger.info({ ...logCtx, txHash }, "Liquidation tx submitted");

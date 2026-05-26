@@ -60,6 +60,17 @@ export const contractErrors = [
   {
     "inputs": [
       {
+        "internalType": "uint256",
+        "name": "index",
+        "type": "uint256"
+      }
+    ],
+    "name": "MulticallSubCallOutOfGas",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "string",
         "name": "str",
         "type": "string"
@@ -173,6 +184,11 @@ export const contractErrors = [
       }
     ],
     "name": "BeaconInvalidImplementation",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "OrderNotBelongToUser",
     "type": "error"
   },
   {
@@ -335,6 +351,11 @@ export const contractErrors = [
       }
     ],
     "name": "ERC20InvalidApprover",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "OrdersStillOpen",
     "type": "error"
   },
   {

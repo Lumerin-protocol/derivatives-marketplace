@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
-import { parseUnits, parseEventLogs } from "viem";
+import { encodeFunctionData, parseUnits, parseEventLogs } from "viem";
 import {
   deployPerpsFixture,
   deployPerpsWithFundingFixture,
@@ -451,7 +451,20 @@ describe("HashPowerPerpsDEX - Funding Fees", function () {
       const isLiquidatable = await perps.read.isLiquidatable([seller.account.address]);
       assert.ok(isLiquidatable);
 
-      await perps.write.liquidateBatch([[seller.account.address]], { account: buyer2.account });
+      // Strict orders-first invariant: must cancel resting orders before the position can be liquidated.
+      const sellerOrders = await perps.read.getUserOrders([seller.account.address]);
+      if (sellerOrders.length > 0) {
+        const calls = sellerOrders.map((id) =>
+          encodeFunctionData({
+            abi: perps.abi,
+            functionName: "liquidateOrder",
+            args: [seller.account.address, id],
+          }),
+        );
+        await perps.write.multicallStopOnFailure([calls], { account: buyer2.account });
+      }
+
+      await perps.write.liquidatePosition([seller.account.address], { account: buyer2.account });
 
       const position = await perps.read.getUserPosition([seller.account.address]);
       assert.equal(position.netQuantity, 0n);
