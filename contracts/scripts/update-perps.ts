@@ -121,6 +121,23 @@ async function main() {
     logStep("Init version", postVersion.toString());
   }
 
+  // Optional: plug in the points/rewards hook. The venue must already hold
+  // HOOK_CALLER_ROLE on the hook (granted by the points deploy) before this.
+  const pointsHookAddress = (process.env.POINTS_HOOK_ADDRESS ?? "") as Hex;
+  if (pointsHookAddress && pointsHookAddress !== zeroAddress) {
+    const currentHook = await perps.read.hook();
+    if (currentHook.toLowerCase() === pointsHookAddress.toLowerCase()) {
+      logStep("setHook", `skipped (already set to ${pointsHookAddress})`);
+    } else {
+      logInfo("setHook", { current: currentHook, new: pointsHookAddress });
+      await logPrompt("Proceed?");
+      const sim = await perps.simulate.setHook([pointsHookAddress]);
+      const receipt = await writeAndWait(deployer, sim);
+      logStep("setHook", txUrl(pc, receipt.transactionHash));
+      logStep("Hook", await perps.read.hook());
+    }
+  }
+
   logSuccess(addrUrl(pc, proxyAddress));
 }
 
