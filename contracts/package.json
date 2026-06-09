@@ -41,7 +41,7 @@
     "hashprice-oracle": "github:Lumerin-protocol/hashprice-oracle.git#main",
     "multicall3": "github:mds1/multicall3",
     "solidity-linked-list": "^6.5.0",
-    "collateral-margin": "github:Lumerin-protocol/collateral-margin.git#dev"
+    "collateral-margin": "github:Lumerin-protocol/collateral-margin.git#feat/points"
   },
   "packageManager": "pnpm@10.28.1"
 }
