@@ -123,7 +123,7 @@ async function main() {
 
   // Optional: plug in the points/rewards hook. The venue must already hold
   // HOOK_CALLER_ROLE on the hook (granted by the points deploy) before this.
-  const pointsHookAddress = (process.env.POINTS_HOOK_ADDRESS ?? "") as Hex;
+  const pointsHookAddress = (process.env.HOOK_ADDRESS ?? "") as Hex;
   if (pointsHookAddress && pointsHookAddress !== zeroAddress) {
     const currentHook = await perps.read.hook();
     if (currentHook.toLowerCase() === pointsHookAddress.toLowerCase()) {
