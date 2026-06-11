@@ -143,6 +143,41 @@ describe("HashPowerPerpsDEX - points hook wiring", function () {
     });
   });
 
+  describe("maker price-improvement multiplier", function () {
+    it("boosts maker points when the resting quote sits at the oracle price", async function () {
+      const { contracts, accounts, config } = await networkHelpers.loadFixture(
+        deployPerpsWithCollateralFixture,
+      );
+      const { perps } = contracts;
+      const { owner, seller, buyer } = accounts;
+
+      const { points, hook } = await deployPointsStack(perps.address, owner);
+      await perps.write.setHook([hook.address], { account: owner.account });
+
+      // Maker must pay a positive fee to earn; enable a 3x bonus tapering over a 1% spread.
+      await perps.write.setMatchFee([10, 5], { account: owner.account });
+      await hook.write.setPriceImprovement([3n * WAD, WAD / 100n], { account: owner.account });
+
+      const marketPrice = await perps.read.getMarketPrice();
+      const qty = parseUnits("1", config.quantityDecimals);
+
+      // Seller rests at the oracle price (spread 0 → full 3x), buyer takes.
+      await perps.write.createOrder([marketPrice, -qty], { account: seller.account });
+      await perps.write.createOrder([marketPrice, qty], { account: buyer.account });
+
+      const notional = (marketPrice * qty) / 10n ** BigInt(config.quantityDecimals);
+
+      // wMaker == 1 WAD and the maker quoted at the reference price → 3x notional.
+      assert.equal(
+        await points.read.balanceOf([seller.account.address]),
+        notional * 3n,
+        "maker earns 3x at zero spread",
+      );
+      // The taker is unaffected by the maker multiplier.
+      assert.equal(await points.read.balanceOf([buyer.account.address]), notional, "taker earns notional");
+    });
+  });
+
   describe("onLiquidation", function () {
     it("mints flat keeper points to the liquidator on a position liquidation", async function () {
       const data = await networkHelpers.loadFixture(deployPerpsWithLiquidatablePositionFixture);

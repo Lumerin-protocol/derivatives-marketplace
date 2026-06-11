@@ -243,13 +243,31 @@ contract HashPowerPerpsDEX is
 
     /// @dev Notify the points hook of a fill. Skipped when no hook is configured. The call is
     ///      intentionally not isolated: a reverting hook reverts the fill (unplug via setHook).
-    function _notifyFill(address _maker, address _taker, uint256 _notional, int256 _makerFee, int256 _takerFee)
-        private
-    {
+    ///      `_makerPrice` is the resting maker order's price; `_refPriceForPoints()` supplies the
+    ///      oracle reference for the hook's price-improvement multiplier (0 when stale → no bonus).
+    function _notifyFill(
+        address _maker,
+        address _taker,
+        uint256 _notional,
+        int256 _makerFee,
+        int256 _takerFee,
+        uint256 _makerPrice
+    ) private {
         IPointsHook _hook = hook;
         if (address(_hook) == address(0)) return;
         uint256 takerFeeAbs = _takerFee > 0 ? uint256(_takerFee) : 0;
-        _hook.onFill(_maker, _taker, _notional, _makerFee, takerFeeAbs);
+        _hook.onFill(_maker, _taker, _notional, _makerFee, takerFeeAbs, _makerPrice, _refPriceForPoints());
+    }
+
+    /// @dev Oracle reference price for the points price-improvement multiplier, in the same
+    ///      units as an order's price. Unlike `getMarketPrice()`, this returns 0 instead of
+    ///      reverting when the oracle is stale or non-positive, so a points-side read can never
+    ///      block a fill — the hook simply applies no bonus (1x) when the reference is 0.
+    function _refPriceForPoints() private view returns (uint256) {
+        (, int256 answer,, uint256 updatedAt,) = priceOracle.latestRoundData();
+        if (answer <= 0) return 0;
+        if (block.timestamp - updatedAt > MAX_ORACLE_STALENESS) return 0;
+        return _roundToNearest(_scaleDecimals(uint256(answer), oracleDecimals, tokenDecimals), minimumPriceIncrement);
     }
 
     /// @dev Notify the points hook of a liquidation. Skipped when no hook is configured. Not
@@ -433,7 +451,7 @@ contract HashPowerPerpsDEX is
         _transferFee(_taker, takerFee);
         _transferFee(makerParticipant, makerFee);
 
-        _notifyFill(makerParticipant, _taker, notionalValue, makerFee, takerFee);
+        _notifyFill(makerParticipant, _taker, notionalValue, makerFee, takerFee, makerPrice);
 
         // Update cached order value (maker is buy when taker is selling, and vice versa)
         _getOrderValue(_remainingQty < 0)[makerParticipant] -= notionalValue;
