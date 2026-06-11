@@ -13,6 +13,7 @@ import { MulticallStopOnFailureUpgradeable } from "./MulticallStopOnFailureUpgra
 import { AggregatorV3Interface } from "./interfaces/AggregatorV3Interface.sol";
 import { ICollateralVault } from "collateral-margin/contracts/contracts/interfaces/ICollateralVault.sol";
 import { IPortfolioMarginEngine } from "collateral-margin/contracts/contracts/interfaces/IPortfolioMarginEngine.sol";
+import { IPointsHook } from "collateral-margin/contracts/contracts/interfaces/IPointsHook.sol";
 import { console } from "hardhat/console.sol";
 import { Versionable } from "./interfaces/Versionable.sol";
 
@@ -41,7 +42,7 @@ contract HashPowerPerpsDEX is
     uint8 public constant QUANTITY_DECIMALS = 6;
     uint256 public constant MAX_PRICE_LEVELS_PER_SIDE = 200; // Max active price levels per side (bid/ask)
     uint256 public immutable minimumPriceIncrement; // Minimum price increment for orders
-    string public constant VERSION = "2.1.0";
+    string public constant VERSION = "2.3.0";
 
     // State variables
     IERC20 public collateralToken;
@@ -91,6 +92,14 @@ contract HashPowerPerpsDEX is
     // Level 2: Unified collateral vault
     ICollateralVault public vault;
     IPortfolioMarginEngine public portfolioMargin;
+
+    /// @notice Optional points/rewards hook notified on fills and liquidations.
+    /// @dev Appended at the end of storage to preserve the upgradeable layout. When unset
+    ///      (`address(0)`) the venue mints no points and skips the call entirely. When set,
+    ///      hook calls are NOT wrapped in try/catch: a reverting hook will revert the fill or
+    ///      liquidation. The hook is a simple, owner-controlled contract and can be unplugged
+    ///      instantly via `setHook(address(0))`; unplug it before finalizing the POINTS token.
+    IPointsHook public hook;
 
     /// @notice Represents an order in the order book
     struct Order {
@@ -217,6 +226,56 @@ contract HashPowerPerpsDEX is
     /// @notice Set the portfolio margin engine for cross-product margin checks.
     function setPortfolioMargin(IPortfolioMarginEngine _pm) external onlyOwner {
         portfolioMargin = _pm;
+    }
+
+    /// @notice Emitted whenever the points hook address changes.
+    event HookUpdated(address indexed hook);
+
+    /// @notice Set (or clear) the points/rewards hook. Pass `address(0)` to disable points.
+    /// @dev The venue proxy must hold `HOOK_CALLER_ROLE` on the hook BEFORE it is plugged in:
+    ///      hook calls are not try/catch-isolated, so a hook that reverts (e.g. missing role,
+    ///      or after the POINTS token is finalized) would block fills and liquidations. Clear
+    ///      the hook with `address(0)` to disable points instantly.
+    function setHook(address _hook) external onlyOwner {
+        hook = IPointsHook(_hook);
+        emit HookUpdated(_hook);
+    }
+
+    /// @dev Notify the points hook of a fill. Skipped when no hook is configured. The call is
+    ///      intentionally not isolated: a reverting hook reverts the fill (unplug via setHook).
+    ///      `_makerPrice` is the resting maker order's price; `_refPriceForPoints()` supplies the
+    ///      oracle reference for the hook's price-improvement multiplier (0 when stale → no bonus).
+    function _notifyFill(
+        address _maker,
+        address _taker,
+        uint256 _notional,
+        int256 _makerFee,
+        int256 _takerFee,
+        uint256 _makerPrice
+    ) private {
+        IPointsHook _hook = hook;
+        if (address(_hook) == address(0)) return;
+        uint256 takerFeeAbs = _takerFee > 0 ? uint256(_takerFee) : 0;
+        _hook.onFill(_maker, _taker, _notional, _makerFee, takerFeeAbs, _makerPrice, _refPriceForPoints());
+    }
+
+    /// @dev Oracle reference price for the points price-improvement multiplier, in the same
+    ///      units as an order's price. Unlike `getMarketPrice()`, this returns 0 instead of
+    ///      reverting when the oracle is stale or non-positive, so a points-side read can never
+    ///      block a fill — the hook simply applies no bonus (1x) when the reference is 0.
+    function _refPriceForPoints() private view returns (uint256) {
+        (, int256 answer,, uint256 updatedAt,) = priceOracle.latestRoundData();
+        if (answer <= 0) return 0;
+        if (block.timestamp - updatedAt > MAX_ORACLE_STALENESS) return 0;
+        return _roundToNearest(_scaleDecimals(uint256(answer), oracleDecimals, tokenDecimals), minimumPriceIncrement);
+    }
+
+    /// @dev Notify the points hook of a liquidation. Skipped when no hook is configured. Not
+    ///      isolated: a reverting hook reverts the liquidation (unplug via setHook).
+    function _notifyLiquidation(address _liquidator, uint256 _fee) private {
+        IPointsHook _hook = hook;
+        if (address(_hook) == address(0)) return;
+        _hook.onLiquidation(_liquidator, _fee);
     }
 
     /// @notice Returns the user's collateral balance from the vault.
@@ -391,6 +450,8 @@ contract HashPowerPerpsDEX is
 
         _transferFee(_taker, takerFee);
         _transferFee(makerParticipant, makerFee);
+
+        _notifyFill(makerParticipant, _taker, notionalValue, makerFee, takerFee, makerPrice);
 
         // Update cached order value (maker is buy when taker is selling, and vice versa)
         _getOrderValue(_remainingQty < 0)[makerParticipant] -= notionalValue;
@@ -680,6 +741,8 @@ contract HashPowerPerpsDEX is
 
         emit OrderCancelled(_orderId, _user);
         emit OrderLiquidated(_orderId, _user, _msgSender(), paid);
+
+        _notifyLiquidation(_msgSender(), paid);
     }
 
     /// @dev Closes the user's position, settles PnL against the insurance fund, and pays the
@@ -730,6 +793,8 @@ contract HashPowerPerpsDEX is
         usersWithPositions.remove(_user);
 
         emit PositionLiquidated(_user, _msgSender(), closedQuantity, pnl, liquidatorFee);
+
+        _notifyLiquidation(_msgSender(), liquidatorFee);
     }
 
     /// @notice Settle a reduced portion of a position (when offsetting)
