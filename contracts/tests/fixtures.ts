@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { parseUnits, maxUint256, encodeFunctionData } from "viem";
+import { parseUnits, maxUint256, encodeFunctionData, getContract } from "viem";
+import type { Abi, Address, PublicClient, WalletClient, GetContractReturnType } from "viem";
 import type { NetworkConnection } from "hardhat/types/network";
+import type { ArtifactMap } from "hardhat/types/artifacts";
 import {
   defaultSeries,
   HASHRATE_INDEX_PRICE_E8,
@@ -19,6 +21,66 @@ type Conn = NetworkConnection;
 
 const MULTICALL3_ADDRESS = "0xcA11bde05977b3631167028862bE2a173976CA11" as const;
 
+// Contract ABIs mapping from Hardhat's artifact map.
+type ContractAbis = {
+  [K in keyof ArtifactMap]: ArtifactMap[K] extends { abi: infer A } ? A : never;
+};
+
+type ContractInstance<ContractName extends keyof ContractAbis> = GetContractReturnType<
+  ContractAbis[ContractName],
+  { public: PublicClient; wallet: WalletClient },
+  Address
+>;
+
+/**
+ * Deploy a contract using raw viem with a dynamically loaded artifact JSON.
+ *
+ * Mirrors the futures harness so the indexer integration tests (which run
+ * from `perps/indexer`, a Hardhat project with no Solidity sources of its
+ * own) can deploy the real contracts by reading the prebuilt artifact off
+ * disk, instead of relying on Hardhat's name-based artifact manager.
+ *
+ * @param walletClient - Viem wallet client (must have an account)
+ * @param publicClient - Viem public client (for the deploy receipt)
+ * @param artifactPath - Path to the artifact JSON, relative to this file
+ * @param args - Constructor arguments
+ */
+export async function deployContract<ContractName extends keyof ContractAbis>(
+  walletClient: WalletClient,
+  publicClient: PublicClient,
+  artifactPath: string,
+  args: unknown[] = [],
+): Promise<ContractInstance<ContractName>> {
+  const content = readFileSync(new URL(artifactPath, import.meta.url), "utf-8");
+  const artifact = JSON.parse(content);
+
+  const abi = artifact.abi as Abi;
+  const bytecode = (artifact.bytecode?.object ?? artifact.bytecode) as `0x${string}`;
+
+  const { deployContract: viemDeploy } = await import("viem/actions");
+  if (walletClient.account === undefined) {
+    throw new Error("Wallet client must have an account");
+  }
+  const txHash = await viemDeploy(walletClient, {
+    abi,
+    bytecode,
+    args,
+    account: walletClient.account,
+    chain: walletClient.chain,
+  });
+
+  const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+  if (!receipt.contractAddress) {
+    throw new Error("Contract deployment failed: no contract address in receipt");
+  }
+
+  return getContract({
+    address: receipt.contractAddress,
+    abi,
+    client: { public: publicClient, wallet: walletClient, chain: walletClient.chain },
+  }) as unknown as ContractInstance<ContractName>;
+}
+
 function loadMulticall3DeployedBytecode(): `0x${string}` {
   const path = resolve(
     import.meta.dirname,
@@ -35,14 +97,24 @@ export async function deployPerpsFixture(conn: Conn) {
   const pc = await viem.getPublicClient();
   const tc = await viem.getTestClient();
 
-  const usdcMock = await viem.deployContract("USDCMock", []);
+  const usdcMock = await deployContract<"USDCMock">(
+    owner,
+    pc,
+    "../artifacts/contracts/mocks/USDCMock.sol/USDCMock.json",
+    [],
+  );
   const tokenDecimals = await usdcMock.read.decimals();
 
   const topUpBalanceUSDC = parseUnits("1000", tokenDecimals);
 
   const oracleDecimals = 6;
   const initialPrice = parseUnits(HASHRATE_USD_PER_100TH_DAY, oracleDecimals);
-  const priceOracle = await viem.deployContract("PriceOracleMock", [initialPrice, oracleDecimals]);
+  const priceOracle = await deployContract<"PriceOracleMock">(
+    owner,
+    pc,
+    "../artifacts/contracts/mocks/PriceOracleMock.sol/PriceOracleMock.json",
+    [initialPrice, oracleDecimals],
+  );
 
   await usdcMock.write.transfer([buyer.account.address, topUpBalanceUSDC]);
   await usdcMock.write.transfer([buyer2.account.address, topUpBalanceUSDC]);
@@ -58,43 +130,90 @@ export async function deployPerpsFixture(conn: Conn) {
   const collateralAmount = parseUnits("100000", tokenDecimals);
 
   // Deploy vault first (need address for perps initialize)
-  const vaultImpl = await viem.deployContract("CollateralVault", []);
-  const vaultProxy = await viem.deployContract("ERC1967Proxy", [
-    vaultImpl.address as `0x${string}`,
-    encodeFunctionData({
-      abi: vaultImpl.abi,
-      functionName: "initialize",
-      args: [usdcMock.address],
-    }),
-  ]);
-  const vault = await viem.getContractAt("CollateralVault", vaultProxy.address);
+  const vaultImpl = await deployContract<"CollateralVault">(
+    owner,
+    pc,
+    "../artifacts/collateral-margin/contracts/contracts/CollateralVault.sol/CollateralVault.json",
+    [],
+  );
+  const vaultProxy = await deployContract<"ERC1967Proxy">(
+    owner,
+    pc,
+    "../artifacts/@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol/ERC1967Proxy.json",
+    [
+      vaultImpl.address as `0x${string}`,
+      encodeFunctionData({
+        abi: vaultImpl.abi,
+        functionName: "initialize",
+        args: [usdcMock.address],
+      }),
+    ],
+  );
+  const vault = getContract({
+    abi: vaultImpl.abi,
+    address: vaultProxy.address,
+    client: { public: pc, wallet: owner },
+  });
 
   // Deploy perps with vault
-  const perpsImpl = await viem.deployContract("HashPowerPerpsDEX", [minimumPriceIncrement]);
-  const perpsProxy = await viem.deployContract("ERC1967Proxy", [
-    perpsImpl.address as `0x${string}`,
-    encodeFunctionData({
-      abi: perpsImpl.abi,
-      functionName: "initialize",
-      args: [priceOracle.address, vault.address],
-    }),
-  ]);
-  const perps = await viem.getContractAt("HashPowerPerpsDEX", perpsProxy.address);
+  const perpsImpl = await deployContract<"HashPowerPerpsDEX">(
+    owner,
+    pc,
+    "../artifacts/contracts/HashPowerPerpsDEX.sol/HashPowerPerpsDEX.json",
+    [minimumPriceIncrement],
+  );
+  const perpsProxy = await deployContract<"ERC1967Proxy">(
+    owner,
+    pc,
+    "../artifacts/@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol/ERC1967Proxy.json",
+    [
+      perpsImpl.address as `0x${string}`,
+      encodeFunctionData({
+        abi: perpsImpl.abi,
+        functionName: "initialize",
+        args: [priceOracle.address, vault.address],
+      }),
+    ],
+  );
+  const perps = getContract({
+    abi: perpsImpl.abi,
+    address: perpsProxy.address,
+    client: { public: pc, wallet: owner },
+  });
   const quantityDecimals = await perps.read.QUANTITY_DECIMALS();
   const fundingDecimals = await perps.read.FUNDING_DECIMALS();
 
   // Deploy PME, then register the perps DEX and an options-engine mock on it.
-  const optionsMock = await viem.deployContract("OptionsEngineMock", []);
-  const pmeImpl = await viem.deployContract("PortfolioMarginEngine", []);
-  const pmeProxy = await viem.deployContract("ERC1967Proxy", [
-    pmeImpl.address as `0x${string}`,
-    encodeFunctionData({
-      abi: pmeImpl.abi,
-      functionName: "initialize",
-      args: [vault.address],
-    }),
-  ]);
-  const pme = await viem.getContractAt("PortfolioMarginEngine", pmeProxy.address);
+  const optionsMock = await deployContract<"OptionsEngineMock">(
+    owner,
+    pc,
+    "../artifacts/collateral-margin/contracts/contracts/mocks/OptionsEngineMock.sol/OptionsEngineMock.json",
+    [],
+  );
+  const pmeImpl = await deployContract<"PortfolioMarginEngine">(
+    owner,
+    pc,
+    "../artifacts/collateral-margin/contracts/contracts/PortfolioMarginEngine.sol/PortfolioMarginEngine.json",
+    [],
+  );
+  const pmeProxy = await deployContract<"ERC1967Proxy">(
+    owner,
+    pc,
+    "../artifacts/@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol/ERC1967Proxy.json",
+    [
+      pmeImpl.address as `0x${string}`,
+      encodeFunctionData({
+        abi: pmeImpl.abi,
+        functionName: "initialize",
+        args: [vault.address],
+      }),
+    ],
+  );
+  const pme = getContract({
+    abi: pmeImpl.abi,
+    address: pmeProxy.address,
+    client: { public: pc, wallet: owner },
+  });
   await pme.write.setPerps([perps.address], { account: owner.account });
   await pme.write.setOptions([optionsMock.address], { account: owner.account });
 
