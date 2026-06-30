@@ -38,6 +38,8 @@ dataSources:
           handler: handleOrderCreated
         - event: OrderCancelled(indexed bytes32,indexed address)
           handler: handleOrderCancelled
+        - event: OrderLiquidated(indexed bytes32,indexed address,indexed address,uint256)
+          handler: handleOrderLiquidated
         - event: OrderUpdated(indexed bytes32,indexed address,int256)
           handler: handleOrderUpdated
         - event: OrderMatched(indexed bytes32,indexed address,indexed address,uint256,int256,int256,int256,int256,int256,uint256,uint256)

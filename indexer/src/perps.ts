@@ -9,6 +9,7 @@ import {
   Initialized,
   OrderCreated,
   OrderCancelled,
+  OrderLiquidated,
   OrderUpdated,
   OrderMatched,
   PositionLiquidated,
@@ -29,7 +30,6 @@ import {
   Order,
   Trade,
   Fill,
-  Liquidation,
   PriceLevel,
   FundingUpdate,
   FundingSettlement,
@@ -276,6 +276,14 @@ export function handleOrderCancelled(event: OrderCancelled): void {
     return;
   }
 
+  // `liquidateOrder` co-emits OrderCancelled + OrderLiquidated in one tx. Either
+  // log order must end at LIQUIDATED, so a cancel must never downgrade an order
+  // already flagged liquidated (and must not double-decrement book/user/global
+  // counters, which handleOrderLiquidated already adjusted on the cancel leg).
+  if (order.status == "LIQUIDATED") {
+    return;
+  }
+
   // Update price level
   const level = getOrCreatePriceLevel(order.price, order.isBuy);
   level.totalQuantity = level.totalQuantity.minus(order.quantity);
@@ -301,6 +309,57 @@ export function handleOrderCancelled(event: OrderCancelled): void {
   perps.activeOrders--;
   perps.lastUpdatedAt = event.block.timestamp;
   perps.save();
+}
+
+export function handleOrderLiquidated(event: OrderLiquidated): void {
+  log.info("Order liquidated: {} user {} by {}", [
+    event.params.orderId.toHexString(),
+    event.params.user.toHexString(),
+    event.params.liquidator.toHexString(),
+  ]);
+
+  const order = Order.load(event.params.orderId);
+  if (!order) {
+    log.warning("Order not found: {}", [event.params.orderId.toHexString()]);
+    return;
+  }
+
+  // `liquidateOrder` co-emits OrderCancelled + OrderLiquidated in the same tx
+  // (OrderCancelled first on-chain). LIQUIDATED is the terminal state and must
+  // win regardless of log order, while the book/user/global counters are
+  // decremented exactly once. So only do the book cleanup here if the order is
+  // still open (i.e. OrderLiquidated was processed before its paired
+  // OrderCancelled); otherwise the cancel leg already did it. The paired
+  // OrderCancelled is guarded to skip once status == LIQUIDATED.
+  const alreadyClosed =
+    order.status == "CANCELLED" ||
+    order.status == "FILLED" ||
+    order.status == "LIQUIDATED";
+  if (!alreadyClosed) {
+    const level = getOrCreatePriceLevel(order.price, order.isBuy);
+    level.totalQuantity = level.totalQuantity.minus(order.quantity);
+    level.orderCount--;
+    level.save();
+
+    const user = User.load(order.user);
+    if (user) {
+      user.activeOrderCount--;
+      user.lastActivityAt = event.block.timestamp;
+      user.save();
+    }
+
+    const perps = getOrCreatePerps();
+    perps.activeOrders--;
+    perps.lastUpdatedAt = event.block.timestamp;
+    perps.save();
+  }
+
+  order.status = "LIQUIDATED";
+  order.liquidator = event.params.liquidator;
+  order.liquidationFee = event.params.fee;
+  order.closedAt = event.block.timestamp;
+  order.updatedAt = event.block.timestamp;
+  order.save();
 }
 
 export function handleOrderUpdated(event: OrderUpdated): void {
@@ -448,6 +507,7 @@ function getOrCreateTrade(
     trade.netQuantityAfter = BigInt.zero();
     trade.aggregatedEntryPriceAfter = BigInt.zero();
     trade.fillCount = 0;
+    trade.isLiquidation = false;
     trade.timestamp = timestamp;
     trade.blockNumber = blockNumber;
     trade.transactionHash = txHash;
@@ -715,6 +775,7 @@ function handleFlip(
   newSession.maxQuantity = absBigInt(newNetQuantity);
   newSession.tradingFees = zero;
   newSession.fundingFees = zero;
+  newSession.liquidatedQuantity = zero;
   newSession.openedAt = timestamp;
   newSession.lastTradeAt = timestamp;
   newSession.save();
@@ -801,6 +862,7 @@ function handleNonFlip(
     session.maxQuantity = zero;
     session.tradingFees = zero;
     session.fundingFees = zero;
+    session.liquidatedQuantity = zero;
     user.currentPositionSessionId = id;
   } else {
     const loaded = PositionSession.load(user.currentPositionSessionId);
@@ -904,42 +966,94 @@ export function handlePositionLiquidated(event: PositionLiquidated): void {
     event.params.liquidator,
     event.block.timestamp,
   );
+  const perps = getOrCreatePerps();
+  const quantityScale = BigInt.fromI32(10).pow(u8(perps.quantityDecimals));
 
-  // Create liquidation record
-  const liqId = createEventId(event.transaction.hash, event.logIndex);
-  const liquidation = new Liquidation(liqId);
-  liquidation.user = user.id;
-  liquidation.liquidator = liquidator.id;
-  liquidation.positionSize = event.params.positionSize;
-  liquidation.pnl = event.params.pnl;
-  liquidation.liquidatorFee = event.params.liquidatorFee;
-  liquidation.timestamp = event.block.timestamp;
-  liquidation.blockNumber = event.block.number;
-  liquidation.transactionHash = event.transaction.hash;
-  liquidation.save();
+  const zero = BigInt.zero();
+  const positionSize = event.params.positionSize; // signed closed position
+  const pnl = event.params.pnl;
+  const liquidatorFee = event.params.liquidatorFee;
 
-  // Update user - position is now closed; mark current session as CLOSE if any
-  if (user.currentPositionSessionId.length > 0) {
-    const session = PositionSession.load(user.currentPositionSessionId);
+  // Capture entry price + open session BEFORE they are zeroed/cleared below;
+  // the forced exit price and the Trade.positionSession link both need them.
+  const entryPrice = user.aggregatedEntryPrice;
+  const closingSessionId = user.currentPositionSessionId;
+
+  // Derive the forced exit price from the realized PnL the event reports:
+  //   pnl = (exit - entry) * positionSize / scale
+  //   => exit = entry + pnl * scale / positionSize
+  let exitPrice = entryPrice;
+  if (!positionSize.equals(zero)) {
+    exitPrice = entryPrice.plus(pnl.times(quantityScale).div(positionSize));
+  }
+
+  // The forced trade offsets the closed position, so its signed quantity is the
+  // opposite sign of the closed position size (short close → forced buy → +).
+  const closedQty = positionSize.neg();
+  const absClosed = absBigInt(positionSize);
+
+  // The dedicated Liquidation entity was dropped: the flagged liquidation Trade
+  // below is the single source of truth (it captures positionSize -> signed
+  // tradeQuantity, pnl -> realizedPnl, liquidatorFee -> liquidationFee, the
+  // liquidator, and tx/time). `Perps.totalLiquidations` + `BadDebtEvent` stay.
+
+  // Close the open session with full close stats + denormalized
+  // liquidatedQuantity, and create the forced liquidation Trade linked to it
+  // (the flagged Trade is the single source of truth for the Trades feed).
+  if (closingSessionId.length > 0) {
+    const session = PositionSession.load(closingSessionId);
     if (session) {
+      const oldClosed = session.closedQuantity;
+      session.closedQuantity = oldClosed.plus(absClosed);
+      session.realizedPnl = session.realizedPnl.plus(pnl);
+      if (session.closedQuantity.gt(zero)) {
+        session.closePrice = session.closePrice
+          .times(oldClosed)
+          .plus(exitPrice.times(absClosed))
+          .div(session.closedQuantity);
+      }
+      session.liquidatedQuantity = session.liquidatedQuantity.plus(absClosed);
       session.status = "CLOSE";
       session.lastTradeAt = event.block.timestamp;
       session.save();
+
+      const trade = getOrCreateTrade(
+        event.transaction.hash,
+        user.id,
+        session.id,
+        event.block.timestamp,
+        event.block.number,
+      );
+      trade.tradePrice = exitPrice;
+      trade.tradeQuantity = closedQty;
+      trade.tradingFee = zero;
+      trade.realizedPnl = pnl;
+      trade.netQuantityAfter = zero;
+      trade.aggregatedEntryPriceAfter = zero;
+      // No per-counterparty Fill: a perps liquidation is a forced close against
+      // the insurance fund, so there is no matched order to anchor a Fill to.
+      trade.fillCount = 0;
+      trade.isLiquidation = true;
+      trade.liquidator = event.params.liquidator;
+      trade.liquidationFee = liquidatorFee;
+      trade.save();
+
+      user.tradeCount++;
+      perps.totalTrades++;
     }
   }
-  user.netQuantity = BigInt.zero();
-  user.aggregatedEntryPrice = BigInt.zero();
+
+  // Reset user position state (position is now fully closed).
+  user.netQuantity = zero;
+  user.aggregatedEntryPrice = zero;
   user.currentPositionSessionId = "";
-  user.realizedPnl = user.realizedPnl.plus(event.params.pnl);
+  user.realizedPnl = user.realizedPnl.plus(pnl);
   user.lastActivityAt = event.block.timestamp;
   user.save();
 
-  // Update liquidator
   liquidator.lastActivityAt = event.block.timestamp;
   liquidator.save();
 
-  // Update global stats
-  const perps = getOrCreatePerps();
   perps.totalLiquidations++;
   perps.lastUpdatedAt = event.block.timestamp;
   perps.save();

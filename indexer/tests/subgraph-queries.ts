@@ -136,24 +136,9 @@ export const OrdersAtPriceQuery = gql`
   }
 `;
 
-// Get recent liquidations
-export const RecentLiquidationsQuery = gql`
-  query RecentLiquidations($first: Int!, $skip: Int!) {
-    liquidations(first: $first, skip: $skip, orderBy: timestamp, orderDirection: desc) {
-      id
-      user {
-        address
-      }
-      liquidator {
-        address
-      }
-      positionSize
-      pnl
-      liquidatorFee
-      timestamp
-    }
-  }
-`;
+// Per-user / global liquidation lists now ride the flagged Trade feed, e.g.
+// `trades(where: { isLiquidation: true })` / `trades(where: { liquidator: $addr })`,
+// since the dedicated Liquidation entity was dropped (superseded by the Trade).
 
 // Get top traders by realized PnL
 export const TopTradersQuery = gql`
