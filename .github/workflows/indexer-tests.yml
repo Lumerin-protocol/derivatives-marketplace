@@ -5,11 +5,13 @@ on:
     branches: [main, dev, stg]
     paths:
       - "indexer/**"
+      - "contracts/**"
       - ".github/workflows/indexer-tests.yml"
 
   pull_request:
     paths:
       - "indexer/**"
+      - "contracts/**"
       - ".github/workflows/indexer-tests.yml"
 
   workflow_dispatch:
@@ -24,11 +26,12 @@ defaults:
 
 jobs:
   test:
-    name: Indexer Unit Tests
+    name: Indexer Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     env:
+      NETWORK: base-mainnet
       PERPS_ADDRESS: "0x0000000000000000000000000000000000000000"
       PERPS_START_BLOCK: "0"
 
@@ -36,41 +39,50 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
+          cache: "pnpm"
+          # Hash both lockfiles — integration tests pull in `derivatives-contracts`
+          # (which has its own pnpm-lock.yaml) for the deployment fixture.
+          cache-dependency-path: |
+            indexer/pnpm-lock.yaml
+            contracts/pnpm-lock.yaml
 
-      - name: Enable corepack
-        run: corepack enable
-
-      - name: Restore cache
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            ~/.local/share/pnpm/store
-            indexer/node_modules
-          key: pnpm-${{ runner.os }}-${{ hashFiles('indexer/pnpm-lock.yaml') }}
-          restore-keys: |
-            pnpm-${{ runner.os }}-
-
-      - name: Install dependencies
+      - name: Install indexer dependencies
         working-directory: ./indexer
         run: pnpm install --frozen-lockfile
 
-      - name: Graph codegen
-        working-directory: ./indexer
-        run: pnpm prepare:env && pnpm exec graph codegen
+      - name: Install contracts dependencies
+        working-directory: ./contracts
+        run: pnpm install --frozen-lockfile
 
-      - name: Run unit tests
-        working-directory: ./indexer
-        run: pnpm test
+      # Integration tests deploy the real perps stack via the fixtures in
+      # `contracts/tests/fixtures.ts`, which read JSON artifacts from
+      # `contracts/artifacts/`. Compile the contracts (and transitive
+      # collateral-margin sources) so the fixture can load their bytecode.
+      - name: Compile contracts
+        working-directory: ./contracts
+        run: pnpm compile
 
-      - name: Save cache
-        uses: actions/cache/save@v4
-        if: always()
-        with:
-          path: |
-            ~/.local/share/pnpm/store
-            indexer/node_modules
-          key: pnpm-${{ runner.os }}-${{ hashFiles('indexer/pnpm-lock.yaml') }}
+      - name: Render subgraph manifest
+        working-directory: ./indexer
+        run: pnpm prepare:env
+
+      - name: Generate types
+        working-directory: ./indexer
+        run: pnpm exec graph codegen
+
+      - name: Run unit tests (matchstick-as)
+        working-directory: ./indexer
+        run: pnpm test:unit
+
+      - name: Run integration tests (matchstick-ts)
+        working-directory: ./indexer
+        run: pnpm test:integration
