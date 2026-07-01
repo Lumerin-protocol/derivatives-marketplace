@@ -76,8 +76,6 @@ type User @entity(immutable: false) {
   fills: [Fill!]! @derivedFrom(field: "user")
   fundingSettlements: [FundingSettlement!]! @derivedFrom(field: "user")
   badDebts: [BadDebtEvent!]! @derivedFrom(field: "user")
-  liquidationsAsUser: [Liquidation!]! @derivedFrom(field: "user")
-  liquidationsAsLiquidator: [Liquidation!]! @derivedFrom(field: "liquidator")
   positionSessions: [PositionSession!]! @derivedFrom(field: "user")
 
   # Timestamps
@@ -98,6 +96,10 @@ type Order @entity(immutable: false) {
   filledQuantity: BigInt!
   "Volume-weighted average price across all fills against this order. Zero if no fills."
   averageFillPrice: BigInt!
+  "Keeper that force-cancelled this order; populated only when status = LIQUIDATED (from the paired OrderLiquidated event)."
+  liquidator: Bytes
+  "Fee paid by the order's participant to `liquidator`; populated only when status = LIQUIDATED."
+  liquidationFee: BigInt
 
   # Relations
   fills: [Fill!]! @derivedFrom(field: "order")
@@ -115,6 +117,7 @@ enum OrderStatus {
   FILLED
   CANCELLED
   PARTIAL
+  LIQUIDATED
 }
 
 # Aggregate of all fills in a single transaction for one user. This is what the UI shows in trade history.
@@ -129,6 +132,12 @@ type Trade @entity(immutable: false) {
   netQuantityAfter: BigInt! # position after the last fill
   aggregatedEntryPriceAfter: BigInt! # entry price after the last fill
   fillCount: Int!
+  "True when this Trade was a forced liquidation against the market."
+  isLiquidation: Boolean! # default false
+  "Keeper that triggered the liquidation; set only when isLiquidation."
+  liquidator: Bytes # nullable
+  "Fee paid to the liquidator; set only when isLiquidation."
+  liquidationFee: BigInt # nullable
   fills: [Fill!]! @derivedFrom(field: "trade")
   # Metadata
   timestamp: BigInt!
@@ -164,21 +173,6 @@ type Fill @entity(immutable: true) {
 enum FillSide {
   MAKER
   TAKER
-}
-
-# Liquidation event
-type Liquidation @entity(immutable: true) {
-  id: Bytes! # tx hash + log index
-  user: User!
-  liquidator: User!
-  positionSize: BigInt! # signed
-  pnl: BigInt! # signed
-  liquidatorFee: BigInt!
-
-  # Metadata
-  timestamp: BigInt!
-  blockNumber: BigInt!
-  transactionHash: Bytes!
 }
 
 # Order book price level aggregation
@@ -249,6 +243,8 @@ type PositionSession @entity(immutable: false) {
   closePrice: BigInt! # average exit price (updated as we close)
   maxQuantity: BigInt! # maximum absolute quantity reached (non-cumulative)
   closedQuantity: BigInt! # cumulative quantity closed
+  "Cumulative absolute quantity closed via liquidation in this session (default 0). 'Was liquidated' = liquidatedQuantity > 0."
+  liquidatedQuantity: BigInt! # default 0
   realizedPnl: BigInt!
   fundingFees: BigInt! # signed: positive = received, negative = paid
   tradingFees: BigInt! # signed: positive = paid, negative = rebate received

@@ -11,7 +11,6 @@ import {
   paramBytes,
   paramUint,
   paramInt,
-  mockEventId,
   setupDataSourceMock,
   setupPerps,
 } from "./helpers";
@@ -88,23 +87,10 @@ describe("handlePositionLiquidated", () => {
     const liqEvent = createPositionLiquidatedEvent(trader, liquidator, qty, pnl, liqFee);
     handlePositionLiquidated(liqEvent);
 
-    const liqId = mockEventId(1);
-
-    // Liquidation entity - all fields
-    assert.entityCount("Liquidation", 1);
-    assert.fieldEquals("Liquidation", liqId, "user", trader.toHexString());
-    assert.fieldEquals("Liquidation", liqId, "liquidator", liquidator.toHexString());
-    assert.fieldEquals("Liquidation", liqId, "positionSize", qty.toString());
-    assert.fieldEquals("Liquidation", liqId, "pnl", pnl.toString());
-    assert.fieldEquals("Liquidation", liqId, "liquidatorFee", liqFee.toString());
-    assert.fieldEquals("Liquidation", liqId, "timestamp", liqEvent.block.timestamp.toString());
-    assert.fieldEquals("Liquidation", liqId, "blockNumber", liqEvent.block.number.toString());
-    assert.fieldEquals(
-      "Liquidation",
-      liqId,
-      "transactionHash",
-      liqEvent.transaction.hash.toHexString(),
-    );
+    // The dedicated Liquidation entity was dropped; the flagged liquidation
+    // Trade (asserted in the integration harness) is now the source of truth.
+    // The unit test keeps the totalLiquidations counter, user-reset, and
+    // PositionSession-close coverage below.
 
     // User reset
     assert.fieldEquals("User", trader.toHexString(), "netQuantity", "0");
