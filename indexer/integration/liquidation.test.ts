@@ -6,7 +6,7 @@
  * Drives the real `HashPowerPerpsDEX`:
  *   - fixture opens a seller short / buyer long at `initialPrice`,
  *   - `makeLiquidatable()` doubles the oracle price so the short is underwater,
- *   - `liquidatePosition(seller)` emits a real `PositionLiquidated`.
+ *   - `liquidatePosition(seller, maxUint256)` fully closes and emits a real `PositionLiquidated`.
  *
  * The harness replays the open `OrderMatched` (no `anchor()` discard) + the
  * `PositionLiquidated` through `src/perps.ts`, and we assert the resulting
@@ -15,7 +15,7 @@
 import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
-import { parseEventLogs } from "viem";
+import { maxUint256, parseEventLogs } from "viem";
 import type { EntityFields } from "matchstick-ts";
 import { deployPerpsWithLiquidatablePositionFixture } from "../../contracts/tests/fixtures.ts";
 
@@ -43,7 +43,9 @@ describe("liquidatePosition: forced Trade with isLiquidation + session liquidate
     await fixture.makeLiquidatable();
 
     // Permissionless liquidation; `owner` is the keeper/liquidator (msg.sender).
-    const liqTx = await perps.write.liquidatePosition([seller.account.address], {
+    // `maxUint256` clamps to |netQty| → a full close (this scenario is a deep,
+    // fully-underwater short after the 2× price move).
+    const liqTx = await perps.write.liquidatePosition([seller.account.address, maxUint256], {
       account: owner.account,
     });
     const liqReceipt = await pc.waitForTransactionReceipt({ hash: liqTx });

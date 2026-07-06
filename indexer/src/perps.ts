@@ -992,6 +992,13 @@ export function handlePositionLiquidated(event: PositionLiquidated): void {
   const closedQty = positionSize.neg();
   const absClosed = absBigInt(positionSize);
 
+  // `positionSize` carries the SAME sign as the position, so the residual after
+  // a (possibly partial) close is `net - positionSize`. A partial close leaves
+  // a non-zero residual: keep the position + session open and only reduce; a
+  // full close (residual == 0) resets the user and closes the session.
+  const newNetQuantity = user.netQuantity.minus(positionSize);
+  const isFullClose = newNetQuantity.equals(zero);
+
   // The dedicated Liquidation entity was dropped: the flagged liquidation Trade
   // below is the single source of truth (it captures positionSize -> signed
   // tradeQuantity, pnl -> realizedPnl, liquidatorFee -> liquidationFee, the
@@ -1013,7 +1020,8 @@ export function handlePositionLiquidated(event: PositionLiquidated): void {
           .div(session.closedQuantity);
       }
       session.liquidatedQuantity = session.liquidatedQuantity.plus(absClosed);
-      session.status = "CLOSE";
+      // Partial close leaves the session open to keep accruing the residual.
+      session.status = isFullClose ? "CLOSE" : "OPEN";
       session.lastTradeAt = event.block.timestamp;
       session.save();
 
@@ -1028,8 +1036,10 @@ export function handlePositionLiquidated(event: PositionLiquidated): void {
       trade.tradeQuantity = closedQty;
       trade.tradingFee = zero;
       trade.realizedPnl = pnl;
-      trade.netQuantityAfter = zero;
-      trade.aggregatedEntryPriceAfter = zero;
+      // Residual position after the close (0 on a full close). A reducing close
+      // leaves the aggregated entry price unchanged.
+      trade.netQuantityAfter = newNetQuantity;
+      trade.aggregatedEntryPriceAfter = isFullClose ? zero : entryPrice;
       // No per-counterparty Fill: a perps liquidation is a forced close against
       // the insurance fund, so there is no matched order to anchor a Fill to.
       trade.fillCount = 0;
@@ -1043,10 +1053,18 @@ export function handlePositionLiquidated(event: PositionLiquidated): void {
     }
   }
 
-  // Reset user position state (position is now fully closed).
-  user.netQuantity = zero;
-  user.aggregatedEntryPrice = zero;
-  user.currentPositionSessionId = "";
+  // Update user position state. Full close → reset; partial close → reduce
+  // netQuantity toward zero, preserving the (unchanged) entry price and the
+  // open session link so the residual keeps flowing into the same session.
+  if (isFullClose) {
+    user.netQuantity = zero;
+    user.aggregatedEntryPrice = zero;
+    user.currentPositionSessionId = "";
+  } else {
+    user.netQuantity = newNetQuantity;
+    // aggregatedEntryPrice unchanged (reducing close doesn't re-average);
+    // currentPositionSessionId stays pointed at the open session.
+  }
   user.realizedPnl = user.realizedPnl.plus(pnl);
   user.lastActivityAt = event.block.timestamp;
   user.save();

@@ -198,6 +198,11 @@
   },
   {
     "inputs": [],
+    "name": "OverLiquidation",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "OrderNotBelongToSender",
     "type": "error"
   },

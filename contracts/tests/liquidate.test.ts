@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
-import { encodeFunctionData, getAddress, parseEventLogs } from "viem";
+import { encodeFunctionData, getAddress, maxUint256, parseEventLogs } from "viem";
 import type { Hex } from "viem";
 import {
   deployPerpsWithPositionsFixture,
@@ -29,7 +29,8 @@ function encodeInnerLiquidatePosition(abi: readonly unknown[], user: `0x${string
         encodeFunctionData({
           abi,
           functionName: "liquidatePosition",
-          args: [user],
+          // Full close (clamped to |netQty|) — the batch tests exercise complete liquidations.
+          args: [user, maxUint256],
         }),
       ],
     ],
@@ -53,7 +54,7 @@ describe("HashPowerPerpsDEX - liquidatePosition (+ batches via nested multicallS
     assert.ok(!isLiquidatable);
 
     await viem.assertions.revertWithCustomError(
-      perps.write.liquidatePosition([seller.account.address], { account: buyer2.account }),
+      perps.write.liquidatePosition([seller.account.address, maxUint256], { account: buyer2.account }),
       perps,
       "NotLiquidatable",
     );
@@ -73,7 +74,7 @@ describe("HashPowerPerpsDEX - liquidatePosition (+ batches via nested multicallS
     const isLiquidatable = await perps.read.isLiquidatable([seller.account.address]);
     assert.ok(isLiquidatable);
 
-    await perps.write.liquidatePosition([seller.account.address], { account: buyer2.account });
+    await perps.write.liquidatePosition([seller.account.address, maxUint256], { account: buyer2.account });
 
     const positionAfter = await perps.read.getUserPosition([seller.account.address]);
     assert.equal(positionAfter.netQuantity, 0n);
@@ -89,7 +90,7 @@ describe("HashPowerPerpsDEX - liquidatePosition (+ batches via nested multicallS
 
     const liquidatorBalanceBefore = await perps.read.balanceOf([buyer2.account.address]);
 
-    await perps.write.liquidatePosition([seller.account.address], { account: buyer2.account });
+    await perps.write.liquidatePosition([seller.account.address, maxUint256], { account: buyer2.account });
 
     const liquidatorBalanceAfter = await perps.read.balanceOf([buyer2.account.address]);
 
@@ -107,7 +108,7 @@ describe("HashPowerPerpsDEX - liquidatePosition (+ batches via nested multicallS
     const usersBefore = await perps.read.getUsersWithPositions();
     assert.ok(usersBefore.map((u: string) => getAddress(u)).includes(getAddress(seller.account.address)));
 
-    await perps.write.liquidatePosition([seller.account.address], { account: buyer2.account });
+    await perps.write.liquidatePosition([seller.account.address, maxUint256], { account: buyer2.account });
 
     const usersAfter = await perps.read.getUsersWithPositions();
     assert.ok(!usersAfter.map((u: string) => getAddress(u)).includes(getAddress(seller.account.address)));
@@ -121,7 +122,9 @@ describe("HashPowerPerpsDEX - liquidatePosition (+ batches via nested multicallS
 
     await data.makeLiquidatable();
 
-    const hash = await perps.write.liquidatePosition([seller.account.address], { account: buyer2.account });
+    const hash = await perps.write.liquidatePosition([seller.account.address, maxUint256], {
+      account: buyer2.account,
+    });
     const receipt = await pc.waitForTransactionReceipt({ hash });
 
     const events = parseEventLogs({ logs: receipt.logs, abi: perps.abi, eventName: "PositionLiquidated" });
@@ -137,7 +140,7 @@ describe("HashPowerPerpsDEX - liquidatePosition (+ batches via nested multicallS
     assert.equal(position.netQuantity, 0n);
 
     await viem.assertions.revertWithCustomError(
-      perps.write.liquidatePosition([buyer2.account.address], { account: buyer2.account }),
+      perps.write.liquidatePosition([buyer2.account.address, maxUint256], { account: buyer2.account }),
       perps,
       "NotLiquidatable",
     );

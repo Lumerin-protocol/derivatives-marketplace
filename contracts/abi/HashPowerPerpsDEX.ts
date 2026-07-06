@@ -149,6 +149,11 @@ export const HashPowerPerpsDEXAbi = [
     "type": "error"
   },
   {
+    "inputs": [],
+    "name": "OverLiquidation",
+    "type": "error"
+  },
+  {
     "inputs": [
       {
         "internalType": "address",
@@ -1185,6 +1190,11 @@ export const HashPowerPerpsDEXAbi = [
         "internalType": "address",
         "name": "_user",
         "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "_closeQty",
+        "type": "uint256"
       }
     ],
     "name": "liquidatePosition",
