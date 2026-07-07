@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
-import { parseUnits, getAddress, parseEventLogs, zeroAddress } from "viem";
+import { parseUnits, getAddress, parseEventLogs, zeroAddress, maxUint256 } from "viem";
 import {
   deployPerpsWithCollateralFixture,
   deployPerpsWithLiquidatablePositionFixture,
@@ -189,7 +189,7 @@ describe("HashPowerPerpsDEX - points hook wiring", function () {
       await perps.write.setHook([hook.address], { account: owner.account });
 
       await data.makeLiquidatable();
-      await perps.write.liquidatePosition([seller.account.address], { account: buyer2.account });
+      await perps.write.liquidatePosition([seller.account.address, maxUint256], { account: buyer2.account });
 
       assert.equal(await points.read.balanceOf([buyer2.account.address]), KEEPER_POINTS);
     });
@@ -205,7 +205,7 @@ describe("HashPowerPerpsDEX - points hook wiring", function () {
 
       await data.makeLiquidatable();
       await assert.rejects(
-        perps.write.liquidatePosition([seller.account.address], { account: buyer2.account }),
+        perps.write.liquidatePosition([seller.account.address, maxUint256], { account: buyer2.account }),
       );
 
       const positionAfter = await perps.read.getUserPosition([seller.account.address]);

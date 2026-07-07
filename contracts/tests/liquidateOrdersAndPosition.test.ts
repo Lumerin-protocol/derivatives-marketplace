@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
-import { decodeErrorResult, encodeFunctionData, parseEventLogs, parseUnits, zeroHash } from "viem";
+import { decodeErrorResult, encodeFunctionData, maxUint256, parseEventLogs, parseUnits, zeroHash } from "viem";
 import type { Hex } from "viem";
 import {
   deployPerpsFixture,
@@ -27,7 +27,8 @@ function encodeInnerLiquidatePosition(abi: readonly unknown[], user: `0x${string
         encodeFunctionData({
           abi,
           functionName: "liquidatePosition",
-          args: [user],
+          // Full close (clamped to |netQty|) — this suite exercises complete liquidations.
+          args: [user, maxUint256],
         }),
       ],
     ],
@@ -169,9 +170,9 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
       );
     });
 
-    it("cancels the order and pays liquidationFee", async function () {
+    it("cancels the order without paying a fee (payout disabled)", async function () {
       const data = await networkHelpers.loadFixture(deployUnderwaterWithOrdersFixture);
-      const { contracts, accounts, config } = data;
+      const { contracts, accounts } = data;
       const { perps } = contracts;
       const { seller, buyer2, pc } = accounts;
 
@@ -192,8 +193,9 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
       const liqBalanceAfter = await perps.read.balanceOf([buyer2.account.address]);
       const sellerBalanceAfter = await perps.read.balanceOf([seller.account.address]);
 
-      assert.equal(liqBalanceAfter - liqBalanceBefore, config.liquidationFee);
-      assert.equal(sellerBalanceBefore - sellerBalanceAfter, config.liquidationFee);
+      // Keeper-incentive payout is disabled: no transfer between seller and liquidator.
+      assert.equal(liqBalanceAfter - liqBalanceBefore, 0n);
+      assert.equal(sellerBalanceBefore - sellerBalanceAfter, 0n);
 
       const ordersAfter = await perps.read.getUserOrders([seller.account.address]);
       assert.equal(ordersAfter.length, ordersBefore.length - 1);
@@ -210,10 +212,10 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
         liquidated.args.liquidator.toLowerCase(),
         buyer2.account.address.toLowerCase(),
       );
-      assert.equal(liquidated.args.fee, config.liquidationFee);
+      assert.equal(liquidated.args.fee, 0n);
     });
 
-    it("caps fee at user's vault balance when balance is below fee", async function () {
+    it("does not transfer any fee even when liquidationFee is set high (payout disabled)", async function () {
       const data = await networkHelpers.loadFixture(deployUnderwaterWithOrdersFixture);
       const { contracts, accounts, config } = data;
       const { perps } = contracts;
@@ -221,7 +223,7 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
 
       await data.makeUnderwater();
 
-      // Bump fee far above seller's vault balance.
+      // Set fee far above seller's vault balance — irrelevant, payout is disabled.
       const huge = parseUnits("100000", config.tokenDecimals);
       await perps.write.setLiquidationFee([huge], { account: owner.account });
 
@@ -236,8 +238,8 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
       const sellerBalanceAfter = await perps.read.balanceOf([seller.account.address]);
       const liqBalanceAfter = await perps.read.balanceOf([buyer2.account.address]);
 
-      assert.equal(sellerBalanceAfter, 0n);
-      assert.equal(liqBalanceAfter - liqBalanceBefore, sellerBalanceBefore);
+      assert.equal(sellerBalanceAfter, sellerBalanceBefore, "seller balance untouched");
+      assert.equal(liqBalanceAfter, liqBalanceBefore, "liquidator balance untouched");
     });
   });
 
@@ -246,9 +248,9 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
   // same behaviour through the generic primitive: FIFO sweep, no fee-drain after MM is
   // restored mid-batch, and graceful no-op when the caller mis-targets a healthy user.
   describe("liquidateOrder × N via multicallStopOnFailure", function () {
-    it("cancels all specified orders and pays per-order fee", async function () {
+    it("cancels all specified orders without paying a fee (payout disabled)", async function () {
       const data = await networkHelpers.loadFixture(deployUnderwaterWithOrdersFixture);
-      const { contracts, accounts, config } = data;
+      const { contracts, accounts } = data;
       const { perps } = contracts;
       const { seller, buyer2 } = accounts;
 
@@ -268,10 +270,8 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
       const ordersAfter = await perps.read.getUserOrders([seller.account.address]);
 
       assert.equal(ordersAfter.length, 0);
-      assert.equal(
-        liqBalanceAfter - liqBalanceBefore,
-        config.liquidationFee * BigInt(ordersBefore.length),
-      );
+      // Keeper-incentive payout is disabled: sweeping every order earns nothing.
+      assert.equal(liqBalanceAfter - liqBalanceBefore, 0n);
     });
 
     // Healthy user: every sub-call reverts `NotLiquidatable`. With the legacy
@@ -349,7 +349,7 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
       const { seller, buyer2 } = accounts;
 
       await viem.assertions.revertWithCustomError(
-        perps.write.liquidatePosition([seller.account.address], { account: buyer2.account }),
+        perps.write.liquidatePosition([seller.account.address, maxUint256], { account: buyer2.account }),
         perps,
         "NotLiquidatable",
       );
@@ -363,7 +363,7 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
       const { seller, buyer2 } = accounts;
 
       await viem.assertions.revertWithCustomError(
-        perps.write.liquidatePosition([seller.account.address], { account: buyer2.account }),
+        perps.write.liquidatePosition([seller.account.address, maxUint256], { account: buyer2.account }),
         perps,
         "NotLiquidatable",
       );
@@ -381,7 +381,7 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
       assert.ok(orders.length > 0);
 
       await viem.assertions.revertWithCustomError(
-        perps.write.liquidatePosition([seller.account.address], { account: buyer2.account }),
+        perps.write.liquidatePosition([seller.account.address, maxUint256], { account: buyer2.account }),
         perps,
         "OrdersStillOpen",
       );
@@ -401,7 +401,7 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
 
       const liqBalanceBefore = await perps.read.balanceOf([buyer2.account.address]);
 
-      await perps.write.liquidatePosition([seller.account.address], {
+      await perps.write.liquidatePosition([seller.account.address, maxUint256], {
         account: buyer2.account,
       });
 
@@ -421,7 +421,7 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
 
       await data.makeLiquidatable();
 
-      const hash = await perps.write.liquidatePosition([seller.account.address], {
+      const hash = await perps.write.liquidatePosition([seller.account.address, maxUint256], {
         account: buyer2.account,
       });
       const receipt = await pc.waitForTransactionReceipt({ hash });

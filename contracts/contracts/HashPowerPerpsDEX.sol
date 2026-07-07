@@ -42,7 +42,7 @@ contract HashPowerPerpsDEX is
     uint8 public constant QUANTITY_DECIMALS = 6;
     uint256 public constant MAX_PRICE_LEVELS_PER_SIDE = 200; // Max active price levels per side (bid/ask)
     uint256 public immutable minimumPriceIncrement; // Minimum price increment for orders
-    string public constant VERSION = "2.3.0";
+    string public constant VERSION = "2.4.0";
 
     // State variables
     IERC20 public collateralToken;
@@ -160,6 +160,7 @@ contract HashPowerPerpsDEX is
     error MaxOrdersPerParticipantReached();
     error NotLiquidatable();
     error OrdersStillOpen(); // liquidatePosition called while user has open orders
+    error OverLiquidation(); // partial liquidatePosition closed too much — leftover balance above the IM buffer
     error OrderNotBelongToUser(); // liquidateOrder called with an id not owned by the specified user
     error InsufficientReservePool(); // The reserve pool does not have enough collateral to cover user profit
     error InvalidFundingParameters();
@@ -691,19 +692,69 @@ contract HashPowerPerpsDEX is
     ///      reverts the inner with a non-empty selector, which the outer treats as a normal
     ///      stop — keepers should size the outer-tx gas as the sum of per-user estimates +
     ///      a buffer rather than relying on `eth_estimateGas` over the whole bundle).
-    function liquidatePosition(address _user) external {
+    /// @param _closeQty Absolute quantity (QUANTITY_DECIMALS) the keeper wants to close. Clamped to
+    ///        `|netQuantity|`; pass `type(uint256).max` for a full close. Sizing the partial amount
+    ///        so the account lands at/under IM is the keeper's off-chain responsibility.
+    function liquidatePosition(address _user, uint256 _closeQty) external {
         _updateGlobalFunding();
         _settleFunding(_user);
 
-        if (positions[_user].netQuantity == 0) revert NotLiquidatable();
+        Position memory position = positions[_user];
+        if (position.netQuantity == 0) revert NotLiquidatable();
         if (!_underwater(_user)) revert NotLiquidatable();
         if (participantOrderIdsIndex[_user].length() != 0) revert OrdersStillOpen();
+        if (_closeQty == 0) revert InvalidSize();
 
-        _doLiquidatePosition(_user);
+        uint256 absNet = _abs(position.netQuantity);
+        uint256 closeAbs = _closeQty < absNet ? _closeQty : absNet;
+
+        // Full close: delete the position and settle the whole PnL (bad-debt path). No IM buffer
+        // guard — the keeper deliberately deleveraged the entire position (deep underwater).
+        if (closeAbs == absNet) {
+            _doLiquidatePosition(_user);
+            return;
+        }
+
+        // Partial close down to the IM buffer.
+        (int256 pnl, int256 signedClose) = _doPartialLiquidatePosition(_user, position, closeAbs);
+
+        // Over-liquidation guard: a position remains here, so if there is a real IM buffer
+        // (`im > mm`) the leftover balance must sit at/under IM.
+        uint256 im = portfolioMargin.computePortfolioIM(_user);
+        uint256 mm = portfolioMargin.computePortfolioMM(_user);
+        if (im > mm && balanceOf(_user) > im) revert OverLiquidation();
+
+        // Keeper-incentive payout is DISABLED for now: the protocol runs the only liquidator,
+        // so no `liquidationFee` is transferred. The state var / setter / `liquidatorFee` event
+        // field are retained (emitting 0) for a future incentive iteration.
+        emit PositionLiquidated(_user, _msgSender(), signedClose, pnl, 0);
     }
 
-    /// @notice Force-cancel a single resting order owned by an underwater user. Permissionless;
-    ///         pays `liquidationFee` from the user's vault to `msg.sender`.
+    /// @dev Closes `_closeAbs` (< |netQuantity|) of a verified-underwater user's position at the
+    ///      mark, realizes PnL on the closed slice via {_settleReducedPosition}, and reduces
+    ///      `netQuantity` toward zero (entry price unchanged). Does NOT pay the fee and does NOT
+    ///      emit — the caller applies the incentive gate and emits `PositionLiquidated`.
+    ///      Returns the realized `pnl` on the closed slice and the SIGNED closed quantity (same
+    ///      sign as the position). Callers MUST have already checked the underwater / orders-clear
+    ///      / partial invariants.
+    function _doPartialLiquidatePosition(address _user, Position memory _position, uint256 _closeAbs)
+        private
+        returns (int256 pnl, int256 signedClose)
+    {
+        uint256 currentPrice = getMarketPrice();
+        int256 priceDiff = int256(currentPrice) - int256(_position.aggregatedEntryPrice);
+
+        bool isLong = _position.netQuantity > 0;
+        signedClose = isLong ? int256(_closeAbs) : -int256(_closeAbs);
+
+        pnl = _settleReducedPosition(_user, priceDiff, signedClose);
+
+        // Reduce magnitude toward zero; aggregatedEntryPrice is unchanged by a reducing close.
+        positions[_user].netQuantity =
+            isLong ? _position.netQuantity - int256(_closeAbs) : _position.netQuantity + int256(_closeAbs);
+    }
+
+    /// @notice Force-cancel a single resting order owned by an underwater user. Permissionless.
     /// @dev    Batch use: bundle several `liquidateOrder` calls via {multicallStopOnFailure}
     ///         to FIFO-sweep orders until the user is healthy again or an id goes stale.
     ///         The first failed sub-call (`NotLiquidatable` once MM is restored, or
@@ -720,40 +771,29 @@ contract HashPowerPerpsDEX is
         _doLiquidateOrder(_user, _orderId, order);
     }
 
-    /// @dev Cancels a single order on behalf of a (verified-underwater) user and pays the
-    ///      flat liquidation fee. Caller must have already verified `_underwater(_user)` and
-    ///      that `_order.participant == _user`.
+    /// @dev Cancels a single order on behalf of a (verified-underwater) user. Caller must have
+    ///      already verified `_underwater(_user)` and that `_order.participant == _user`.
+    ///      Keeper-incentive payout is DISABLED for now (see `liquidatePosition`): no
+    ///      `liquidationFee` is transferred; `OrderLiquidated` carries 0.
     function _doLiquidateOrder(address _user, bytes32 _orderId, Order memory _order) private {
         bool isBid = _order.quantity > 0;
         _getOrderValue(isBid)[_user] -= _calculateValue(_order.price, _abs(_order.quantity));
         _removeOrder(_orderId, _user, _order.price, isBid);
         _removePriceLevelIfEmpty(_order.price, isBid);
 
-        uint256 fee = liquidationFee;
-        uint256 paid;
-        if (fee > 0) {
-            uint256 userBalance = balanceOf(_user);
-            paid = fee < userBalance ? fee : userBalance;
-            if (paid > 0) {
-                _move(_user, _msgSender(), paid);
-            }
-        }
-
         emit OrderCancelled(_orderId, _user);
-        emit OrderLiquidated(_orderId, _user, _msgSender(), paid);
-
-        _notifyLiquidation(_msgSender(), paid);
+        emit OrderLiquidated(_orderId, _user, _msgSender(), 0);
+        _notifyLiquidation(_msgSender(), 0);
     }
 
-    /// @dev Closes the user's position, settles PnL against the insurance fund, and pays the
-    ///      position liquidation fee. Caller must have verified all predicates.
+    /// @dev Closes the user's position and settles PnL against the insurance fund. Caller must
+    ///      have verified all predicates. Keeper-incentive payout is DISABLED for now (see
+    ///      `liquidatePosition`): no `liquidationFee` is transferred; `PositionLiquidated` carries 0.
     function _doLiquidatePosition(address _user) private {
         Position memory position = positions[_user];
         uint256 currentPrice = getMarketPrice();
 
         int256 pnl = _calculatePositionPnl(position, currentPrice);
-
-        uint256 liquidatorFee = liquidationFee;
 
         // Settle PnL
         if (pnl < 0) {
@@ -773,28 +813,12 @@ contract HashPowerPerpsDEX is
             }
         }
 
-        // Pay liquidator fee from user's remaining balance
-        if (liquidatorFee > 0) {
-            uint256 userBalance = balanceOf(_user);
-            if (userBalance >= liquidatorFee) {
-                _move(_user, _msgSender(), liquidatorFee);
-            } else {
-                if (userBalance > 0) {
-                    _move(_user, _msgSender(), userBalance);
-                    liquidatorFee = userBalance;
-                } else {
-                    liquidatorFee = 0;
-                }
-            }
-        }
-
         int256 closedQuantity = position.netQuantity;
         delete positions[_user];
         usersWithPositions.remove(_user);
 
-        emit PositionLiquidated(_user, _msgSender(), closedQuantity, pnl, liquidatorFee);
-
-        _notifyLiquidation(_msgSender(), liquidatorFee);
+        emit PositionLiquidated(_user, _msgSender(), closedQuantity, pnl, 0);
+        _notifyLiquidation(_msgSender(), 0);
     }
 
     /// @notice Settle a reduced portion of a position (when offsetting)

@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
-import { encodeFunctionData, parseUnits, parseEventLogs } from "viem";
+import { encodeFunctionData, maxUint256, parseUnits, parseEventLogs } from "viem";
 import {
   deployPerpsFixture,
   deployPerpsWithFundingFixture,
@@ -464,7 +464,7 @@ describe("HashPowerPerpsDEX - Funding Fees", function () {
         await perps.write.multicallStopOnFailure([calls], { account: buyer2.account });
       }
 
-      await perps.write.liquidatePosition([seller.account.address], { account: buyer2.account });
+      await perps.write.liquidatePosition([seller.account.address, maxUint256], { account: buyer2.account });
 
       const position = await perps.read.getUserPosition([seller.account.address]);
       assert.equal(position.netQuantity, 0n);

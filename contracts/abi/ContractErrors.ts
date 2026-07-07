@@ -198,6 +198,11 @@ export const contractErrors = [
   },
   {
     "inputs": [],
+    "name": "OverLiquidation",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "OrderNotBelongToSender",
     "type": "error"
   },
