@@ -783,7 +783,7 @@ contract HashPowerPerpsDEX is
 
         emit OrderCancelled(_orderId, _user);
         emit OrderLiquidated(_orderId, _user, _msgSender(), 0);
-        _notifyLiquidation(_msgSender(), paid);
+        _notifyLiquidation(_msgSender(), 0);
     }
 
     /// @dev Closes the user's position and settles PnL against the insurance fund. Caller must
@@ -818,7 +818,7 @@ contract HashPowerPerpsDEX is
         usersWithPositions.remove(_user);
 
         emit PositionLiquidated(_user, _msgSender(), closedQuantity, pnl, 0);
-        _notifyLiquidation(_msgSender(), liquidatorFee);
+        _notifyLiquidation(_msgSender(), 0);
     }
 
     /// @notice Settle a reduced portion of a position (when offsetting)
