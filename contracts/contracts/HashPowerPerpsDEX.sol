@@ -42,7 +42,7 @@ contract HashPowerPerpsDEX is
     uint8 public constant QUANTITY_DECIMALS = 6;
     uint256 public constant MAX_PRICE_LEVELS_PER_SIDE = 200; // Max active price levels per side (bid/ask)
     uint256 public immutable minimumPriceIncrement; // Minimum price increment for orders
-    string public constant VERSION = "2.3.0";
+    string public constant VERSION = "2.4.0";
 
     // State variables
     IERC20 public collateralToken;
