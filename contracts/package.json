@@ -16,6 +16,8 @@
     "compile": "hardhat compile",
     "clean": "rm -rf abi artifacts cache",
     "aderyn": "aderyn",
+    "deploy:perps": "hardhat run scripts/deploy-perps.ts",
+    "upgrade:perps": "hardhat run scripts/update-perps.ts",
     "deploy-local": "hardhat run scripts/deploy-local.ts",
     "node": "hardhat node"
   },
