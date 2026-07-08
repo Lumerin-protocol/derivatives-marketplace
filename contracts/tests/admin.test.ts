@@ -2,7 +2,11 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
 import { parseUnits, zeroAddress } from "viem";
-import { deployPerpsFixture, deployPerpsWithCollateralFixture } from "./fixtures.ts";
+import {
+  deployPerpsFixture,
+  deployPerpsWithCollateralFixture,
+  MARK_MULTIPLIER,
+} from "./fixtures.ts";
 
 const { viem, networkHelpers } = await network.connect();
 
@@ -19,7 +23,8 @@ describe("HashPowerPerpsDEX - Admin Functions", function () {
       await perps.write.setOracle([newOracle.address], { account: owner.account });
 
       const marketPrice = await perps.read.getMarketPrice();
-      assert.equal(marketPrice, newPrice);
+      // Mark applies the fixed CONTRACT_SIZE_HPS_DAY / ORACLE_UNIT_HPS_DAY (x10) factor.
+      assert.equal(marketPrice, newPrice * MARK_MULTIPLIER);
     });
 
     it("should revert when non-owner tries to set oracle", async function () {
@@ -229,6 +234,30 @@ describe("HashPowerPerpsDEX - Admin Functions", function () {
 
       const ownerBalanceAfter = await usdcMock.read.balanceOf([owner.account.address]);
       assert.equal(ownerBalanceAfter - ownerBalanceBefore, amount);
+    });
+  });
+
+  describe("contract size (fixed compile-time constant)", function () {
+    it("exposes CONTRACT_SIZE_HPS_DAY = 1e15 (1 PH/s/day) and ORACLE_UNIT_HPS_DAY = 100 TH/s/day", async function () {
+      const { contracts } = await networkHelpers.loadFixture(deployPerpsFixture);
+      const { perps } = contracts;
+
+      assert.equal(await perps.read.CONTRACT_SIZE_HPS_DAY(), 10n ** 15n);
+      assert.equal(await perps.read.ORACLE_UNIT_HPS_DAY(), 100n * 10n ** 12n);
+    });
+
+    it("rebases the mark by CONTRACT_SIZE_HPS_DAY / ORACLE_UNIT_HPS_DAY (fixed x10)", async function () {
+      const { contracts, config } = await networkHelpers.loadFixture(deployPerpsFixture);
+      const { perps } = contracts;
+
+      const contractSize = await perps.read.CONTRACT_SIZE_HPS_DAY();
+      const oracleUnit = await perps.read.ORACLE_UNIT_HPS_DAY();
+      assert.equal(contractSize / oracleUnit, MARK_MULTIPLIER);
+
+      // Oracle and collateral both use 6 decimals, so the mark is exactly the
+      // oracle answer times the fixed multiplier.
+      const marketPrice = await perps.read.getMarketPrice();
+      assert.equal(marketPrice, (config.oracle.price * contractSize) / oracleUnit);
     });
   });
 });

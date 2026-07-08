@@ -14,7 +14,7 @@ describe("HashPowerPerpsDEX - Order Book Limits", function () {
       const { perps } = contracts;
       const { owner } = accounts;
 
-      const minMargin = parseUnits("0.5", config.tokenDecimals);
+      const minMargin = parseUnits("5", config.tokenDecimals);
       await perps.write.setMinimumMarginPerOrder([minMargin], { account: owner.account });
       assert.equal(await perps.read.minimumMarginPerOrder(), minMargin);
     });
@@ -39,7 +39,7 @@ describe("HashPowerPerpsDEX - Order Book Limits", function () {
       const marketPrice = await perps.read.getMarketPrice();
       const price = marketPrice - config.minimumPriceIncrement;
 
-      const minMargin = parseUnits("0.5", config.tokenDecimals);
+      const minMargin = parseUnits("5", config.tokenDecimals);
       await perps.write.setMinimumMarginPerOrder([minMargin], { account: owner.account });
 
       const tinyQty = parseUnits("1", config.quantityDecimals);
@@ -57,7 +57,7 @@ describe("HashPowerPerpsDEX - Order Book Limits", function () {
       const marketPrice = await perps.read.getMarketPrice();
       const price = marketPrice - config.minimumPriceIncrement;
 
-      const minMargin = parseUnits("0.5", config.tokenDecimals);
+      const minMargin = parseUnits("5", config.tokenDecimals);
       await perps.write.setMinimumMarginPerOrder([minMargin], { account: owner.account });
 
       const qty = parseUnits("2", config.quantityDecimals);
@@ -77,7 +77,7 @@ describe("HashPowerPerpsDEX - Order Book Limits", function () {
 
       await perps.write.createOrder([marketPrice, -qty1], { account: seller.account });
 
-      const minMargin = parseUnits("0.5", config.tokenDecimals);
+      const minMargin = parseUnits("5", config.tokenDecimals);
       await perps.write.setMinimumMarginPerOrder([minMargin], { account: owner.account });
 
       await perps.write.createOrder([marketPrice, qty1], { account: buyer.account });
@@ -93,7 +93,7 @@ describe("HashPowerPerpsDEX - Order Book Limits", function () {
 
       const marketPrice = await perps.read.getMarketPrice();
 
-      const minMargin = parseUnits("0.5", config.tokenDecimals);
+      const minMargin = parseUnits("5", config.tokenDecimals);
       await perps.write.setMinimumMarginPerOrder([minMargin], { account: owner.account });
 
       const qty2 = parseUnits("2", config.quantityDecimals);
@@ -145,7 +145,7 @@ describe("HashPowerPerpsDEX - Order Book Limits", function () {
       const marketPrice = await perps.read.getMarketPrice();
       const price = marketPrice - config.minimumPriceIncrement;
 
-      const minMargin = parseUnits("0.5", config.tokenDecimals);
+      const minMargin = parseUnits("5", config.tokenDecimals);
       await perps.write.setMinimumMarginPerOrder([minMargin], { account: owner.account });
 
       const tinyQty = parseUnits("1", config.quantityDecimals);

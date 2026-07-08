@@ -31,6 +31,8 @@ async function main() {
     "MINIMUM_PRICE_INCREMENT",
   );
   const SAFE_OWNER_ADDRESS = readOptionalAddress("SAFE_OWNER_ADDRESS");
+  // Contract size is a compile-time constant (CONTRACT_SIZE_HPS_DAY = 1e15 = 1 PH/s over a day → one
+  // contract = 1 PH/s/day); it is not deploy-configurable.
   // Optional: wire the perps DEX into the cross-product PortfolioMarginEngine
   // (perps.setPortfolioMargin + PME.setPerps + Vault.setAuthorizedCaller). When
   // the deployer doesn't own the PME or the vault the script logs the calldata
@@ -203,6 +205,7 @@ async function main() {
     tick: env.MINIMUM_PRICE_INCREMENT,
     takerFeeBps: env.TAKER_FEE_BPS,
     makerFeeBps: env.MAKER_FEE_BPS,
+    contractSizeHpsDay: "1000000000000000",
   });
 
   logSuccess(addrUrl(pc, perpsProxy.address));

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { network } from "hardhat";
 import { maxUint256, parseEventLogs, parseUnits } from "viem";
 import type { NetworkConnection } from "hardhat/types/network";
-import { deployPerpsFixture } from "./fixtures.ts";
+import { deployPerpsFixture, oracleAnswerForMark } from "./fixtures.ts";
 
 const { viem, networkHelpers } = await network.connect();
 
@@ -34,10 +34,12 @@ async function partialPerpsFixture(_conn: NetworkConnection) {
   const entry = await perps.read.getMarketPrice();
   const qty = parseUnits("40", config.quantityDecimals);
 
-  // Seller short 40. deposit ≈ 13·entry (13 · $4.21 ≈ $54.73): clears entry IM
-  // (40 · 0.10 · entry = 4·entry) but a +30% pump drives MM > deposit.
+  // Seller short 40. deposit ≈ 13·entry (13 · $42.10 ≈ $547): clears entry IM
+  // (40 · 0.10 · entry = 4·entry) but a +30% pump drives MM > deposit. The deposit
+  // ratios are scale-invariant; the buyer only needs to over-collateralize its long
+  // while staying within its wallet balance (20·entry ≈ $842 < the 1000 top-up).
   const sellerDeposit = entry * 13n;
-  const buyerDeposit = entry * 100n;
+  const buyerDeposit = entry * 20n;
   await vault.write.deposit([sellerDeposit], { account: seller.account });
   await vault.write.deposit([buyerDeposit], { account: buyer.account });
 
@@ -50,9 +52,11 @@ async function partialPerpsFixture(_conn: NetworkConnection) {
     config: { ...config, entry, qty },
     /** Move the mark to `factorNum/factorDen · entry` (a pump for the short). */
     async pump(factorNum: bigint, factorDen: bigint) {
-      const newPrice = (entry * factorNum) / factorDen;
-      await priceOracle.write.setPrice([newPrice, config.oracle.decimals]);
-      return newPrice;
+      // `entry` is a mark price (already x10), so feed the oracle the mark target
+      // divided by the fixed contract-size multiplier.
+      const newMark = (entry * factorNum) / factorDen;
+      await priceOracle.write.setPrice([oracleAnswerForMark(newMark), config.oracle.decimals]);
+      return newMark;
     },
   };
 }
