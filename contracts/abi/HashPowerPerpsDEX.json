@@ -620,6 +620,19 @@
   },
   {
     "inputs": [],
+    "name": "CONTRACT_SIZE_HPS_DAY",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "FUNDING_DECIMALS",
     "outputs": [
       {
@@ -647,6 +660,19 @@
   {
     "inputs": [],
     "name": "MAX_PRICE_LEVELS_PER_SIDE",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "ORACLE_UNIT_HPS_DAY",
     "outputs": [
       {
         "internalType": "uint256",

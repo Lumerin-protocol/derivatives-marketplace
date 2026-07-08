@@ -132,7 +132,11 @@ Anyone can call `liquidate(user)` if the user's collateral falls below their mai
 
 ### Price Oracle
 
-The contract uses a Chainlink `AggregatorV3Interface` oracle for the mark price. Prices are scaled to match collateral token decimals and rounded to the configured `minimumPriceIncrement`. A staleness check (1 hour max) rejects outdated oracle data.
+The contract uses a Chainlink `AggregatorV3Interface` oracle for the mark price. Prices are scaled to match collateral token decimals, then rebased from the oracle's quote basis to the contract unit, and finally rounded to the configured `minimumPriceIncrement`. A staleness check (1 hour max) rejects outdated oracle data.
+
+#### Contract size
+
+The hashprice oracle quotes the price of **100 TH/s sustained over one day** (`ORACLE_UNIT_HPS_DAY = 100 * 1e12`, in hashes/s·day). One perp contract, however, settles **1 PH/s/day** — the fixed compile-time constant `CONTRACT_SIZE_HPS_DAY = 1e15` (hashes/s·day). `getMarketPrice()` therefore rebases the oracle answer by `CONTRACT_SIZE_HPS_DAY / ORACLE_UNIT_HPS_DAY` (a fixed **×10**) after decimal scaling and before rounding. As a result, the mark price — and all notional, margin, PnL, and collateral amounts derived from it — is 10× the oracle's per-100 TH/s answer. Margin *percentages* and relative ratios are unaffected. The contract size is a constant baked into the implementation (no runtime setter).
 
 ### Upgradeability
 

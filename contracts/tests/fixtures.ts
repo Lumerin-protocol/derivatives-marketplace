@@ -21,6 +21,27 @@ type Conn = NetworkConnection;
 
 const MULTICALL3_ADDRESS = "0xcA11bde05977b3631167028862bE2a173976CA11" as const;
 
+/**
+ * Fixed mark multiplier applied on top of the oracle answer:
+ * `CONTRACT_SIZE_HPS_DAY / ORACLE_UNIT_HPS_DAY = 1e15 / 1e14 = 10`.
+ *
+ * `getMarketPrice()` returns the oracle-derived price (scaled to collateral
+ * decimals) multiplied by this factor and then rounded to `minimumPriceIncrement`.
+ * One contract settles 1 PH/s/day while the oracle quotes 100 TH/s/day.
+ */
+export const MARK_MULTIPLIER = 10n;
+
+/**
+ * Oracle answer (in oracle decimals) that produces `markPrice` from
+ * `getMarketPrice()` before rounding. Use this when a test wants to move the
+ * mark to a target expressed in mark-price units: the oracle must be fed the
+ * mark divided by {@link MARK_MULTIPLIER}, otherwise the fixed x10 factor is
+ * double-counted.
+ */
+export function oracleAnswerForMark(markPrice: bigint): bigint {
+  return markPrice / MARK_MULTIPLIER;
+}
+
 // Contract ABIs mapping from Hardhat's artifact map.
 type ContractAbis = {
   [K in keyof ArtifactMap]: ArtifactMap[K] extends { abi: infer A } ? A : never;
@@ -330,9 +351,11 @@ export async function deployPerpsWithLiquidatablePositionFixture(conn: Conn) {
     ...data,
     config: { ...config, initialPrice, qty, minCollateral },
     async makeLiquidatable() {
-      const newPrice = initialPrice * 2n;
-      await priceOracle.write.setPrice([newPrice, config.oracle.decimals]);
-      return newPrice;
+      // Double the mark. `initialPrice` is a mark price (already x10), so feed
+      // the oracle the mark target divided by the fixed multiplier.
+      const newMark = initialPrice * 2n;
+      await priceOracle.write.setPrice([oracleAnswerForMark(newMark), config.oracle.decimals]);
+      return newMark;
     },
   };
 }
@@ -359,9 +382,11 @@ export async function deployPerpsWithBatchLiquidatableFixture(conn: Conn) {
     ...data,
     config: { ...config, initialPrice, qty, minCollateral },
     async makeLiquidatable() {
-      const newPrice = initialPrice * 2n;
-      await priceOracle.write.setPrice([newPrice, config.oracle.decimals]);
-      return newPrice;
+      // Double the mark. `initialPrice` is a mark price (already x10), so feed
+      // the oracle the mark target divided by the fixed multiplier.
+      const newMark = initialPrice * 2n;
+      await priceOracle.write.setPrice([oracleAnswerForMark(newMark), config.oracle.decimals]);
+      return newMark;
     },
   };
 }

@@ -42,7 +42,17 @@ contract HashPowerPerpsDEX is
     uint8 public constant QUANTITY_DECIMALS = 6;
     uint256 public constant MAX_PRICE_LEVELS_PER_SIDE = 200; // Max active price levels per side (bid/ask)
     uint256 public immutable minimumPriceIncrement; // Minimum price increment for orders
-    string public constant VERSION = "2.4.0";
+    /// @notice The oracle's quote basis, expressed in hashes/s·day (hashes produced by a given hashrate
+    ///         sustained over one day, normalizing to a hash count). The hashprice oracle answers the price
+    ///         of 100 TH/s per day, so its basis is 100 TH/s = 100 * 1e12 (in hashes/s·day units).
+    uint256 public constant ORACLE_UNIT_HPS_DAY = 100 * 1e12;
+    /// @notice Contract size in hashes/s·day: the hashes produced by a given hashrate sustained over one day.
+    ///         One contract settles the value of `CONTRACT_SIZE_HPS_DAY`; oracle answers are rebased by
+    ///         `CONTRACT_SIZE_HPS_DAY / ORACLE_UNIT_HPS_DAY` (= 10x). Fixed at 1e15 (1 PH/s over a day) so one
+    ///         contract equals 1 PH/s/day. Intentionally a constant: resizing live contracts is a migration,
+    ///         not a live parameter change, so it is set at deploy time only.
+    uint256 public constant CONTRACT_SIZE_HPS_DAY = 1e15;
+    string public constant VERSION = "2.5.0";
 
     // State variables
     IERC20 public collateralToken;
@@ -147,7 +157,6 @@ contract HashPowerPerpsDEX is
     event FundingSettled(address indexed user, int256 amount);
     event FundingParametersUpdated(uint256 maxBps, uint256 period);
     event MinimumMarginPerOrderUpdated(uint256 newMinimumMarginPerOrder);
-
     // Errors
     error InvalidPrice();
     error InvalidSize();
@@ -268,7 +277,15 @@ contract HashPowerPerpsDEX is
         (, int256 answer,, uint256 updatedAt,) = priceOracle.latestRoundData();
         if (answer <= 0) return 0;
         if (block.timestamp - updatedAt > MAX_ORACLE_STALENESS) return 0;
-        return _roundToNearest(_scaleDecimals(uint256(answer), oracleDecimals, tokenDecimals), minimumPriceIncrement);
+        uint256 price = _applyContractSize(_scaleDecimals(uint256(answer), oracleDecimals, tokenDecimals));
+        return _roundToNearest(price, minimumPriceIncrement);
+    }
+
+    /// @dev Rebase an oracle-derived price from the oracle's quote basis (`ORACLE_UNIT_HPS_DAY`, i.e.
+    ///      100 TH/s over a day) to one contract unit (`CONTRACT_SIZE_HPS_DAY`, in hashes/s·day). With the
+    ///      fixed `CONTRACT_SIZE_HPS_DAY = 1e15` this multiplies by 10 so one contract equals 1 PH/s/day.
+    function _applyContractSize(uint256 _price) private pure returns (uint256) {
+        return (_price * CONTRACT_SIZE_HPS_DAY) / ORACLE_UNIT_HPS_DAY;
     }
 
     /// @dev Notify the points hook of a liquidation. Skipped when no hook is configured. Not
@@ -314,6 +331,9 @@ contract HashPowerPerpsDEX is
 
         // Convert oracle price to collateral token decimals
         uint256 price = _scaleDecimals(uint256(answer), oracleDecimals, tokenDecimals);
+
+        // Rebase from the oracle quote basis (100 TH/s/day) to one contract unit (CONTRACT_SIZE_HPS_DAY/day)
+        price = _applyContractSize(price);
 
         // Round to nearest minimumPriceIncrement
         price = _roundToNearest(price, minimumPriceIncrement);

@@ -274,8 +274,10 @@ describe("HashPowerPerpsDEX - Funding Fees", function () {
       const { buyer, seller, buyer2 } = accounts;
       const tick = config.minimumPriceIncrement;
 
-      const bidPrice = config.marketPrice + 10n * tick;
-      const askPrice = config.marketPrice + 20n * tick;
+      // Offsets scale with the mark (now 10x the oracle answer) so the mark-vs-index
+      // deviation still exceeds the 1% funding-rate clamp.
+      const bidPrice = config.marketPrice + 100n * tick;
+      const askPrice = config.marketPrice + 200n * tick;
       const smallQty = parseUnits("1", config.quantityDecimals);
 
       await perps.write.createOrder([bidPrice, smallQty], { account: buyer2.account });
