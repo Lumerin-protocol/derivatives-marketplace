@@ -7,7 +7,7 @@
     "node": ">=22.6.0"
   },
   "scripts": {
-    "pretest": "cd ../contracts && pnpm hardhat compile && cp ./abi/abi.ts ../keeper/src/abi.ts",
+    "pretest": "cd ../contracts && pnpm hardhat compile",
     "up": "docker compose up -d --build",
     "down": "docker compose down --volumes",
     "reset": "docker compose down --volumes && rm -rf data && docker compose up -d --build",

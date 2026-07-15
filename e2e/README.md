@@ -1,6 +1,8 @@
 # E2E Tests
 
-End-to-end tests that exercise the full stack: Hardhat node, contract deployment, subgraph indexing (Graph Node), and the keeper liquidation bot.
+End-to-end tests that exercise the full stack: Hardhat node, contract deployment, and subgraph indexing (Graph Node).
+
+> Liquidation is handled by the unified keeper in the [`collateral-margin`](https://github.com/Lumerin-protocol/collateral-margin) repo; these tests no longer run a local keeper.
 
 ## Prerequisites
 
@@ -39,11 +41,9 @@ pnpm test
    - Waits for the Docker stack to be reachable
    - Compiles and deploys the contracts to the Hardhat node
    - Deploys the subgraph to Graph Node
-   - Starts the keeper process
 
 2. **Deployment** — verifies contracts deployed successfully
 3. **Subgraph indexing** — checks that orders, trades, and positions are indexed
-4. **Keeper liquidation** — moves the price to make a position liquidatable, waits for the keeper to execute the liquidation on-chain, and verifies the subgraph indexes the event
 
 ## Architecture
 
@@ -51,16 +51,15 @@ pnpm test
 Host machine                         Docker
 ┌──────────────────┐      ┌─────────────────────────┐
 │ Test runner       │      │ Hardhat node  (:8545)   │
-│ Keeper process    │◄────►│ Graph Node    (:8000)   │
+│                   │◄────►│ Graph Node    (:8000)   │
 │                   │      │ IPFS          (:5001)   │
 │                   │      │ Postgres      (:5432)   │
 └──────────────────┘      └─────────────────────────┘
 ```
 
-The test runner and keeper run on the host and connect to the Dockerized services via exposed ports.
+The test runner runs on the host and connects to the Dockerized services via exposed ports.
 
 ## Troubleshooting
 
 - **Stale state**: Run `pnpm reset` to wipe volumes and rebuild.
 - **Port conflicts**: Ensure ports 5001, 5432, 8000, 8020, and 8545 are free.
-- **Keeper won't stop**: The test teardown kills the keeper's process group. If a zombie persists, check for orphaned processes on port 3001.

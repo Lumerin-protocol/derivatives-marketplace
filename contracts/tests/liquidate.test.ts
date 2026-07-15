@@ -151,9 +151,9 @@ describe("HashPowerPerpsDEX - liquidatePosition (+ batches via nested multicallS
   // an inner sub-call OOGs (the inner reverts with a non-empty
   // `MulticallSubCallOutOfGas` selector, which the outer treats as a normal
   // stop). The estimator therefore picks a G that lets the outer return
-  // while only the first user actually liquidates. The keeper sidesteps this
-  // by passing `sum(perUserEstimate) * 1.2 + per-user overhead` (see
-  // `keeper/src/liquidator.ts#buildBatchGasLimit`); these tests just over-allocate.
+  // while only the first user actually liquidates. The off-chain keeper (in the
+  // collateral-margin repo) sidesteps this by passing
+  // `sum(perUserEstimate) * 1.2 + per-user overhead`; these tests just over-allocate.
   const BATCH_GAS = 5_000_000n;
 
   describe("batches via nested multicallStopOnFailure", function () {

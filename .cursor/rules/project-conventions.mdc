@@ -1,5 +1,5 @@
 ---
-description: Coding conventions for the titan/perps project — a perpetual futures protocol with contracts, subgraph indexer, keeper bot, and e2e tests.
+description: Coding conventions for the titan/perps project — a perpetual futures protocol with contracts, subgraph indexer, market maker, and e2e tests.
 alwaysApply: true
 ---
 
@@ -11,7 +11,6 @@ Multi-package repo (not a workspace monorepo). Each package is independent with 
 | ------------ | --------------- | --------------------- | ----------------------------------------------- |
 | `contracts/` | Solidity 0.8.28 | Hardhat 3             | On-chain CLOB perps contract (UUPS upgradeable) |
 | `indexer/`   | AssemblyScript  | Graph Protocol (WASM) | Subgraph event indexer                          |
-| `keeper/`    | TypeScript      | Node.js 22+           | Liquidation bot                                 |
 | `e2e/`       | TypeScript      | Node.js 22+           | Full-stack integration tests                    |
 
 # General Style
@@ -24,7 +23,7 @@ Multi-package repo (not a workspace monorepo). Each package is independent with 
 - No `any` — use proper types. `any` triggers a biome warning.
 - Use `type` imports for type-only symbols: `import type { Foo } from "./bar.ts"`
 
-# TypeScript (keeper, e2e)
+# TypeScript (e2e)
 
 - Target ES2022, module NodeNext, strict mode
 - Always use `.ts` extensions in imports: `import { foo } from "./bar.ts"`
@@ -71,10 +70,8 @@ AssemblyScript is NOT TypeScript. Key differences:
 | --------- | ----------- | ----------- |
 | contracts | Hardhat     | `pnpm test` |
 | indexer   | Matchstick  | `pnpm test` |
-| keeper    | node --test | `pnpm test` |
 | e2e       | node --test | `pnpm test` |
 
-- ABIs are generated in contracts and copied to keeper (`contracts/abi/abi.ts` → `keeper/src/abi.ts`)
-- Keeper/e2e tests use shared fixtures from `contracts/fixtures/`
+- e2e tests use shared fixtures from `contracts/fixtures/`
 - Capture test output to temp file. Scan that file with grep or tail to avoid rerunning all test cases again and again
 - Solidity custom error testing should use viem.assertions.revertWithCustomError to assert the error
