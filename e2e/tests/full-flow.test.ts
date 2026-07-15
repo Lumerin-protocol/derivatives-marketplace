@@ -1,16 +1,13 @@
-import { describe, it, before, after } from "node:test";
+import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { request, gql } from "graphql-request";
 
 import { waitFor } from "../../contracts/fixtures/helpers.ts";
 import { waitForStack, deploySubgraph, SUBGRAPH_URL } from "../setup/subgraph.ts";
-import { startKeeper, type KeeperProcess } from "../setup/keeper.ts";
 import { deployWithLiquidatablePositionFixture } from "../../contracts/fixtures/viem.ts";
-import { HashPowerPerpsDEXAbi as hashPowerPerpsDexAbi } from "../../contracts/abi/HashPowerPerpsDEX.ts";
 
 // ── Shared state ──────────────────────────────────────────────────────────────
 
-let keeper: KeeperProcess;
 let deployment: Awaited<ReturnType<typeof deployWithLiquidatablePositionFixture>>;
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
@@ -30,17 +27,10 @@ before(
     console.log("[e2e] Deploying subgraph...");
     await deploySubgraph(perpsAddress, Number(deployment.config.startBlock));
 
-    console.log("[e2e] Starting keeper...");
-    keeper = await startKeeper(perpsAddress);
-
     console.log("[e2e] Setup complete.");
   },
   { timeout: 180_000 },
 );
-
-after(async () => {
-  await keeper?.stop();
-});
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -106,42 +96,6 @@ describe("Subgraph indexing", () => {
   });
 });
 
-describe("Keeper liquidation", () => {
-  it(
-    "liquidates an underwater position and subgraph indexes the event",
-    { timeout: 60_000 },
-    async () => {
-      const { clients, contracts, makeLiquidatable } = deployment;
-      const sellerAddress = clients.sellerWallet.account.address.toLowerCase();
-
-      console.log("Moving price to make seller liquidatable...");
-      await makeLiquidatable();
-
-      // Wait for keeper to execute the on-chain liquidation
-      console.log("Waiting for keeper to liquidate the position...");
-      await waitFor(async () => {
-        const pos = (await clients.publicClient.readContract({
-          address: contracts.perpsAddress,
-          abi: hashPowerPerpsDexAbi,
-          functionName: "getUserPosition",
-          args: [clients.sellerWallet.account.address],
-        })) as { netQuantity: bigint };
-        return pos.netQuantity === 0n;
-      }, 30_000);
-
-      console.log("Waiting for subgraph to index the Liquidation event...");
-      const data = await pollSubgraph<{
-        liquidations: Array<{ id: string; user: { address: string }; positionSize: string }>;
-      }>(LiquidationsQuery, {}, (d) =>
-        d.liquidations.some((l) => l.user.address.toLowerCase() === sellerAddress),
-      );
-
-      const liq = data.liquidations.find((l) => l.user.address.toLowerCase() === sellerAddress);
-      assert.ok(liq, "liquidation entity should appear in subgraph");
-      assert.ok(BigInt(liq.positionSize) !== 0n, "liquidated position size should be non-zero");
-    },
-  );
-});
 // ── Queries ───────────────────────────────────────────────────────────────────
 
 const PerpsStatsQuery = gql`
@@ -168,18 +122,6 @@ const PositionQuery = gql`
   query ($address: ID!) {
     user(id: $address) {
       netQuantity
-    }
-  }
-`;
-
-const LiquidationsQuery = gql`
-  query {
-    liquidations(first: 10, orderBy: timestamp, orderDirection: desc) {
-      id
-      user {
-        address
-      }
-      positionSize
     }
   }
 `;

@@ -18,7 +18,6 @@ graph TD
 
   subgraph Off-Chain Bots
     MM["Market Maker<br/>(Avellaneda–Stoikov)"]
-    Keeper["Keeper<br/>(liquidation bot)"]
   end
 
   subgraph Indexing
@@ -31,14 +30,10 @@ graph TD
 
   HP -- "getMarketPrice()" --> Contract
   ETH -. "gas cost calc" .-> MM
-  ETH -. "gas cost calc" .-> Keeper
 
   MM -- "place / cancel orders" --> Contract
   Contract -. "events<br/>(OrderMatched)" .-> MM
   MM -- "getMarketPrice()" --> Contract
-
-  Keeper -- "multicallStopOnFailure(<br/>liquidatePosition / liquidateOrder)" --> Contract
-  Contract -. "events<br/>(Transfer, OrderMatched,<br/>PositionLiquidated)" .-> Keeper
 
   Collateral -. "ERC-20 transfers" .-> Contract
 
@@ -58,11 +53,11 @@ graph TD
 
 **Indexer** (`indexer/`) — A Graph Protocol subgraph that listens to contract events and builds a queryable GraphQL API. It tracks the order book, trade history, user positions, collateral events, and aggregated stats. The frontend and any off-chain services consume data from here instead of reading contract state directly. See [`indexer/README.md`](indexer/README.md) for schema and query examples.
 
-**Keeper** (`keeper/`) — An off-chain liquidation bot that monitors user positions via a built-in mini-indexer (no subgraph dependency). It watches contract events in real-time to track positions and balances locally, pre-computes the liquidation price for each user, and polls the oracle price. When the market price crosses a user's liquidation threshold, the keeper verifies on-chain and executes the `liquidate(user)` call to earn the liquidation fee. Built with Node.js, TypeScript, and viem.
+**Keeper (liquidations)** — Liquidations are handled by the unified cross-venue keeper in the [`collateral-margin`](https://github.com/Lumerin-protocol/collateral-margin) repo, which liquidates underwater accounts across Perps and Futures against the shared `CollateralVault` and `PortfolioMarginEngine`. The former perps-only keeper in this repo has been retired.
 
 **Market Maker** (`market-maker/`) — Automated two-sided liquidity provider for the on-chain CLOB. Places layered limit orders around the oracle price using an Avellaneda-Stoikov inspired quoting strategy, with dynamic spread adjustment based on inventory skew, volatility, and gas conditions. Includes risk controls (position limits, utilization caps, drawdown halt, daily loss limits, gas budgets) and a health-check HTTP endpoint. See [`market-maker/README.md`](market-maker/README.md) for configuration and strategy details.
 
-**E2E Tests** (`e2e/`) — Full-stack integration tests that exercise the entire system: Hardhat node, contract deployment, subgraph indexing via Graph Node, and the keeper liquidation bot. Runs against a Dockerized infrastructure stack (Hardhat, Graph Node, IPFS, Postgres). See [`e2e/README.md`](e2e/README.md) for setup instructions.
+**E2E Tests** (`e2e/`) — Full-stack integration tests that exercise the system: Hardhat node, contract deployment, and subgraph indexing via Graph Node. Runs against a Dockerized infrastructure stack (Hardhat, Graph Node, IPFS, Postgres). See [`e2e/README.md`](e2e/README.md) for setup instructions.
 
 **Frontend** ([`futures-marketplace`](https://github.com/Lumerin-protocol/futures-marketplace)) — React-based trading UI shared between futures and perps. Handles order placement, collateral management, position tracking, and trade history. Communicates with the contract via wagmi/viem for writes and the subgraph for reads.
 
@@ -73,15 +68,14 @@ graph TD
 3. **Matching engine** executes on-chain when `createOrder` is called. Matched trades settle immediately: positions are updated and PnL flows through the reserve pool.
 4. **Subgraph** indexes all emitted events into structured entities (orders, trades, positions, price levels, etc.) and serves them over GraphQL.
 5. **Frontend** queries the subgraph for order book depth, trade history, and portfolio data to render the UI.
-6. **Keeper** watches contract events to track positions and balances locally, pre-computes liquidation prices, and executes liquidations when the oracle price crosses a threshold.
-7. **Market Maker** reads the oracle price each tick, computes bid/ask levels with inventory-aware spreads, and reconciles desired quotes against resting orders on-chain.
+6. **Market Maker** reads the oracle price each tick, computes bid/ask levels with inventory-aware spreads, and reconciles desired quotes against resting orders on-chain.
+7. **Keeper** (external, in the `collateral-margin` repo) monitors account health across venues and liquidates underwater positions when the oracle price crosses a threshold.
 
 ## Repository Structure
 
 ```
 contracts/          Solidity smart contracts (Hardhat + Foundry)
 indexer/            Graph Protocol subgraph
-keeper/             Liquidation keeper bot (Node.js + viem)
 market-maker/       Automated market maker bot (Node.js + viem)
 e2e/                Full-stack integration tests (Docker + Graph Node)
 ```
@@ -90,7 +84,7 @@ e2e/                Full-stack integration tests (Docker + Graph Node)
 
 ### Prerequisites
 
-- Node.js 20.x (contracts/indexer) or 22.x (keeper/market-maker/e2e)
+- Node.js 20.x (contracts/indexer) or 22.x (market-maker/e2e)
 - [pnpm](https://pnpm.io/)
 - [Foundry](https://book.getfoundry.sh/) (for Solidity formatting)
 - Docker & Docker Compose (for subgraph development and e2e tests)
@@ -115,18 +109,6 @@ pnpm install
 pnpm indexer            # Start graph-node via Docker
 pnpm setup-local       # Codegen, build, create & deploy subgraph
 ```
-
-### Keeper
-
-```bash
-cd keeper
-pnpm install
-pnpm start             # Run keeper (reads ../.env)
-pnpm start:dry         # Dry-run mode (simulate without executing)
-pnpm typecheck         # Type-check TypeScript
-```
-
-Add `KEEPER_PRIVATE_KEY` to the root `.env` file. See [`keeper/.env.example`](keeper/.env.example) for all keeper-specific configuration.
 
 ### Market Maker
 
@@ -162,7 +144,6 @@ See [`contracts/README.md`](contracts/README.md) and [`indexer/README.md`](index
 | Contracts    | Solidity 0.8.28, OpenZeppelin, Hardhat, Foundry |
 | Oracle       | Hashprice Oracle (Chainlink AggregatorV3 iface) |
 | Indexer      | The Graph, AssemblyScript                       |
-| Keeper       | Node.js 22, TypeScript, viem                    |
 | Market Maker | Node.js 22, TypeScript, viem, pino              |
 | E2E Tests    | Node.js 22, Docker Compose, Graph Node          |
 | Frontend     | React, wagmi, viem (planned)                    |

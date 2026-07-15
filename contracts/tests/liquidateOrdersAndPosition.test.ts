@@ -479,8 +479,8 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
       // Now the nested-multicall batch should succeed for seller even if buyer is still healthy.
       // Explicit gas: `eth_estimateGas` can't size nested-multicall batches correctly (an inner
       // OOG reverts the inner cleanly, which the outer treats as a stop instead of as gas
-      // starvation), so we over-allocate. See `keeper/src/liquidator.ts#buildBatchGasLimit`
-      // for the production sizing strategy.
+      // starvation), so we over-allocate. The off-chain keeper (in the collateral-margin
+      // repo) implements the production batch gas-sizing strategy.
       const calls = [seller.account.address, buyer.account.address].map((u) =>
         encodeInnerLiquidatePosition(perps.abi, u),
       );
