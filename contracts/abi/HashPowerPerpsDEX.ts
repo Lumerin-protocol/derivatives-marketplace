@@ -44,11 +44,6 @@ export const HashPowerPerpsDEXAbi = [
   },
   {
     "inputs": [],
-    "name": "FillOrKillNotFilled",
-    "type": "error"
-  },
-  {
-    "inputs": [],
     "name": "InsufficientCollateral",
     "type": "error"
   },
@@ -183,6 +178,11 @@ export const HashPowerPerpsDEXAbi = [
       }
     ],
     "name": "OwnableUnauthorizedAccount",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "TimeInForceNotFilled",
     "type": "error"
   },
   {

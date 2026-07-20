@@ -52,7 +52,7 @@ contract HashPowerPerpsDEX is
     ///         contract equals 1 PH/s/day. Intentionally a constant: resizing live contracts is a migration,
     ///         not a live parameter change, so it is set at deploy time only.
     uint256 public constant CONTRACT_SIZE_HPS_DAY = 1e15;
-    string public constant VERSION = "2.6.0";
+    string public constant VERSION = "2.6.1";
 
     // State variables
     IERC20 public collateralToken;
@@ -127,7 +127,7 @@ contract HashPowerPerpsDEX is
     /// @notice Order lifetime / fill policy. GTD is not supported.
     enum TimeInForce {
         GTC, // rest unfilled size on the book
-        IOC, // fill what is available now; cancel remainder
+        IOC, // fill what is available now; cancel remainder; revert if nothing fills
         FOK // fill entire size now or revert
     }
 
@@ -183,7 +183,8 @@ contract HashPowerPerpsDEX is
     error OrderMarginTooLow(); // Order margin is below minimumMarginPerOrder
     error MaxPriceLevelsReached(); // Too many active price levels on one side of the book
     error InsuranceFundNotConfigured(); // CollateralVault.insuranceFund not set by vault owner
-    error FillOrKillNotFilled(); // FOK order could not fill entire size within the limit
+    /// @notice FOK could not fill entirely, or IOC matched nothing.
+    error TimeInForceNotFilled();
     error InvalidTimeInForce();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -384,7 +385,9 @@ contract HashPowerPerpsDEX is
         int256 remainingQuantity = _matchWithOppositeOrders(sender, _price, _quantity);
         bool partiallyOrFullyFilled = remainingQuantity != _quantity;
 
-        if (_tif == TimeInForce.FOK && remainingQuantity != 0) revert FillOrKillNotFilled();
+        if (_tif == TimeInForce.FOK && remainingQuantity != 0) revert TimeInForceNotFilled();
+        // IOC with zero fill is a noop — revert rather than emit a closed empty order.
+        if (_tif == TimeInForce.IOC && !partiallyOrFullyFilled) revert TimeInForceNotFilled();
 
         if (_tif == TimeInForce.GTC) {
             if (partiallyOrFullyFilled) {
