@@ -44,6 +44,11 @@
   },
   {
     "inputs": [],
+    "name": "FillOrKillNotFilled",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "InsufficientCollateral",
     "type": "error"
   },
@@ -90,6 +95,11 @@
   {
     "inputs": [],
     "name": "InvalidSize",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidTimeInForce",
     "type": "error"
   },
   {
@@ -781,6 +791,29 @@
       }
     ],
     "name": "createOrder",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_price",
+        "type": "uint256"
+      },
+      {
+        "internalType": "int256",
+        "name": "_quantity",
+        "type": "int256"
+      },
+      {
+        "internalType": "enum HashPowerPerpsDEX.TimeInForce",
+        "name": "_tif",
+        "type": "uint8"
+      }
+    ],
+    "name": "createOrderV2",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"

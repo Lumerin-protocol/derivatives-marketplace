@@ -39,10 +39,12 @@ async function main() {
   // Get current proxy contract
   const perps = await viem.getContractAt("HashPowerPerpsDEX", proxyAddress);
   const currentOwner = await perps.read.owner();
+  const currentCodeVersion = await perps.read.VERSION().catch(() => "unknown");
   const currentInitVersion = await readInitializedVersion(pc, proxyAddress);
   logInfo("proxy", {
     Address: addrUrl(pc, proxyAddress),
     Owner: currentOwner,
+    Version: currentCodeVersion,
     InitVersion: currentInitVersion.toString(),
   });
 

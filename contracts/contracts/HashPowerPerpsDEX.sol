@@ -52,7 +52,7 @@ contract HashPowerPerpsDEX is
     ///         contract equals 1 PH/s/day. Intentionally a constant: resizing live contracts is a migration,
     ///         not a live parameter change, so it is set at deploy time only.
     uint256 public constant CONTRACT_SIZE_HPS_DAY = 1e15;
-    string public constant VERSION = "2.5.0";
+    string public constant VERSION = "2.6.0";
 
     // State variables
     IERC20 public collateralToken;
@@ -124,6 +124,13 @@ contract HashPowerPerpsDEX is
         uint256 aggregatedEntryPrice; // Weighted average entry price
     }
 
+    /// @notice Order lifetime / fill policy. GTD is not supported.
+    enum TimeInForce {
+        GTC, // rest unfilled size on the book
+        IOC, // fill what is available now; cancel remainder
+        FOK // fill entire size now or revert
+    }
+
     // Events
     event OrderCreated(bytes32 indexed orderId, address indexed participant, uint256 price, int256 quantity);
     event OrderCancelled(bytes32 indexed orderId, address indexed participant);
@@ -176,6 +183,8 @@ contract HashPowerPerpsDEX is
     error OrderMarginTooLow(); // Order margin is below minimumMarginPerOrder
     error MaxPriceLevelsReached(); // Too many active price levels on one side of the book
     error InsuranceFundNotConfigured(); // CollateralVault.insuranceFund not set by vault owner
+    error FillOrKillNotFilled(); // FOK order could not fill entire size within the limit
+    error InvalidTimeInForce();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(uint256 _minimumPriceIncrement) {
@@ -341,13 +350,22 @@ contract HashPowerPerpsDEX is
         return price;
     }
 
-    /// @notice Create an order (buy or sell) with limit price matching (direct walk, no simulate list).
+    /// @notice Create a GTC limit order (buy or sell).
     /// @param _price Limit price (must be multiple of minimumPriceIncrement)
     /// @param _quantity Order quantity (positive = long/buy, negative = short/sell)
-    /// @dev Buy orders match with asks at or below the limit price
-    /// @dev Sell orders match with bids at or above the limit price
     function createOrder(uint256 _price, int256 _quantity) external {
-        address sender = _msgSender();
+        _createOrderInternal(_msgSender(), _price, _quantity, TimeInForce.GTC);
+    }
+
+    /// @notice Create a limit order with explicit time-in-force (GTC / IOC / FOK).
+    function createOrderV2(uint256 _price, int256 _quantity, TimeInForce _tif) external {
+        _createOrderInternal(_msgSender(), _price, _quantity, _tif);
+    }
+
+    /// @dev Shared body for `createOrder` / `createOrderV2`.
+    function _createOrderInternal(address sender, uint256 _price, int256 _quantity, TimeInForce _tif) private {
+        if (uint8(_tif) > uint8(TimeInForce.FOK)) revert InvalidTimeInForce();
+
         _updateGlobalFunding();
         _validateQuantity(_quantity);
         _validatePrice(_price);
@@ -364,35 +382,45 @@ contract HashPowerPerpsDEX is
         int256 positionBefore = positions[sender].netQuantity;
 
         int256 remainingQuantity = _matchWithOppositeOrders(sender, _price, _quantity);
+        bool partiallyOrFullyFilled = remainingQuantity != _quantity;
 
-        if (remainingQuantity != _quantity) {
-            emit OrderUpdated(orderId, sender, remainingQuantity);
-        }
+        if (_tif == TimeInForce.FOK && remainingQuantity != 0) revert FillOrKillNotFilled();
 
-        if (remainingQuantity != 0) {
-            // Validate minimum margin per resting order
-            if (minimumMarginPerOrder > 0) {
-                uint256 restingValue = _calculateValue(_price, _abs(remainingQuantity));
-                uint256 restingMargin = (restingValue * portfolioMargin.imSpotShock()) / 1e18;
-                if (restingMargin < minimumMarginPerOrder) {
-                    revert OrderMarginTooLow();
+        if (_tif == TimeInForce.GTC) {
+            if (partiallyOrFullyFilled) {
+                emit OrderUpdated(orderId, sender, remainingQuantity);
+            }
+
+            if (remainingQuantity != 0) {
+                // Validate minimum margin per resting order
+                if (minimumMarginPerOrder > 0) {
+                    uint256 restingValue = _calculateValue(_price, _abs(remainingQuantity));
+                    uint256 restingMargin = (restingValue * portfolioMargin.imSpotShock()) / 1e18;
+                    if (restingMargin < minimumMarginPerOrder) {
+                        revert OrderMarginTooLow();
+                    }
                 }
+
+                // Validate max orders per participant
+                EnumerableSet.Bytes32Set storage participantOrders = participantOrderIdsIndex[sender];
+                if (participantOrders.length() >= MAX_ORDERS_PER_PARTICIPANT) {
+                    revert MaxOrdersPerParticipantReached();
+                }
+
+                // Create order with quantity that was not matched
+                orders[orderId] = Order({ participant: sender, price: _price, quantity: remainingQuantity });
+                _getOrderValue(isBuy)[sender] += _calculateValue(_price, _abs(remainingQuantity));
+                participantOrders.add(orderId);
+                StructuredLinkedList.List storage orderQueue = _priceOrderIds(_price, isBuy);
+                orderQueue.pushBack(uint256(orderId));
+
+                _addPriceLevel(_price, isBuy);
             }
-
-            // Validate max orders per participant
-            EnumerableSet.Bytes32Set storage participantOrders = participantOrderIdsIndex[sender];
-            if (participantOrders.length() >= MAX_ORDERS_PER_PARTICIPANT) {
-                revert MaxOrdersPerParticipantReached();
+        } else {
+            // IOC (or FOK after a full fill): never rest; close the taker order id at 0.
+            if (partiallyOrFullyFilled || _tif == TimeInForce.IOC) {
+                emit OrderUpdated(orderId, sender, 0);
             }
-
-            // Create order with quantity that was not matched
-            orders[orderId] = Order({ participant: sender, price: _price, quantity: remainingQuantity });
-            _getOrderValue(isBuy)[sender] += _calculateValue(_price, _abs(remainingQuantity));
-            participantOrders.add(orderId);
-            StructuredLinkedList.List storage orderQueue = _priceOrderIds(_price, isBuy);
-            orderQueue.pushBack(uint256(orderId));
-
-            _addPriceLevel(_price, isBuy);
         }
 
         // Skip margin check for reduce-only orders (opposite side, not exceeding position)
