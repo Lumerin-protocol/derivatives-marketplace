@@ -41,6 +41,23 @@ describe("HashPowerPerpsDEX - createOrderV2 time-in-force", () => {
     assert.equal(await perps.read.getBestAskPrice(), 0n);
   });
 
+
+  it("IOC with no liquidity reverts TimeInForceNotFilled", async () => {
+    const { contracts, accounts, config } = await networkHelpers.loadFixture(
+      deployPerpsWithCollateralFixture,
+    );
+    const { perps } = contracts;
+    const { buyer } = accounts;
+
+    const price = await perps.read.getMarketPrice();
+    const q1 = parseUnits("1", config.quantityDecimals);
+
+    await viem.assertions.revertWithCustomError(
+      perps.write.createOrderV2([price, q1, TimeInForce.IOC], { account: buyer.account }),
+      perps,
+      "TimeInForceNotFilled",
+    );
+  });
   it("FOK reverts when the book cannot fill the full size", async () => {
     const { contracts, accounts, config } = await networkHelpers.loadFixture(
       deployPerpsWithCollateralFixture,
@@ -57,7 +74,7 @@ describe("HashPowerPerpsDEX - createOrderV2 time-in-force", () => {
     await viem.assertions.revertWithCustomError(
       perps.write.createOrderV2([price, q2, TimeInForce.FOK], { account: buyer.account }),
       perps,
-      "FillOrKillNotFilled",
+      "TimeInForceNotFilled",
     );
 
     assert.equal(await perps.read.getQuantityAtPrice([price, false]), q1);
@@ -87,8 +104,8 @@ describe("HashPowerPerpsDEX - createOrderV2 time-in-force", () => {
     assert.equal((await perps.read.getUserOrders([buyer.account.address])).length, 0);
   });
 
-  it("VERSION is 2.6.0", async () => {
+  it("VERSION is 2.6.1", async () => {
     const { contracts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
-    assert.equal(await contracts.perps.read.VERSION(), "2.6.0");
+    assert.equal(await contracts.perps.read.VERSION(), "2.6.1");
   });
 });

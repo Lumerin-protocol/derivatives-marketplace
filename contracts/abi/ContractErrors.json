@@ -292,11 +292,6 @@
   },
   {
     "inputs": [],
-    "name": "FillOrKillNotFilled",
-    "type": "error"
-  },
-  {
-    "inputs": [],
     "name": "OrderMarginTooLow",
     "type": "error"
   },
@@ -329,6 +324,11 @@
   {
     "inputs": [],
     "name": "NotLiquidatable",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "TimeInForceNotFilled",
     "type": "error"
   },
   {
