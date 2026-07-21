@@ -103,9 +103,4 @@ describe("HashPowerPerpsDEX - createOrderV2 time-in-force", () => {
     );
     assert.equal((await perps.read.getUserOrders([buyer.account.address])).length, 0);
   });
-
-  it("VERSION is 2.6.1", async () => {
-    const { contracts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
-    assert.equal(await contracts.perps.read.VERSION(), "2.6.1");
-  });
 });

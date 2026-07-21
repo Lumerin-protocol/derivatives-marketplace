@@ -10,17 +10,16 @@ const { viem, networkHelpers } = await network.connect();
 /**
  * `liquidatePosition(user, closeQty)` — partial close down to the IM buffer.
  *
- * The contract closes `min(closeQty, |netQty|)` of the user's net position at
- * the mark, reduces `netQuantity` (entry price unchanged), then reads margin
- * ONCE at the end: if a position remains AND there's a real IM buffer
- * (`im > mm`), the leftover balance must sit at/under IM else `OverLiquidation`.
- * A full close (closeQty ≥ |netQty|) deletes the position and skips the guard
- * (bad-debt / deep-underwater path). The keeper sizes `closeQty` off-chain.
+ * `closeQty` is an upper bound: the contract closes up to `min(closeQty, |netQty|)`.
+ * The keeper sizes the partial off-chain; with a position remaining and a real
+ * IM buffer (`im > mm`), leftover balance above IM reverts `OverLiquidation`.
+ * A full close (closeQty ≥ |netQty|) deletes the position (bad-debt path) and
+ * skips that guard.
  *
  * Fixture: seller is short 40 @ $4.21 (PME default 10% IM / 5% MM → real
  * buffer), deposit ≈ 13·entry. A +30% pump breaks MM while leaving a
  * recoverable band; closing ~25–32 qty lands `[MM, IM]`, closing ~38 overshoots
- * IM (revert), a +200% pump plus a full close is the bad-debt path.
+ * IM, a +200% pump plus a full close is the bad-debt path.
  */
 async function partialPerpsFixture(_conn: NetworkConnection) {
   const data = await networkHelpers.loadFixture(deployPerpsFixture);
@@ -147,7 +146,7 @@ describe("HashPowerPerpsDEX - liquidatePosition(user, closeQty) partial close", 
     assert.equal(pos.netQuantity, 0n, "position should be fully closed");
   });
 
-  it("reverts OverLiquidation when closeQty overshoots the IM buffer", async function () {
+  it("reverts OverLiquidation when an oversize partial leaves balance above IM", async function () {
     const data = await networkHelpers.loadFixture(partialPerpsFixture);
     const { contracts, accounts, config } = data;
     const { perps } = contracts;
@@ -155,8 +154,7 @@ describe("HashPowerPerpsDEX - liquidatePosition(user, closeQty) partial close", 
 
     await data.pump(13n, 10n);
 
-    // Closing 38 of 40 leaves a 2-qty short whose IM is tiny relative to the
-    // residual balance → over the buffer → revert.
+    // Closing 38 of 40 leaves a 2-qty short whose IM is tiny vs residual balance.
     const tooMuch = parseUnits("38", config.quantityDecimals);
     await viem.assertions.revertWithCustomError(
       perps.write.liquidatePosition([seller.account.address, tooMuch], {
@@ -278,8 +276,8 @@ describe("HashPowerPerpsDEX - liquidatePosition(user, closeQty) partial close", 
     const { perps, pme } = contracts;
     const { seller, buyer2, owner } = accounts;
 
-    // Collapse the buffer: IM == MM. The guard's `im > mm` precondition fails,
-    // so the same over-close that reverted above now succeeds.
+    // Collapse the buffer: IM == MM. The OverLiquidation guard's `im > mm`
+    // precondition fails, so the oversize request is allowed.
     const shock = parseUnits("0.05", 18);
     await pme.write.setShocks([shock, shock, 0n, 0n], { account: owner.account });
 

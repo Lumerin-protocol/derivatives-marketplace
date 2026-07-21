@@ -52,7 +52,7 @@ contract HashPowerPerpsDEX is
     ///         contract equals 1 PH/s/day. Intentionally a constant: resizing live contracts is a migration,
     ///         not a live parameter change, so it is set at deploy time only.
     uint256 public constant CONTRACT_SIZE_HPS_DAY = 1e15;
-    string public constant VERSION = "2.6.1";
+    string public constant VERSION = "2.9.1";
 
     // State variables
     IERC20 public collateralToken;
@@ -131,6 +131,19 @@ contract HashPowerPerpsDEX is
         FOK // fill entire size now or revert
     }
 
+    /// @notice One placement in a `createOrders` batch (GTC).
+    struct OrderIntent {
+        uint256 price;
+        int256 quantity; // >0 bid/long, <0 ask/short
+    }
+
+    /// @notice One placement in a `createOrdersV2` batch.
+    struct OrderIntentV2 {
+        uint256 price;
+        int256 quantity;
+        TimeInForce timeInForce;
+    }
+
     // Events
     event OrderCreated(bytes32 indexed orderId, address indexed participant, uint256 price, int256 quantity);
     event OrderCancelled(bytes32 indexed orderId, address indexed participant);
@@ -176,7 +189,8 @@ contract HashPowerPerpsDEX is
     error MaxOrdersPerParticipantReached();
     error NotLiquidatable();
     error OrdersStillOpen(); // liquidatePosition called while user has open orders
-    error OverLiquidation(); // partial liquidatePosition closed too much — leftover balance above the IM buffer
+    /// @notice Partial liquidation left balance above IM while a real IM>MM buffer remains.
+    error OverLiquidation();
     error OrderNotBelongToUser(); // liquidateOrder called with an id not owned by the specified user
     error InsufficientReservePool(); // The reserve pool does not have enough collateral to cover user profit
     error InvalidFundingParameters();
@@ -355,16 +369,67 @@ contract HashPowerPerpsDEX is
     /// @param _price Limit price (must be multiple of minimumPriceIncrement)
     /// @param _quantity Order quantity (positive = long/buy, negative = short/sell)
     function createOrder(uint256 _price, int256 _quantity) external {
-        _createOrderInternal(_msgSender(), _price, _quantity, TimeInForce.GTC);
+        address sender = _msgSender();
+        bool skipMargin = _createOrderInternal(sender, _price, _quantity, TimeInForce.GTC);
+        if (!skipMargin) {
+            _ensureInitialMargin(sender);
+        }
     }
 
     /// @notice Create a limit order with explicit time-in-force (GTC / IOC / FOK).
     function createOrderV2(uint256 _price, int256 _quantity, TimeInForce _tif) external {
-        _createOrderInternal(_msgSender(), _price, _quantity, _tif);
+        address sender = _msgSender();
+        bool skipMargin = _createOrderInternal(sender, _price, _quantity, _tif);
+        if (!skipMargin) {
+            _ensureInitialMargin(sender);
+        }
     }
 
-    /// @dev Shared body for `createOrder` / `createOrderV2`.
-    function _createOrderInternal(address sender, uint256 _price, int256 _quantity, TimeInForce _tif) private {
+    /// @notice Batched GTC placement — IM check once at the end.
+    function createOrders(OrderIntent[] calldata _intents) external {
+        address sender = _msgSender();
+        uint256 len = _intents.length;
+        for (uint256 i = 0; i < len; i++) {
+            OrderIntent calldata intent = _intents[i];
+            _createOrderInternal(sender, intent.price, intent.quantity, TimeInForce.GTC);
+        }
+        _ensureInitialMargin(sender);
+    }
+
+    /// @notice Batched placement with per-leg time-in-force — IM check once at the end.
+    function createOrdersV2(OrderIntentV2[] calldata _intents) external {
+        address sender = _msgSender();
+        uint256 len = _intents.length;
+        for (uint256 i = 0; i < len; i++) {
+            OrderIntentV2 calldata intent = _intents[i];
+            _createOrderInternal(sender, intent.price, intent.quantity, intent.timeInForce);
+        }
+        _ensureInitialMargin(sender);
+    }
+
+    /// @notice Cancel then place GTC orders in one call — IM check once at the end.
+    /// @dev Cancels run first so freed margin is available to the creates.
+    function updateOrders(bytes32[] calldata _cancelIds, OrderIntent[] calldata _intents) external {
+        address sender = _msgSender();
+        _updateGlobalFunding();
+        uint256 cancelLen = _cancelIds.length;
+        for (uint256 i = 0; i < cancelLen; i++) {
+            _cancelOrderInternal(sender, _cancelIds[i]);
+        }
+        uint256 createLen = _intents.length;
+        for (uint256 j = 0; j < createLen; j++) {
+            OrderIntent calldata intent = _intents[j];
+            _createOrderInternal(sender, intent.price, intent.quantity, TimeInForce.GTC);
+        }
+        _ensureInitialMargin(sender);
+    }
+
+    /// @dev Shared body for create paths. Returns true when the leg is reduce-only
+    ///      (single-order callers may skip the IM check); batch callers always check once.
+    function _createOrderInternal(address sender, uint256 _price, int256 _quantity, TimeInForce _tif)
+        private
+        returns (bool isReduceOnly)
+    {
         if (uint8(_tif) > uint8(TimeInForce.FOK)) revert InvalidTimeInForce();
 
         _updateGlobalFunding();
@@ -379,8 +444,9 @@ contract HashPowerPerpsDEX is
         bytes32 orderId = bytes32(++nonce);
         emit OrderCreated(orderId, sender, _price, _quantity);
 
-        // Snapshot position before matching to detect reduce-only orders
+        // Snapshot before matching — reduce-only vs position minus already-resting reduces.
         int256 positionBefore = positions[sender].netQuantity;
+        uint256 reducingBefore = _restingReduceAbs(sender, positionBefore);
 
         int256 remainingQuantity = _matchWithOppositeOrders(sender, _price, _quantity);
         bool partiallyOrFullyFilled = remainingQuantity != _quantity;
@@ -426,12 +492,22 @@ contract HashPowerPerpsDEX is
             }
         }
 
-        // Skip margin check for reduce-only orders (opposite side, not exceeding position)
-        bool isReduceOnly = positionBefore != 0 && (positionBefore > 0 ? _quantity < 0 : _quantity > 0)
-            && _abs(_quantity) <= _abs(positionBefore);
+        // Opposite side and combined reducing size (resting + this intent) ≤ position.
+        isReduceOnly = positionBefore != 0 && (positionBefore > 0 ? _quantity < 0 : _quantity > 0)
+            && _abs(_quantity) + reducingBefore <= _abs(positionBefore);
+    }
 
-        if (!isReduceOnly) {
-            _ensureInitialMargin(sender);
+    /// @dev Absolute qty of resting orders that reduce `_net`.
+    function _restingReduceAbs(address _user, int256 _net) private view returns (uint256 total) {
+        if (_net == 0) return 0;
+        EnumerableSet.Bytes32Set storage ids = participantOrderIdsIndex[_user];
+        uint256 len = ids.length();
+        for (uint256 i = 0; i < len; i++) {
+            Order memory order = orders[ids.at(i)];
+            if (order.quantity == 0) continue;
+            if (_net > 0 ? order.quantity < 0 : order.quantity > 0) {
+                total += _abs(order.quantity);
+            }
         }
     }
 
@@ -555,8 +631,14 @@ contract HashPowerPerpsDEX is
     /// @param _orderId Order ID to cancel
     function cancelOrder(bytes32 _orderId) external {
         _updateGlobalFunding();
+        _cancelOrderInternal(_msgSender(), _orderId);
+    }
+
+    /// @dev Shared cancel body for `cancelOrder` / `updateOrders`. Caller must
+    ///      have already updated global funding for this tx when needed.
+    function _cancelOrderInternal(address _participant, bytes32 _orderId) private {
         Order memory order = orders[_orderId];
-        if (order.participant != _msgSender()) {
+        if (order.participant != _participant) {
             revert OrderNotBelongToSender();
         }
 
@@ -745,7 +827,8 @@ contract HashPowerPerpsDEX is
     ///      a buffer rather than relying on `eth_estimateGas` over the whole bundle).
     /// @param _closeQty Absolute quantity (QUANTITY_DECIMALS) the keeper wants to close. Clamped to
     ///        `|netQuantity|`; pass `type(uint256).max` for a full close. Sizing the partial amount
-    ///        so the account lands at/under IM is the keeper's off-chain responsibility.
+    ///        so the account lands at/under IM is the keeper's off-chain responsibility — an
+    ///        oversize partial reverts `OverLiquidation`.
     function liquidatePosition(address _user, uint256 _closeQty) external {
         _updateGlobalFunding();
         _settleFunding(_user);
@@ -766,7 +849,6 @@ contract HashPowerPerpsDEX is
             return;
         }
 
-        // Partial close down to the IM buffer.
         (int256 pnl, int256 signedClose) = _doPartialLiquidatePosition(_user, position, closeAbs);
 
         // Over-liquidation guard: a position remains here, so if there is a real IM buffer
@@ -806,11 +888,6 @@ contract HashPowerPerpsDEX is
     }
 
     /// @notice Force-cancel a single resting order owned by an underwater user. Permissionless.
-    /// @dev    Batch use: bundle several `liquidateOrder` calls via {multicallStopOnFailure}
-    ///         to FIFO-sweep orders until the user is healthy again or an id goes stale.
-    ///         The first failed sub-call (`NotLiquidatable` once MM is restored, or
-    ///         `OrderNotBelongToUser` if another keeper raced you) ends the batch while
-    ///         keeping fees from earlier successes — see {MulticallStopOnFailureUpgradeable}.
     function liquidateOrder(address _user, bytes32 _orderId) external {
         _updateGlobalFunding();
 
@@ -820,6 +897,25 @@ contract HashPowerPerpsDEX is
         if (order.participant != _user) revert OrderNotBelongToUser();
 
         _doLiquidateOrder(_user, _orderId, order);
+    }
+
+    /// @notice Cancel keeper-chosen resting orders. Keeps prior cancels; skips raced/stale
+    ///         ids; stops when the user is healthy.
+    function liquidateOrders(address _user, bytes32[] calldata _orderIds) external {
+        _updateGlobalFunding();
+
+        uint256 cancelled = 0;
+        uint256 len = _orderIds.length;
+        for (uint256 i = 0; i < len; i++) {
+            if (!_underwater(_user)) break;
+            bytes32 orderId = _orderIds[i];
+            Order memory order = orders[orderId];
+            // Skip raced/stale ids; stop only once healthy.
+            if (order.participant != _user || order.quantity == 0) continue;
+            _doLiquidateOrder(_user, orderId, order);
+            cancelled++;
+        }
+        if (cancelled == 0) revert NotLiquidatable();
     }
 
     /// @dev Cancels a single order on behalf of a (verified-underwater) user. Caller must have
