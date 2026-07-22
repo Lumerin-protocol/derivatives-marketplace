@@ -377,26 +377,27 @@ export function handleOrderUpdated(event: OrderUpdated): void {
   const oldQuantity = order.quantity;
   const newQuantity = absBigInt(event.params.newQuantity);
   const quantityDiff = oldQuantity.minus(newQuantity);
-  const isFilled = event.params.newQuantity.equals(BigInt.zero());
+  const isClosed = event.params.newQuantity.equals(BigInt.zero());
 
-  // Update price level
+  // Update price level (book always follows remaining size).
   const level = getOrCreatePriceLevel(order.price, order.isBuy);
   level.totalQuantity = level.totalQuantity.minus(quantityDiff);
-  if (isFilled) {
+  if (isClosed) {
     level.orderCount--;
   }
   level.save();
 
-  // Update order
+  // Remaining size only. `filledQuantity` is owned by `OrderMatched` /
+  // `updateOrderFillStats` so a lone shrink (reduce-only amend) is not a fill.
   order.quantity = newQuantity;
-  order.filledQuantity = order.originalQuantity.minus(newQuantity);
   order.updatedAt = event.block.timestamp;
 
-  if (isFilled) {
-    order.status = "FILLED";
+  if (isClosed) {
+    // Full fill (matches already credited filledQuantity) or IOC close.
+    // Amend never emits newQuantity=0 (use cancelOrder).
+    order.status = order.filledQuantity.gt(BigInt.zero()) ? "FILLED" : "CANCELLED";
     order.closedAt = event.block.timestamp;
 
-    // Update user
     const user = User.load(order.user);
     if (user) {
       user.activeOrderCount--;
@@ -404,13 +405,15 @@ export function handleOrderUpdated(event: OrderUpdated): void {
       user.save();
     }
 
-    // Update global stats
     const perps = getOrCreatePerps();
     perps.activeOrders--;
     perps.lastUpdatedAt = event.block.timestamp;
     perps.save();
-  } else {
+  } else if (order.filledQuantity.gt(BigInt.zero())) {
     order.status = "PARTIAL";
+  } else {
+    // Reduce-only amend (or pre-match book update): still ACTIVE.
+    order.status = "ACTIVE";
   }
 
   order.save();

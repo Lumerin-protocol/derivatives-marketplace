@@ -52,7 +52,7 @@ contract HashPowerPerpsDEX is
     ///         contract equals 1 PH/s/day. Intentionally a constant: resizing live contracts is a migration,
     ///         not a live parameter change, so it is set at deploy time only.
     uint256 public constant CONTRACT_SIZE_HPS_DAY = 1e15;
-    string public constant VERSION = "2.9.1";
+    string public constant VERSION = "2.10.0";
 
     // State variables
     IERC20 public collateralToken;
@@ -144,9 +144,18 @@ contract HashPowerPerpsDEX is
         TimeInForce timeInForce;
     }
 
+    /// @notice Shrink a resting order in place (FIFO position preserved).
+    struct ReduceIntent {
+        bytes32 orderId;
+        int256 newQuantity; // same sign as resting; 0 < |new| < |old|
+    }
+
     // Events
     event OrderCreated(bytes32 indexed orderId, address indexed participant, uint256 price, int256 quantity);
     event OrderCancelled(bytes32 indexed orderId, address indexed participant);
+    /// @notice Resting size changed (partial fill, IOC remainder close, or reduce-only amend).
+    /// @dev Indexers must attribute fills only when paired with `OrderMatched` in the same tx;
+    ///      a lone shrink is a reduce-only amend (FIFO kept, not a trade).
     event OrderUpdated(bytes32 indexed orderId, address indexed participant, int256 newQuantity);
     event OrderMatched(
         bytes32 indexed makerOrderId,
@@ -200,6 +209,8 @@ contract HashPowerPerpsDEX is
     /// @notice FOK could not fill entirely, or IOC matched nothing.
     error TimeInForceNotFilled();
     error InvalidTimeInForce();
+    error InvalidReduceQuantity();
+    error OrderNotExists();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(uint256 _minimumPriceIncrement) {
@@ -370,6 +381,7 @@ contract HashPowerPerpsDEX is
     /// @param _quantity Order quantity (positive = long/buy, negative = short/sell)
     function createOrder(uint256 _price, int256 _quantity) external {
         address sender = _msgSender();
+        _updateGlobalFunding();
         bool skipMargin = _createOrderInternal(sender, _price, _quantity, TimeInForce.GTC);
         if (!skipMargin) {
             _ensureInitialMargin(sender);
@@ -379,6 +391,7 @@ contract HashPowerPerpsDEX is
     /// @notice Create a limit order with explicit time-in-force (GTC / IOC / FOK).
     function createOrderV2(uint256 _price, int256 _quantity, TimeInForce _tif) external {
         address sender = _msgSender();
+        _updateGlobalFunding();
         bool skipMargin = _createOrderInternal(sender, _price, _quantity, _tif);
         if (!skipMargin) {
             _ensureInitialMargin(sender);
@@ -388,6 +401,7 @@ contract HashPowerPerpsDEX is
     /// @notice Batched GTC placement — IM check once at the end.
     function createOrders(OrderIntent[] calldata _intents) external {
         address sender = _msgSender();
+        _updateGlobalFunding();
         uint256 len = _intents.length;
         for (uint256 i = 0; i < len; i++) {
             OrderIntent calldata intent = _intents[i];
@@ -399,6 +413,7 @@ contract HashPowerPerpsDEX is
     /// @notice Batched placement with per-leg time-in-force — IM check once at the end.
     function createOrdersV2(OrderIntentV2[] calldata _intents) external {
         address sender = _msgSender();
+        _updateGlobalFunding();
         uint256 len = _intents.length;
         for (uint256 i = 0; i < len; i++) {
             OrderIntentV2 calldata intent = _intents[i];
@@ -407,14 +422,23 @@ contract HashPowerPerpsDEX is
         _ensureInitialMargin(sender);
     }
 
-    /// @notice Cancel then place GTC orders in one call — IM check once at the end.
-    /// @dev Cancels run first so freed margin is available to the creates.
-    function updateOrders(bytes32[] calldata _cancelIds, OrderIntent[] calldata _intents) external {
+    /// @notice Cancel, reduce-in-place, then place GTC orders — IM check once at the end.
+    /// @dev Cancels/reduces run first so freed margin is available to the creates.
+    ///      Reduces keep FIFO queue position; creates always join the back.
+    function updateOrders(
+        bytes32[] calldata _cancelIds,
+        ReduceIntent[] calldata _reduces,
+        OrderIntent[] calldata _intents
+    ) external {
         address sender = _msgSender();
         _updateGlobalFunding();
         uint256 cancelLen = _cancelIds.length;
         for (uint256 i = 0; i < cancelLen; i++) {
             _cancelOrderInternal(sender, _cancelIds[i]);
+        }
+        uint256 reduceLen = _reduces.length;
+        for (uint256 r = 0; r < reduceLen; r++) {
+            _reduceOrderSizeInternal(sender, _reduces[r].orderId, _reduces[r].newQuantity);
         }
         uint256 createLen = _intents.length;
         for (uint256 j = 0; j < createLen; j++) {
@@ -424,15 +448,22 @@ contract HashPowerPerpsDEX is
         _ensureInitialMargin(sender);
     }
 
+    /// @notice Shrink a resting order owned by the caller without losing FIFO priority.
+    /// @dev Rejects grow / sign flip / zero (use `cancelOrder` to remove entirely).
+    function reduceOrderSize(bytes32 _orderId, int256 _newQuantity) external {
+        _updateGlobalFunding();
+        _reduceOrderSizeInternal(_msgSender(), _orderId, _newQuantity);
+    }
+
     /// @dev Shared body for create paths. Returns true when the leg is reduce-only
     ///      (single-order callers may skip the IM check); batch callers always check once.
+    ///      Caller must have already run `_updateGlobalFunding()` for this tx.
     function _createOrderInternal(address sender, uint256 _price, int256 _quantity, TimeInForce _tif)
         private
         returns (bool isReduceOnly)
     {
         if (uint8(_tif) > uint8(TimeInForce.FOK)) revert InvalidTimeInForce();
 
-        _updateGlobalFunding();
         _validateQuantity(_quantity);
         _validatePrice(_price);
 
@@ -648,6 +679,31 @@ contract HashPowerPerpsDEX is
         _removeOrder(_orderId, order.participant, order.price, isBid);
         _removePriceLevelIfEmpty(order.price, isBid);
         emit OrderCancelled(_orderId, order.participant);
+    }
+
+    /// @dev In-place size shrink. Keeps the order id in its price queue slot.
+    function _reduceOrderSizeInternal(address _participant, bytes32 _orderId, int256 _newQuantity) private {
+        Order storage order = orders[_orderId];
+        if (order.participant == address(0) || order.quantity == 0) revert OrderNotExists();
+        if (order.participant != _participant) revert OrderNotBelongToSender();
+
+        int256 oldQty = order.quantity;
+        if (_newQuantity == 0 || (_newQuantity > 0) != (oldQty > 0)) revert InvalidReduceQuantity();
+        uint256 oldAbs = _abs(oldQty);
+        uint256 newAbs = _abs(_newQuantity);
+        if (newAbs >= oldAbs) revert InvalidReduceQuantity();
+
+        if (minimumMarginPerOrder > 0) {
+            uint256 restingValue = _calculateValue(order.price, newAbs);
+            uint256 restingMargin = (restingValue * portfolioMargin.imSpotShock()) / 1e18;
+            if (restingMargin < minimumMarginPerOrder) revert OrderMarginTooLow();
+        }
+
+        bool isBid = oldQty > 0;
+        uint256 reducedAbs = oldAbs - newAbs;
+        _getOrderValue(isBid)[order.participant] -= _calculateValue(order.price, reducedAbs);
+        order.quantity = _newQuantity;
+        emit OrderUpdated(_orderId, order.participant, _newQuantity);
     }
 
     function _getOrderValue(bool _isBuy) private view returns (mapping(address => uint256) storage) {
