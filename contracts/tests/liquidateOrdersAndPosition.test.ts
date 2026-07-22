@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
-import { decodeErrorResult, encodeFunctionData, maxUint256, parseEventLogs, parseUnits, zeroHash } from "viem";
+import { encodeFunctionData, maxUint256, parseEventLogs, parseUnits, zeroHash } from "viem";
 import type { Hex } from "viem";
 import {
   deployPerpsFixture,
@@ -45,21 +45,17 @@ function encodeLiquidateOrder(abi: readonly unknown[], user: `0x${string}`, orde
 }
 
 /**
- * Strict orders-first invariant + new permissionless entry points
- * (Phase 0 of the unified margin keeper plan).
+ * Strict orders-first invariant + permissionless liquidation entry points.
  *
  * Surface under test:
- *   - liquidateOrder(user, id)            — single cancel, FIFO-bundle via multicallStopOnFailure
- *   - liquidatePosition(user)             — reverts OrdersStillOpen if any orders remain
- *   - nested multicallStopOnFailure       — per-user skip-and-continue batches
- *   - setLiquidationFee(uint256)          — single flat fee, paid per cancelled order and per closed position
- *
- * The legacy `liquidateOrders(user, ids[])` entry point was retired; its FIFO-sweep
- * semantics are now expressed by the keeper composing N `liquidateOrder` sub-calls
- * via `multicallStopOnFailure` (see {MulticallStopOnFailureUpgradeable}).
+ *   - liquidateOrder(user, id)              — single cancel
+ *   - liquidateOrders(user, ids[])          — keeper-chosen ids, stop-on-failure
+ *   - liquidatePosition(user, closeQty)     — reverts OrdersStillOpen if any orders remain
+ *   - nested multicallStopOnFailure         — per-user skip-and-continue batches
+ *   - setLiquidationFee(uint256)            — retained; payout currently disabled
  *
  * Fixture pattern: build an underwater account that ALSO has resting orders so we can
- * exercise both legs of the new strict two-step.
+ * exercise both legs of the strict two-step.
  */
 async function deployUnderwaterWithOrdersFixture(conn: Parameters<typeof deployPerpsFixture>[0]) {
   const data = await deployPerpsFixture(conn);
@@ -243,11 +239,7 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
     });
   });
 
-  // The dedicated `liquidateOrders(address, bytes32[])` entry point was retired in favour of
-  // composing N `liquidateOrder` calls via {multicallStopOnFailure}. The tests below cover the
-  // same behaviour through the generic primitive: FIFO sweep, no fee-drain after MM is
-  // restored mid-batch, and graceful no-op when the caller mis-targets a healthy user.
-  describe("liquidateOrder × N via multicallStopOnFailure", function () {
+  describe("liquidateOrders (keeper-chosen ids, stop-on-failure)", function () {
     it("cancels all specified orders without paying a fee (payout disabled)", async function () {
       const data = await networkHelpers.loadFixture(deployUnderwaterWithOrdersFixture);
       const { contracts, accounts } = data;
@@ -261,24 +253,18 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
 
       const liqBalanceBefore = await perps.read.balanceOf([buyer2.account.address]);
 
-      const calls = ordersBefore.map((id) =>
-        encodeLiquidateOrder(perps.abi, seller.account.address, id),
-      );
-      await perps.write.multicallStopOnFailure([calls], { account: buyer2.account });
+      await perps.write.liquidateOrders([seller.account.address, ordersBefore], {
+        account: buyer2.account,
+      });
 
       const liqBalanceAfter = await perps.read.balanceOf([buyer2.account.address]);
       const ordersAfter = await perps.read.getUserOrders([seller.account.address]);
 
       assert.equal(ordersAfter.length, 0);
-      // Keeper-incentive payout is disabled: sweeping every order earns nothing.
       assert.equal(liqBalanceAfter - liqBalanceBefore, 0n);
     });
 
-    // Healthy user: every sub-call reverts `NotLiquidatable`. With the legacy
-    // `liquidateOrders` we'd see a top-level revert; with the multicall primitive the tx
-    // commits successfully and the caller inspects `successes`/`results` to detect that the
-    // batch did nothing. No fees are paid.
-    it("returns failure for the first sub-call when user is healthy (no top-level revert)", async function () {
+    it("reverts NotLiquidatable when user is healthy", async function () {
       const { contracts, accounts } = await networkHelpers.loadFixture(
         deployUnderwaterWithOrdersFixture,
       );
@@ -286,34 +272,22 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
       const { seller, buyer2 } = accounts;
 
       const orders = await perps.read.getUserOrders([seller.account.address]);
-      const calls = orders.map((id) => encodeLiquidateOrder(perps.abi, seller.account.address, id));
-
-      const balanceBefore = await perps.read.balanceOf([buyer2.account.address]);
-      const { result } = await perps.simulate.multicallStopOnFailure([calls], {
-        account: buyer2.account,
-      });
-      const [successes, results] = result;
-
-      assert.equal(successes[0], false, "first sub-call must fail");
-      const decoded = decodeErrorResult({ abi: perps.abi, data: results[0] });
-      assert.equal(decoded.errorName, "NotLiquidatable");
-
-      // No state change → no fee transfer.
-      await perps.write.multicallStopOnFailure([calls], { account: buyer2.account });
-      const balanceAfter = await perps.read.balanceOf([buyer2.account.address]);
-      assert.equal(balanceAfter, balanceBefore);
+      await viem.assertions.revertWithCustomError(
+        perps.write.liquidateOrders([seller.account.address, orders], {
+          account: buyer2.account,
+        }),
+        perps,
+        "NotLiquidatable",
+      );
     });
 
-    it("stops early once user becomes healthy mid-batch (no fee drain)", async function () {
+    it("stops early once user becomes healthy mid-batch", async function () {
       const data = await networkHelpers.loadFixture(deployUnderwaterWithOrdersFixture);
       const { contracts, accounts } = data;
       const { perps, priceOracle } = contracts;
       const { seller, buyer2 } = accounts;
 
-      // Make the user just barely underwater so cancelling the resting shorts can flip
-      // them healthy mid-batch. With the price doubled (full `makeUnderwater`) the
-      // position alone keeps them underwater regardless of order cancels, so we use a
-      // smaller bump and fall back to the full move if the bump isn't enough.
+      // Barely underwater so cancelling resting shorts can flip healthy mid-batch.
       const initialPrice = await perps.read.getMarketPrice();
       const tick = data.config.minimumPriceIncrement;
       const bump = initialPrice + tick * 30n;
@@ -327,16 +301,13 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
       const orders = await perps.read.getUserOrders([seller.account.address]);
       assert.ok(orders.length > 0);
 
-      const calls = orders.map((id) => encodeLiquidateOrder(perps.abi, seller.account.address, id));
+      await perps.write.liquidateOrders([seller.account.address, orders], {
+        account: buyer2.account,
+      });
 
-      const balanceBefore = await perps.read.balanceOf([buyer2.account.address]);
-      await perps.write.multicallStopOnFailure([calls], { account: buyer2.account });
-      const balanceAfter = await perps.read.balanceOf([buyer2.account.address]);
-
-      // Liquidator earned at most `orders.length * fee` — early-exit shouldn't *increase* fees.
-      assert.ok(
-        balanceAfter - balanceBefore <= data.config.liquidationFee * BigInt(orders.length),
-      );
+      // At least one cancel landed; remaining orders (if any) are left for a later call.
+      const ordersAfter = await perps.read.getUserOrders([seller.account.address]);
+      assert.ok(ordersAfter.length < orders.length);
     });
   });
 

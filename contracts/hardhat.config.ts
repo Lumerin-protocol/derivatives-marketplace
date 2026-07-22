@@ -55,6 +55,8 @@ export default defineConfig({
         enabled: true,
         runs: 200,
       },
+      // Keeps HashPowerPerpsDEX under the 24kb EIP-170 deployed-bytecode limit.
+      viaIR: true,
     },
   },
 

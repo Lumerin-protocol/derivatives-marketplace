@@ -819,6 +819,61 @@ export const HashPowerPerpsDEXAbi = [
     "type": "function"
   },
   {
+    "inputs": [
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "price",
+            "type": "uint256"
+          },
+          {
+            "internalType": "int256",
+            "name": "quantity",
+            "type": "int256"
+          }
+        ],
+        "internalType": "struct HashPowerPerpsDEX.OrderIntent[]",
+        "name": "_intents",
+        "type": "tuple[]"
+      }
+    ],
+    "name": "createOrders",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "price",
+            "type": "uint256"
+          },
+          {
+            "internalType": "int256",
+            "name": "quantity",
+            "type": "int256"
+          },
+          {
+            "internalType": "enum HashPowerPerpsDEX.TimeInForce",
+            "name": "timeInForce",
+            "type": "uint8"
+          }
+        ],
+        "internalType": "struct HashPowerPerpsDEX.OrderIntentV2[]",
+        "name": "_intents",
+        "type": "tuple[]"
+      }
+    ],
+    "name": "createOrdersV2",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
     "inputs": [],
     "name": "cumulativeFundingPerUnit",
     "outputs": [
@@ -1277,6 +1332,24 @@ export const HashPowerPerpsDEXAbi = [
         "type": "address"
       },
       {
+        "internalType": "bytes32[]",
+        "name": "_orderIds",
+        "type": "bytes32[]"
+      }
+    ],
+    "name": "liquidateOrders",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      },
+      {
         "internalType": "uint256",
         "name": "_closeQty",
         "type": "uint256"
@@ -1638,6 +1711,36 @@ export const HashPowerPerpsDEXAbi = [
   {
     "inputs": [],
     "name": "updateFunding",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32[]",
+        "name": "_cancelIds",
+        "type": "bytes32[]"
+      },
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "price",
+            "type": "uint256"
+          },
+          {
+            "internalType": "int256",
+            "name": "quantity",
+            "type": "int256"
+          }
+        ],
+        "internalType": "struct HashPowerPerpsDEX.OrderIntent[]",
+        "name": "_intents",
+        "type": "tuple[]"
+      }
+    ],
+    "name": "updateOrders",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
