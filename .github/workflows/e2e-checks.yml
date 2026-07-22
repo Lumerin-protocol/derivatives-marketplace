@@ -45,9 +45,17 @@ jobs:
         with:
           node-version: "24"
           cache: "pnpm"
-          cache-dependency-path: e2e/pnpm-lock.yaml
+          cache-dependency-path: |
+            e2e/pnpm-lock.yaml
+            contracts/pnpm-lock.yaml
 
-      - name: Install dependencies
+      # e2e typecheck follows imports into `contracts/fixtures/*`, which resolve
+      # modules (e.g. viem) from the contracts package.
+      - name: Install contracts dependencies
+        working-directory: ./contracts
+        run: pnpm install --frozen-lockfile
+
+      - name: Install e2e dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Lint
