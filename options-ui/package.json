@@ -10,7 +10,10 @@
     "dev": "vite",
     "dev-hardhat": "vite --mode hardhat",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "tsgo --noEmit -p tsconfig.json && tsgo --noEmit -p tsconfig.node.json",
+    "lint": "biome lint .",
+    "lint:fix": "biome check --write ."
   },
   "dependencies": {
     "@tanstack/react-query": "^5.62.0",
@@ -20,8 +23,11 @@
     "wagmi": "^2.14.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.4.13",
+    "@types/node": "^22.20.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@typescript/native-preview": "7.0.0-dev.20260707.2",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.49",

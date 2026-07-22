@@ -8,12 +8,17 @@
       "!**/node_modules",
       "!**/coverage",
       "!**/artifacts",
-      "!**/cache"
+      "!**/cache",
+      "!**/dist"
     ]
   },
   "overrides": [
     {
-      "includes": ["**/indexer/src/**", "**/indexer/tests/**", "**/types/**"],
+      "includes": [
+        "**/indexer/src/**",
+        "**/indexer/tests/**",
+        "**/types/**"
+      ],
       "linter": {
         "rules": {
           "complexity": {
@@ -33,6 +38,18 @@
           "suspicious": {
             "noShadowRestrictedNames": "off",
             "noDoubleEquals": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "**/*.css"
+      ],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noUnknownAtRules": "off"
           }
         }
       }
