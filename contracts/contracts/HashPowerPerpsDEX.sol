@@ -569,6 +569,8 @@ contract HashPowerPerpsDEX is
     }
 
     /// @notice Match orders at a specific price level (direct walk).
+    /// @dev Self-cross (maker == taker) nets out size with no trade, fees, or
+    ///      position update — same STP semantics as Futures.
     function _matchOrdersAtPrice(address _taker, uint256 _price, int256 _remainingQty, bool _isBuy)
         private
         returns (int256)
@@ -579,6 +581,13 @@ contract HashPowerPerpsDEX is
         while (_remainingQty != 0 && orderIdUint != 0) {
             bytes32 makerOrderId = bytes32(orderIdUint);
             Order storage makerOrder = orders[makerOrderId];
+
+            if (makerOrder.participant == _taker) {
+                _remainingQty = _netSelfCross(_taker, makerOrderId, makerOrder, _remainingQty);
+                (, orderIdUint) = makerOrderQueue.getNextNode(0);
+                continue;
+            }
+
             _remainingQty = _executeMatch(_taker, makerOrderId, makerOrder, _remainingQty);
             (, orderIdUint) = makerOrderQueue.getNextNode(0);
         }
@@ -587,6 +596,38 @@ contract HashPowerPerpsDEX is
         _removePriceLevelIfEmpty(_price, !_isBuy);
 
         return _remainingQty;
+    }
+
+    /// @dev Cancel overlapping size against the taker's own resting order.
+    ///      No fill, no fees, no position change.
+    function _netSelfCross(
+        address _taker,
+        bytes32 _makerOrderId,
+        Order storage _makerOrder,
+        int256 _remainingQty
+    ) private returns (int256) {
+        uint256 makerPrice = _makerOrder.price;
+        int256 makerQty = _makerOrder.quantity;
+        uint256 makerAbs = _abs(makerQty);
+        uint256 remainingAbs = _abs(_remainingQty);
+        uint256 cancelAmt = makerAbs < remainingAbs ? makerAbs : remainingAbs;
+        bool makerIsBid = makerQty > 0;
+
+        _getOrderValue(makerIsBid)[_taker] -= _calculateValue(makerPrice, cancelAmt);
+
+        if (cancelAmt == makerAbs) {
+            _removeOrder(_makerOrderId, _taker, makerPrice, makerIsBid);
+            emit OrderCancelled(_makerOrderId, _taker);
+        } else {
+            uint256 reducedMakerAbs = makerAbs - cancelAmt;
+            int256 newMakerQty = makerQty > 0 ? int256(reducedMakerAbs) : -int256(reducedMakerAbs);
+            _makerOrder.quantity = newMakerQty;
+            emit OrderUpdated(_makerOrderId, _taker, newMakerQty);
+        }
+
+        return _remainingQty > 0
+            ? int256(remainingAbs - cancelAmt)
+            : -int256(remainingAbs - cancelAmt);
     }
 
     /// @notice Execute a single order match

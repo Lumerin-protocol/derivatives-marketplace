@@ -232,8 +232,8 @@ describe("HashPowerPerpsDEX - createOrder", function () {
     });
   });
 
-  describe("Self-Trade", function () {
-    it("should self-trade own opposite orders at matching prices", async function () {
+  describe("Self-Trade Prevention", function () {
+    it("should net out own opposite orders at matching prices without a fill", async function () {
       const { contracts, accounts, config } = await networkHelpers.loadFixture(
         deployPerpsWithCollateralFixture,
       );
@@ -258,7 +258,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       assert.equal(position.netQuantity, 0n);
     });
 
-    it("should partially self-trade own orders", async function () {
+    it("should partially net out own orders without a fill", async function () {
       const { contracts, accounts } = await networkHelpers.loadFixture(
         deployPerpsWithCollateralFixture,
       );
