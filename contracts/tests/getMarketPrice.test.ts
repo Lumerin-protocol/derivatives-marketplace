@@ -53,7 +53,7 @@ describe("HashPowerPerpsDEX - getMarketPrice", function () {
     const { perps, priceOracle } = contracts;
 
     const newPrice = parseUnits("85000", 6);
-    await priceOracle.write.setPrice([newPrice, 6n]);
+    await priceOracle.write.setPrice([newPrice, 6]);
 
     const marketPrice = await perps.read.getMarketPrice();
     assert.equal(marketPrice, newPrice * MARK_MULTIPLIER);

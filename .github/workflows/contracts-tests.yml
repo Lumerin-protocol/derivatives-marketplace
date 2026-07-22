@@ -49,6 +49,18 @@ jobs:
         working-directory: ./contracts
         run: pnpm install --frozen-lockfile
 
+      - name: Compile contracts
+        working-directory: ./contracts
+        run: pnpm compile
+
+      - name: Lint
+        working-directory: ./contracts
+        run: pnpm lint
+
+      - name: Typecheck
+        working-directory: ./contracts
+        run: pnpm typecheck
+
       - name: Run tests
         working-directory: ./contracts
         run: pnpm test

@@ -53,7 +53,7 @@ export const defaultSeries = {
   strikeE8: 50000_00000000n, // $50,000
   expiryTs: YEAR_LATER,
   isCall: true,
-  tickSizeE8: 1_000_000n, // $0.01 in 1e8
+  tickSizeE8: 1_000_000, // $0.01 in 1e8
   lotSize: 1_000_000, // 1 contract (1e6)
   initialIV: 500_000_000_000_000_000n, // 50% = 0.5e18
 } as const;

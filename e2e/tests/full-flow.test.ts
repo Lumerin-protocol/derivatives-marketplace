@@ -17,7 +17,8 @@ let deployment: Awaited<ReturnType<typeof deployWithLiquidatablePositionFixture>
 before(
   async () => {
     console.log("[e2e] Waiting for Docker stack to be reachable...");
-    await waitForStack();
+    // Cold CI pulls (graph-node/postgres/ipfs + hardhat image build) can exceed 30s.
+    await waitForStack(180_000);
 
     console.log("[e2e] Deploying contracts...");
     deployment = await deployWithLiquidatablePositionFixture();

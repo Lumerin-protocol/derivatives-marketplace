@@ -79,6 +79,14 @@ jobs:
         working-directory: ./indexer
         run: pnpm exec graph codegen
 
+      - name: Lint
+        working-directory: ./indexer
+        run: pnpm lint
+
+      - name: Typecheck
+        working-directory: ./indexer
+        run: pnpm typecheck
+
       - name: Run unit tests (matchstick-as)
         working-directory: ./indexer
         run: pnpm test:unit

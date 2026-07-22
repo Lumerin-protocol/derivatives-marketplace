@@ -14,7 +14,7 @@ describe("OptionOrderBook", () => {
       const { owner } = accounts;
 
       await book.write.placeOrder(
-        [seriesId, owner.account.address, true, 100, 1_000_000n, false, false],
+        [seriesId, owner.account.address, true, 100n, 1_000_000n, false, false],
         { account: owner.account },
       );
 
@@ -28,7 +28,7 @@ describe("OptionOrderBook", () => {
       const { owner } = accounts;
 
       await book.write.placeOrder(
-        [seriesId, owner.account.address, false, 200, 1_000_000n, false, false],
+        [seriesId, owner.account.address, false, 200n, 1_000_000n, false, false],
         { account: owner.account },
       );
 
@@ -41,9 +41,9 @@ describe("OptionOrderBook", () => {
       const { book, seriesId, accounts } = await networkHelpers.loadFixture(deployBookWithSeriesFixture);
       const { owner } = accounts;
 
-      await book.write.placeOrder([seriesId, owner.account.address, true, 100, 1_000_000n, false, false], { account: owner.account });
-      await book.write.placeOrder([seriesId, owner.account.address, true, 150, 1_000_000n, false, false], { account: owner.account });
-      await book.write.placeOrder([seriesId, owner.account.address, true, 120, 1_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, true, 100n, 1_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, true, 150n, 1_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, true, 120n, 1_000_000n, false, false], { account: owner.account });
 
       const [, bidPrice] = await book.read.bestBid([seriesId]);
       assert.equal(bidPrice, 150n);
@@ -53,9 +53,9 @@ describe("OptionOrderBook", () => {
       const { book, seriesId, accounts } = await networkHelpers.loadFixture(deployBookWithSeriesFixture);
       const { owner } = accounts;
 
-      await book.write.placeOrder([seriesId, owner.account.address, false, 300, 1_000_000n, false, false], { account: owner.account });
-      await book.write.placeOrder([seriesId, owner.account.address, false, 200, 1_000_000n, false, false], { account: owner.account });
-      await book.write.placeOrder([seriesId, owner.account.address, false, 250, 1_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, false, 300n, 1_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, false, 200n, 1_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, false, 250n, 1_000_000n, false, false], { account: owner.account });
 
       const [, askPrice] = await book.read.bestAsk([seriesId]);
       assert.equal(askPrice, 200n);
@@ -65,7 +65,7 @@ describe("OptionOrderBook", () => {
       const { book, seriesId, accounts } = await networkHelpers.loadFixture(deployBookWithSeriesFixture);
       await assert.rejects(
         book.write.placeOrder(
-          [seriesId, accounts.admin.account.address, true, 100, 1_000_000n, false, false],
+          [seriesId, accounts.admin.account.address, true, 100n, 1_000_000n, false, false],
           { account: accounts.admin.account },
         ),
       );
@@ -74,14 +74,14 @@ describe("OptionOrderBook", () => {
     it("reverts for zero price", async () => {
       const { book, seriesId, accounts } = await networkHelpers.loadFixture(deployBookWithSeriesFixture);
       await assert.rejects(
-        book.write.placeOrder([seriesId, accounts.owner.account.address, true, 0, 1_000_000n, false, false], { account: accounts.owner.account }),
+        book.write.placeOrder([seriesId, accounts.owner.account.address, true, 0n, 1_000_000n, false, false], { account: accounts.owner.account }),
       );
     });
 
     it("reverts for zero size", async () => {
       const { book, seriesId, accounts } = await networkHelpers.loadFixture(deployBookWithSeriesFixture);
       await assert.rejects(
-        book.write.placeOrder([seriesId, accounts.owner.account.address, true, 100, 0n, false, false], { account: accounts.owner.account }),
+        book.write.placeOrder([seriesId, accounts.owner.account.address, true, 100n, 0n, false, false], { account: accounts.owner.account }),
       );
     });
   });
@@ -93,9 +93,9 @@ describe("OptionOrderBook", () => {
       const { book, seriesId, accounts } = await networkHelpers.loadFixture(deployBookWithSeriesFixture);
       const { owner } = accounts;
 
-      await book.write.placeOrder([seriesId, owner.account.address, true, 100, 1_000_000n, false, false], { account: owner.account });
-      await book.write.placeOrder([seriesId, owner.account.address, true, 100, 2_000_000n, false, false], { account: owner.account });
-      await book.write.placeOrder([seriesId, owner.account.address, true, 100, 3_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, true, 100n, 1_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, true, 100n, 2_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, true, 100n, 3_000_000n, false, false], { account: owner.account });
 
       const [headOrderId] = await book.read.bestBid([seriesId]);
       assert.equal(headOrderId, 1n); // first placed
@@ -103,7 +103,7 @@ describe("OptionOrderBook", () => {
       const order1 = await book.read.getOrder([1n]);
       assert.equal(order1.size, 1_000_000n);
 
-      const depth = await book.read.levelDepth([seriesId, true, 100]);
+      const depth = await book.read.levelDepth([seriesId, true, 100n]);
       assert.equal(depth, 3n);
     });
   });
@@ -115,7 +115,7 @@ describe("OptionOrderBook", () => {
       const { book, seriesId, accounts } = await networkHelpers.loadFixture(deployBookWithSeriesFixture);
       const { owner } = accounts;
 
-      await book.write.placeOrder([seriesId, owner.account.address, true, 100, 1_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, true, 100n, 1_000_000n, false, false], { account: owner.account });
       await book.write.cancelOrder([1n], { account: owner.account });
 
       assert.equal(await book.read.isOrderActive([1n]), false);
@@ -129,8 +129,8 @@ describe("OptionOrderBook", () => {
       const { book, seriesId, accounts } = await networkHelpers.loadFixture(deployBookWithSeriesFixture);
       const { owner } = accounts;
 
-      await book.write.placeOrder([seriesId, owner.account.address, false, 200, 1_000_000n, false, false], { account: owner.account });
-      await book.write.placeOrder([seriesId, owner.account.address, false, 200, 2_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, false, 200n, 1_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, false, 200n, 2_000_000n, false, false], { account: owner.account });
 
       await book.write.cancelOrder([1n], { account: owner.account });
 
@@ -142,18 +142,18 @@ describe("OptionOrderBook", () => {
       const { book, seriesId, accounts } = await networkHelpers.loadFixture(deployBookWithSeriesFixture);
       const { owner } = accounts;
 
-      await book.write.placeOrder([seriesId, owner.account.address, true, 100, 1_000_000n, false, false], { account: owner.account });
-      await book.write.placeOrder([seriesId, owner.account.address, true, 100, 2_000_000n, false, false], { account: owner.account });
-      await book.write.placeOrder([seriesId, owner.account.address, true, 100, 3_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, true, 100n, 1_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, true, 100n, 2_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, true, 100n, 3_000_000n, false, false], { account: owner.account });
 
       await book.write.cancelOrder([2n], { account: owner.account });
 
-      assert.equal(await book.read.levelDepth([seriesId, true, 100]), 2n);
+      assert.equal(await book.read.levelDepth([seriesId, true, 100n]), 2n);
 
       const [headOrderId] = await book.read.bestBid([seriesId]);
       assert.equal(headOrderId, 1n);
 
-      const nextAfterHead = await book.read.nextOrderInQueue([seriesId, true, 100, 1n]);
+      const nextAfterHead = await book.read.nextOrderInQueue([seriesId, true, 100n, 1n]);
       assert.equal(nextAfterHead, 3n);
     });
 
@@ -161,8 +161,8 @@ describe("OptionOrderBook", () => {
       const { book, seriesId, accounts } = await networkHelpers.loadFixture(deployBookWithSeriesFixture);
       const { owner } = accounts;
 
-      await book.write.placeOrder([seriesId, owner.account.address, true, 100, 1_000_000n, false, false], { account: owner.account });
-      await book.write.placeOrder([seriesId, owner.account.address, true, 150, 1_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, true, 100n, 1_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, true, 150n, 1_000_000n, false, false], { account: owner.account });
 
       await book.write.cancelOrder([2n], { account: owner.account }); // cancel 150
 
@@ -174,8 +174,8 @@ describe("OptionOrderBook", () => {
       const { book, seriesId, accounts } = await networkHelpers.loadFixture(deployBookWithSeriesFixture);
       const { owner } = accounts;
 
-      await book.write.placeOrder([seriesId, owner.account.address, false, 200, 1_000_000n, false, false], { account: owner.account });
-      await book.write.placeOrder([seriesId, owner.account.address, false, 300, 1_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, false, 200n, 1_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, false, 300n, 1_000_000n, false, false], { account: owner.account });
 
       await book.write.cancelOrder([1n], { account: owner.account }); // cancel 200
 
@@ -187,7 +187,7 @@ describe("OptionOrderBook", () => {
       const { book, seriesId, accounts } = await networkHelpers.loadFixture(deployBookWithSeriesFixture);
       const { owner } = accounts;
 
-      await book.write.placeOrder([seriesId, owner.account.address, true, 100, 1_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, true, 100n, 1_000_000n, false, false], { account: owner.account });
       await book.write.cancelOrder([1n], { account: owner.account });
 
       await assert.rejects(
@@ -203,7 +203,7 @@ describe("OptionOrderBook", () => {
       const { book, seriesId, accounts } = await networkHelpers.loadFixture(deployBookWithSeriesFixture);
       const { owner } = accounts;
 
-      await book.write.placeOrder([seriesId, owner.account.address, false, 200, 5_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, false, 200n, 5_000_000n, false, false], { account: owner.account });
 
       await book.write.fillOrder([1n, 2_000_000n], { account: owner.account });
 
@@ -216,7 +216,7 @@ describe("OptionOrderBook", () => {
       const { book, seriesId, accounts } = await networkHelpers.loadFixture(deployBookWithSeriesFixture);
       const { owner } = accounts;
 
-      await book.write.placeOrder([seriesId, owner.account.address, false, 200, 5_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, false, 200n, 5_000_000n, false, false], { account: owner.account });
 
       await book.write.fillOrder([1n, 5_000_000n], { account: owner.account });
 
@@ -230,7 +230,7 @@ describe("OptionOrderBook", () => {
       const { book, seriesId, accounts } = await networkHelpers.loadFixture(deployBookWithSeriesFixture);
       const { owner } = accounts;
 
-      await book.write.placeOrder([seriesId, owner.account.address, true, 100, 1_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, true, 100n, 1_000_000n, false, false], { account: owner.account });
 
       // Simulate fill via staticCall to read return values
       const pc = accounts.pc;
@@ -250,7 +250,7 @@ describe("OptionOrderBook", () => {
       const { book, seriesId, accounts } = await networkHelpers.loadFixture(deployBookWithSeriesFixture);
       const { owner } = accounts;
 
-      await book.write.placeOrder([seriesId, owner.account.address, false, 200, 3_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, false, 200n, 3_000_000n, false, false], { account: owner.account });
 
       await assert.rejects(
         book.write.fillOrder([1n, 5_000_000n], { account: owner.account }),
@@ -261,8 +261,8 @@ describe("OptionOrderBook", () => {
       const { book, seriesId, accounts } = await networkHelpers.loadFixture(deployBookWithSeriesFixture);
       const { owner } = accounts;
 
-      await book.write.placeOrder([seriesId, owner.account.address, false, 200, 1_000_000n, false, false], { account: owner.account });
-      await book.write.placeOrder([seriesId, owner.account.address, false, 250, 1_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, false, 200n, 1_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, false, 250n, 1_000_000n, false, false], { account: owner.account });
 
       await book.write.fillOrder([1n, 1_000_000n], { account: owner.account });
 
@@ -278,9 +278,9 @@ describe("OptionOrderBook", () => {
       const { book, seriesId, accounts } = await networkHelpers.loadFixture(deployBookWithSeriesFixture);
       const { owner } = accounts;
 
-      await book.write.placeOrder([seriesId, owner.account.address, true, 100, 1_000_000n, false, false], { account: owner.account });
-      await book.write.placeOrder([seriesId, owner.account.address, true, 120, 1_000_000n, false, false], { account: owner.account });
-      await book.write.placeOrder([seriesId, owner.account.address, true, 80, 1_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, true, 100n, 1_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, true, 120n, 1_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, true, 80n, 1_000_000n, false, false], { account: owner.account });
 
       const [, bestPrice] = await book.read.bestBid([seriesId]);
       assert.equal(bestPrice, 120n);
@@ -301,9 +301,9 @@ describe("OptionOrderBook", () => {
       const { book, seriesId, accounts } = await networkHelpers.loadFixture(deployBookWithSeriesFixture);
       const { owner } = accounts;
 
-      await book.write.placeOrder([seriesId, owner.account.address, false, 200, 1_000_000n, false, false], { account: owner.account });
-      await book.write.placeOrder([seriesId, owner.account.address, false, 250, 1_000_000n, false, false], { account: owner.account });
-      await book.write.placeOrder([seriesId, owner.account.address, false, 300, 1_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, false, 200n, 1_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, false, 250n, 1_000_000n, false, false], { account: owner.account });
+      await book.write.placeOrder([seriesId, owner.account.address, false, 300n, 1_000_000n, false, false], { account: owner.account });
 
       const [, bestPrice] = await book.read.bestAsk([seriesId]);
       assert.equal(bestPrice, 200n);

@@ -21,18 +21,18 @@ describe("OrderQueueLib", () => {
 
     it("enqueue one item", async () => {
       const { harness } = await networkHelpers.loadFixture(deployHarness);
-      await harness.write.enqueue([1]);
+      await harness.write.enqueue([1n]);
       assert.equal(await harness.read.isEmpty(), false);
       assert.equal(await harness.read.sizeOf(), 1n);
       assert.equal(await harness.read.peek(), 1n);
-      assert.equal(await harness.read.exists([1]), true);
+      assert.equal(await harness.read.exists([1n]), true);
     });
 
     it("enqueue multiple, peek returns head (FIFO)", async () => {
       const { harness } = await networkHelpers.loadFixture(deployHarness);
-      await harness.write.enqueue([10]);
-      await harness.write.enqueue([20]);
-      await harness.write.enqueue([30]);
+      await harness.write.enqueue([10n]);
+      await harness.write.enqueue([20n]);
+      await harness.write.enqueue([30n]);
 
       assert.equal(await harness.read.sizeOf(), 3n);
       assert.equal(await harness.read.peek(), 10n);
@@ -42,9 +42,9 @@ describe("OrderQueueLib", () => {
   describe("dequeue (FIFO order)", () => {
     it("dequeues in insertion order", async () => {
       const { harness } = await networkHelpers.loadFixture(deployHarness);
-      await harness.write.enqueue([1]);
-      await harness.write.enqueue([2]);
-      await harness.write.enqueue([3]);
+      await harness.write.enqueue([1n]);
+      await harness.write.enqueue([2n]);
+      await harness.write.enqueue([3n]);
 
       await harness.write.dequeue();
       assert.equal(await harness.read.peek(), 2n);
@@ -65,14 +65,14 @@ describe("OrderQueueLib", () => {
   describe("remove (arbitrary cancellation)", () => {
     it("remove from middle", async () => {
       const { harness } = await networkHelpers.loadFixture(deployHarness);
-      await harness.write.enqueue([1]);
-      await harness.write.enqueue([2]);
-      await harness.write.enqueue([3]);
+      await harness.write.enqueue([1n]);
+      await harness.write.enqueue([2n]);
+      await harness.write.enqueue([3n]);
 
-      await harness.write.remove([2]);
+      await harness.write.remove([2n]);
 
       assert.equal(await harness.read.sizeOf(), 2n);
-      assert.equal(await harness.read.exists([2]), false);
+      assert.equal(await harness.read.exists([2n]), false);
       assert.equal(await harness.read.peek(), 1n);
 
       await harness.write.dequeue();
@@ -81,10 +81,10 @@ describe("OrderQueueLib", () => {
 
     it("remove head", async () => {
       const { harness } = await networkHelpers.loadFixture(deployHarness);
-      await harness.write.enqueue([1]);
-      await harness.write.enqueue([2]);
+      await harness.write.enqueue([1n]);
+      await harness.write.enqueue([2n]);
 
-      await harness.write.remove([1]);
+      await harness.write.remove([1n]);
 
       assert.equal(await harness.read.peek(), 2n);
       assert.equal(await harness.read.sizeOf(), 1n);
@@ -92,14 +92,14 @@ describe("OrderQueueLib", () => {
 
     it("remove tail", async () => {
       const { harness } = await networkHelpers.loadFixture(deployHarness);
-      await harness.write.enqueue([1]);
-      await harness.write.enqueue([2]);
-      await harness.write.enqueue([3]);
+      await harness.write.enqueue([1n]);
+      await harness.write.enqueue([2n]);
+      await harness.write.enqueue([3n]);
 
-      await harness.write.remove([3]);
+      await harness.write.remove([3n]);
 
       assert.equal(await harness.read.sizeOf(), 2n);
-      assert.equal(await harness.read.exists([3]), false);
+      assert.equal(await harness.read.exists([3n]), false);
 
       await harness.write.dequeue();
       assert.equal(await harness.read.peek(), 2n);
@@ -107,8 +107,8 @@ describe("OrderQueueLib", () => {
 
     it("remove sole element → empty", async () => {
       const { harness } = await networkHelpers.loadFixture(deployHarness);
-      await harness.write.enqueue([42]);
-      await harness.write.remove([42]);
+      await harness.write.enqueue([42n]);
+      await harness.write.remove([42n]);
 
       assert.equal(await harness.read.isEmpty(), true);
       assert.equal(await harness.read.sizeOf(), 0n);
@@ -118,9 +118,9 @@ describe("OrderQueueLib", () => {
   describe("getNext (iteration)", () => {
     it("walks the full queue via getNext", async () => {
       const { harness } = await networkHelpers.loadFixture(deployHarness);
-      await harness.write.enqueue([10]);
-      await harness.write.enqueue([20]);
-      await harness.write.enqueue([30]);
+      await harness.write.enqueue([10n]);
+      await harness.write.enqueue([20n]);
+      await harness.write.enqueue([30n]);
 
       let current = await harness.read.peek();
       const items: bigint[] = [];
@@ -135,14 +135,14 @@ describe("OrderQueueLib", () => {
   describe("exists", () => {
     it("returns false for orderId 0 (sentinel)", async () => {
       const { harness } = await networkHelpers.loadFixture(deployHarness);
-      assert.equal(await harness.read.exists([0]), false);
+      assert.equal(await harness.read.exists([0n]), false);
     });
 
     it("returns false after dequeue", async () => {
       const { harness } = await networkHelpers.loadFixture(deployHarness);
-      await harness.write.enqueue([5]);
+      await harness.write.enqueue([5n]);
       await harness.write.dequeue();
-      assert.equal(await harness.read.exists([5]), false);
+      assert.equal(await harness.read.exists([5n]), false);
     });
   });
 });

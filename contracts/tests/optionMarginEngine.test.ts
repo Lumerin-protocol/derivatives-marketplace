@@ -479,7 +479,7 @@ describe("OptionMarginEngine", () => {
         await networkHelpers.loadFixture(deployMarginEngineFixture);
 
       // Freeze oracle timestamp, then advance time past staleness
-      await oracle.write.freezeTimestamp([], {
+      await oracle.write.freezeTimestamp({
         account: accounts.owner.account,
       });
       await networkHelpers.time.increase(3601); // > 1 hour
@@ -548,11 +548,11 @@ describe("OptionMarginEngine", () => {
 
       // Create series 2 and 3
       await registry.write.createSeries(
-        [60000_00000000n, farExpiry, true, 1_000_000n, 1_000_000, 500_000_000_000_000_000n],
+        [60000_00000000n, farExpiry, true, 1_000_000, 1_000_000, 500_000_000_000_000_000n],
         { account: accounts.owner.account },
       );
       await registry.write.createSeries(
-        [70000_00000000n, farExpiry, false, 1_000_000n, 1_000_000, 500_000_000_000_000_000n],
+        [70000_00000000n, farExpiry, false, 1_000_000, 1_000_000, 500_000_000_000_000_000n],
         { account: accounts.owner.account },
       );
 

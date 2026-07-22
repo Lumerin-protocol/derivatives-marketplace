@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
 import { parseUnits, getAddress, parseEventLogs, zeroAddress, maxUint256 } from "viem";
+import type { Account } from "viem";
 import {
   deployPerpsWithCollateralFixture,
   deployPerpsWithLiquidatablePositionFixture,
@@ -21,7 +22,7 @@ const KEEPER_POINTS = parseUnits("10", 6); // flat keeper reward (POINTS has 6 d
  */
 async function deployPointsStack(
   perpsAddress: `0x${string}`,
-  owner: { account: { address: `0x${string}` } },
+  owner: { account: Account },
   grantCaller = true,
 ) {
   const admin = owner.account.address;

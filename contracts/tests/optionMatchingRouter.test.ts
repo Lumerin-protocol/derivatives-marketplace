@@ -15,7 +15,7 @@ const IOC = 1;
 const FOK = 2;
 
 function premiumWad(ticks: bigint, size: bigint): bigint {
-  return (ticks * TICK_SIZE_E8 * 10n ** 10n * size) / LOT;
+  return (ticks * BigInt(TICK_SIZE_E8) * 10n ** 10n * size) / LOT;
 }
 
 describe("OptionMatchingRouter", () => {

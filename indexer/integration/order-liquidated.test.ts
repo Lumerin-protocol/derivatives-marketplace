@@ -123,7 +123,7 @@ describe("liquidateOrder: Order.status = LIQUIDATED wins over co-emitted OrderCa
 
     const snap = await matchstick.indexSnapshot([]);
 
-    const order: EntityFields | undefined = snap.entity("Order", restingId);
+    const order = snap.entity("Order", restingId) ?? undefined;
     assert.ok(order, "the resting Order entity must exist after replay");
 
     assert.equal(
