@@ -6,8 +6,8 @@ import { deployPerpsWithCollateralFixture } from "./fixtures.ts";
 
 const { viem, networkHelpers } = await network.connect();
 
-describe("HashPowerPerpsDEX - Self-Trade Behavior", function () {
-  it("partial self-trade: buy partially fills own sell, no net position", async function () {
+describe("HashPowerPerpsDEX - Self-Trade Prevention", function () {
+  it("partial self-cross: buy nets out own sell, no net position or fill", async function () {
     const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
     const { perps } = contracts;
     const { seller: userA, buyer: userB } = accounts;
@@ -33,7 +33,7 @@ describe("HashPowerPerpsDEX - Self-Trade Behavior", function () {
     assert.equal((await perps.read.getUserPosition([userB.account.address])).netQuantity, 0n);
   });
 
-  it("self-trade exhausts own sell, remaining buy matches B", async function () {
+  it("self-cross exhausts own sell, remaining buy matches B", async function () {
     const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
     const { perps } = contracts;
     const { seller: userA, buyer: userB } = accounts;
@@ -58,7 +58,7 @@ describe("HashPowerPerpsDEX - Self-Trade Behavior", function () {
     assert.equal((await perps.read.getUserPosition([userB.account.address])).netQuantity, -qty3);
   });
 
-  it("exact self-trade: sell fully consumed, buy fully consumed", async function () {
+  it("exact self-cross: sell and buy fully net out", async function () {
     const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
     const { perps } = contracts;
     const { seller: userA, buyer: userB } = accounts;
@@ -110,7 +110,7 @@ describe("HashPowerPerpsDEX - Self-Trade Behavior", function () {
     assert.equal((await perps.read.getUserPosition([userB.account.address])).netQuantity, -qty3);
   });
 
-  it("cross-price: self-trade only at prices encountered during matching", async function () {
+  it("cross-price: self-cross only at prices encountered during matching", async function () {
     const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
     const { perps } = contracts;
     const { seller: userA, buyer: userB } = accounts;
