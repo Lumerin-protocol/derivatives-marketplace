@@ -582,12 +582,6 @@ contract HashPowerPerpsDEX is
             bytes32 makerOrderId = bytes32(orderIdUint);
             Order storage makerOrder = orders[makerOrderId];
 
-            if (makerOrder.participant == address(0) || makerOrder.quantity == 0) {
-                makerOrderQueue.remove(orderIdUint);
-                (, orderIdUint) = makerOrderQueue.getNextNode(0);
-                continue;
-            }
-
             if (makerOrder.participant == _taker) {
                 _remainingQty = _netSelfCross(_taker, makerOrderId, makerOrder, _remainingQty);
                 (, orderIdUint) = makerOrderQueue.getNextNode(0);
