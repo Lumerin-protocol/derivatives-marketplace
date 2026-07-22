@@ -52,7 +52,7 @@ contract HashPowerPerpsDEX is
     ///         contract equals 1 PH/s/day. Intentionally a constant: resizing live contracts is a migration,
     ///         not a live parameter change, so it is set at deploy time only.
     uint256 public constant CONTRACT_SIZE_HPS_DAY = 1e15;
-    string public constant VERSION = "2.10.0";
+    string public constant VERSION = "2.11.0";
 
     // State variables
     IERC20 public collateralToken;
