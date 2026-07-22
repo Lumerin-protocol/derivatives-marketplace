@@ -101,17 +101,14 @@ async function main() {
 
   // Perps collateral (vault) — hashrate index ~4.21 USDC per 100 TH/s/day; keep headroom for IM
   const collateralPerUser = parseUnits("150000", config.tokenDecimals);
-  await perps.write.addCollateral([collateralPerUser], { account: seller.account });
-  await perps.write.addCollateral([collateralPerUser], { account: buyer.account });
-  await perps.write.addCollateral([collateralPerUser], { account: buyer2.account });
+  await vault.write.deposit([collateralPerUser], { account: seller.account });
+  await vault.write.deposit([collateralPerUser], { account: buyer.account });
+  await vault.write.deposit([collateralPerUser], { account: buyer2.account });
 
   // Options margin engine (same vault)
   const optionsDeposit = parseUnits("50000", config.tokenDecimals);
   for (const w of [seller, buyer, buyer2]) {
-    const eng = await viem.getContractAt("OptionMarginEngine", optionMarginEngine.address, {
-      client: { wallet: w },
-    });
-    await eng.write.deposit([optionsDeposit]);
+    await vault.write.deposit([optionsDeposit], { account: w.account });
   }
 
   // Seed perps order book

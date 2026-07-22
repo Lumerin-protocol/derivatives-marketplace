@@ -233,7 +233,7 @@ describe("HashPowerPerpsDEX - liquidatePosition (+ batches via nested multicallS
         encodeInnerLiquidatePosition(perps.abi, u),
       );
       const { result: outerResult } = await perps.simulate.multicallStopOnFailure([calls], {
-        account: buyer2.account,
+        account: buyer2.account.address,
         gas: BATCH_GAS,
       });
       // Outer succeeded for every entry (each inner returned cleanly with successes=[false]).

@@ -18,7 +18,7 @@ const TICK_SIZE_E8 = defaultSeries.tickSizeE8;
 const LIMIT = 0;
 
 function premiumWad(ticks: bigint, size: bigint): bigint {
-  return (ticks * TICK_SIZE_E8 * 10n ** 10n * size) / LOT;
+  return (ticks * BigInt(TICK_SIZE_E8) * 10n ** 10n * size) / LOT;
 }
 
 // ── Settlement lifecycle ──────────────────────────────────────────────────

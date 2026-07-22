@@ -1,7 +1,16 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseUnits, maxUint256, encodeFunctionData, getContract } from "viem";
-import type { Abi, Address, PublicClient, WalletClient, GetContractReturnType } from "viem";
+import type {
+  Abi,
+  Account,
+  Address,
+  Chain,
+  PublicClient,
+  Transport,
+  WalletClient,
+  GetContractReturnType,
+} from "viem";
 import type { NetworkConnection } from "hardhat/types/network";
 import type { ArtifactMap } from "hardhat/types/artifacts";
 import {
@@ -49,7 +58,7 @@ type ContractAbis = {
 
 type ContractInstance<ContractName extends keyof ContractAbis> = GetContractReturnType<
   ContractAbis[ContractName],
-  { public: PublicClient; wallet: WalletClient },
+  { public: PublicClient; wallet: WalletClient<Transport, Chain, Account> },
   Address
 >;
 
@@ -67,7 +76,7 @@ type ContractInstance<ContractName extends keyof ContractAbis> = GetContractRetu
  * @param args - Constructor arguments
  */
 export async function deployContract<ContractName extends keyof ContractAbis>(
-  walletClient: WalletClient,
+  walletClient: WalletClient<Transport, Chain, Account>,
   publicClient: PublicClient,
   artifactPath: string,
   args: unknown[] = [],
@@ -79,9 +88,6 @@ export async function deployContract<ContractName extends keyof ContractAbis>(
   const bytecode = (artifact.bytecode?.object ?? artifact.bytecode) as `0x${string}`;
 
   const { deployContract: viemDeploy } = await import("viem/actions");
-  if (walletClient.account === undefined) {
-    throw new Error("Wallet client must have an account");
-  }
   const txHash = await viemDeploy(walletClient, {
     abi,
     bytecode,
