@@ -89,6 +89,11 @@ export const HashPowerPerpsDEXAbi = [
   },
   {
     "inputs": [],
+    "name": "InvalidReduceQuantity",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "InvalidSize",
     "type": "error"
   },
@@ -146,6 +151,11 @@ export const HashPowerPerpsDEXAbi = [
   {
     "inputs": [],
     "name": "OrderNotBelongToUser",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "OrderNotExists",
     "type": "error"
   },
   {
@@ -1534,6 +1544,24 @@ export const HashPowerPerpsDEXAbi = [
     "type": "function"
   },
   {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "_orderId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "int256",
+        "name": "_newQuantity",
+        "type": "int256"
+      }
+    ],
+    "name": "reduceOrderSize",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
     "inputs": [],
     "name": "renounceOwnership",
     "outputs": [],
@@ -1721,6 +1749,23 @@ export const HashPowerPerpsDEXAbi = [
         "internalType": "bytes32[]",
         "name": "_cancelIds",
         "type": "bytes32[]"
+      },
+      {
+        "components": [
+          {
+            "internalType": "bytes32",
+            "name": "orderId",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "int256",
+            "name": "newQuantity",
+            "type": "int256"
+          }
+        ],
+        "internalType": "struct HashPowerPerpsDEX.ReduceIntent[]",
+        "name": "_reduces",
+        "type": "tuple[]"
       },
       {
         "components": [
