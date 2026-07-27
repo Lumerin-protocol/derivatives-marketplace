@@ -6,7 +6,6 @@ import {
   deployPerpsWithCollateralFixture,
   deployPerpsWithOrdersFixture,
   deployPerpsWithLiquidatablePositionFixture,
-  oracleAnswerForMark,
 } from "./fixtures.ts";
 
 const { viem, networkHelpers } = await network.connect();
@@ -312,7 +311,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       const tick = config.minimumPriceIncrement;
       const priceIncrease = tick * 200n;
       const newPrice = config.initialPrice + priceIncrease;
-      await priceOracle.write.setPrice([oracleAnswerForMark(newPrice), config.oracle.decimals]);
+      await priceOracle.write.setPrice([newPrice, config.oracle.decimals]);
 
       // Verify seller is in the buffer zone: above maintenance (5%) but below initial (10%)
       const balance = await perps.read.balanceOf([seller.account.address]);
@@ -343,7 +342,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       const tick = config.minimumPriceIncrement;
       const priceIncrease = tick * 220n;
       const newPrice = config.initialPrice + priceIncrease;
-      await priceOracle.write.setPrice([oracleAnswerForMark(newPrice), config.oracle.decimals]);
+      await priceOracle.write.setPrice([newPrice, config.oracle.decimals]);
 
       // Verify seller is in the buffer zone and not liquidatable
       const balance = await perps.read.balanceOf([seller.account.address]);
@@ -374,7 +373,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       const tick = config.minimumPriceIncrement;
       const priceIncrease = tick * 200n;
       const newPrice = config.initialPrice + priceIncrease;
-      await priceOracle.write.setPrice([oracleAnswerForMark(newPrice), config.oracle.decimals]);
+      await priceOracle.write.setPrice([newPrice, config.oracle.decimals]);
 
       // Verify seller is in the buffer zone: above maintenance (5%) but below initial (10%)
       const balance = await perps.read.balanceOf([seller.account.address]);
@@ -402,7 +401,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       const tick = config.minimumPriceIncrement;
       const priceIncrease = tick * 200n;
       const newPrice = config.initialPrice + priceIncrease;
-      await priceOracle.write.setPrice([oracleAnswerForMark(newPrice), config.oracle.decimals]);
+      await priceOracle.write.setPrice([newPrice, config.oracle.decimals]);
 
       // Verify seller is in the buffer zone: above maintenance (5%) but below initial (10%)
       const balance = await perps.read.balanceOf([seller.account.address]);

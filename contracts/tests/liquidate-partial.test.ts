@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { network } from "hardhat";
 import { maxUint256, parseEventLogs, parseUnits } from "viem";
 import type { NetworkConnection } from "hardhat/types/network";
-import { deployPerpsFixture, oracleAnswerForMark } from "./fixtures.ts";
+import { deployPerpsFixture } from "./fixtures.ts";
 
 const { viem, networkHelpers } = await network.connect();
 
@@ -51,10 +51,9 @@ async function partialPerpsFixture(_conn: NetworkConnection) {
     config: { ...config, entry, qty },
     /** Move the mark to `factorNum/factorDen · entry` (a pump for the short). */
     async pump(factorNum: bigint, factorDen: bigint) {
-      // `entry` is a mark price (already x10), so feed the oracle the mark target
-      // divided by the fixed contract-size multiplier.
+      // Oracle quotes 1 PH/s/day (= contract unit), so write the mark directly.
       const newMark = (entry * factorNum) / factorDen;
-      await priceOracle.write.setPrice([oracleAnswerForMark(newMark), config.oracle.decimals]);
+      await priceOracle.write.setPrice([newMark, config.oracle.decimals]);
       return newMark;
     },
   };

@@ -99,7 +99,7 @@ async function main() {
   } = contracts;
   const { owner, seller, seller2, buyer, buyer2 } = accounts;
 
-  // Perps collateral (vault) — hashrate index ~4.21 USDC per 100 TH/s/day; keep headroom for IM
+  // Perps collateral (vault) — hashrate index ~42.1 USDC per 1 PH/s/day; keep headroom for IM
   const collateralPerUser = parseUnits("150000", config.tokenDecimals);
   await vault.write.deposit([collateralPerUser], { account: seller.account });
   await vault.write.deposit([collateralPerUser], { account: buyer.account });
