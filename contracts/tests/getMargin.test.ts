@@ -6,7 +6,6 @@ import {
   deployPerpsWithOrdersFixture,
   deployPerpsWithPositionsFixture,
   deployPerpsWithLiquidatablePositionFixture,
-  oracleAnswerForMark,
 } from "./fixtures.ts";
 
 const { viem, networkHelpers } = await network.connect();
@@ -50,7 +49,7 @@ describe("HashPowerPerpsDEX - Margin View Functions", function () {
 
       const currentPrice = await perps.read.getMarketPrice();
       const newPrice = (currentPrice * 110n) / 100n;
-      await priceOracle.write.setPrice([oracleAnswerForMark(newPrice), 6]);
+      await priceOracle.write.setPrice([newPrice, 6]);
 
       const marginAfter = await perps.read.getMaintenanceMargin([seller.account.address]);
       assert.ok(marginAfter > marginBefore);
@@ -66,7 +65,7 @@ describe("HashPowerPerpsDEX - Margin View Functions", function () {
 
       const currentPrice = await perps.read.getMarketPrice();
       const newPrice = (currentPrice * 90n) / 100n;
-      await priceOracle.write.setPrice([oracleAnswerForMark(newPrice), 6]);
+      await priceOracle.write.setPrice([newPrice, 6]);
 
       const marginAfter = await perps.read.getMaintenanceMargin([seller.account.address]);
       assert.ok(marginAfter <= marginBefore);

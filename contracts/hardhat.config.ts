@@ -30,7 +30,35 @@ export default defineConfig({
     tests: "tests",
   },
   solidity: {
-    version: "0.8.28",
+    // Default: viaIR for large impls (HashPowerPerpsDEX EIP-170 limit).
+    compilers: [
+      {
+        version: "0.8.28",
+        settings: {
+          optimizer: {
+            enabled: true,
+            runs: 200,
+          },
+          viaIR: true,
+          evmVersion: "cancun",
+        },
+      },
+    ],
+    // OZ ERC1967Proxy was deployed without viaIR; matching settings keep
+    // artifacts verifiable on Basescan / Tenderly.
+    overrides: {
+      "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol": {
+        version: "0.8.28",
+        settings: {
+          optimizer: {
+            enabled: true,
+            runs: 200,
+          },
+          viaIR: false,
+          evmVersion: "cancun",
+        },
+      },
+    },
     npmFilesToBuild: [
       "@openzeppelin/contracts/token/ERC20/IERC20.sol",
       "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol",
@@ -50,14 +78,6 @@ export default defineConfig({
       "collateral-margin/contracts/contracts/mocks/PerpsDEXMock.sol",
       "collateral-margin/contracts/contracts/mocks/OptionsEngineMock.sol",
     ],
-    settings: {
-      optimizer: {
-        enabled: true,
-        runs: 200,
-      },
-      // Keeps HashPowerPerpsDEX under the 24kb EIP-170 deployed-bytecode limit.
-      viaIR: true,
-    },
   },
 
   verify: {

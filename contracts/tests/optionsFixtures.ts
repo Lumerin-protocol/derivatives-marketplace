@@ -126,18 +126,21 @@ async function deployVaultAndPME(
 export const ORACLE_DECIMALS = 8;
 export const INITIAL_PRICE_E8 = 50000_00000000n; // $50,000
 
-/** Spot index for Hashpower / hashrate instruments: USD per 100 TH/s per day (index scale 1e8). */
-export const HASHRATE_USD_PER_100TH_DAY = "4.21" as const;
+/** Spot index for Hashpower / hashrate instruments: USD per 1 PH/s per day (index scale 1e8). */
+export const HASHRATE_USD_PER_PH_DAY = "42.1" as const;
 
-/** On-chain oracle answer for {@link HASHRATE_USD_PER_100TH_DAY} with {@link ORACLE_DECIMALS} = 8. */
-export const HASHRATE_INDEX_PRICE_E8 = parseUnits(HASHRATE_USD_PER_100TH_DAY, 8);
+/** @deprecated Use {@link HASHRATE_USD_PER_PH_DAY}. */
+export const HASHRATE_USD_PER_100TH_DAY = HASHRATE_USD_PER_PH_DAY;
+
+/** On-chain oracle answer for {@link HASHRATE_USD_PER_PH_DAY} with {@link ORACLE_DECIMALS} = 8. */
+export const HASHRATE_INDEX_PRICE_E8 = parseUnits(HASHRATE_USD_PER_PH_DAY, 8);
 
 /** Option strikes (1e8 index units) seeded by `deployLocalFullStackFixture` in fixtures.ts. */
 export const HASHRATE_LOCAL_OPTIONS_STRIKES_E8 = [
-  parseUnits("3.50", 8),
-  parseUnits("4.00", 8),
+  parseUnits("35.0", 8),
+  parseUnits("40.0", 8),
   HASHRATE_INDEX_PRICE_E8,
-  parseUnits("4.50", 8),
+  parseUnits("45.0", 8),
 ] as const;
 
 export async function deployMarginEngineFixture(conn: NetworkConnection) {

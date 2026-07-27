@@ -27,6 +27,11 @@ export const contractErrors = [
   },
   {
     "inputs": [],
+    "name": "OrderNotExists",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "InvalidSize",
     "type": "error"
   },
@@ -387,6 +392,11 @@ export const contractErrors = [
       }
     ],
     "name": "ERC20InvalidReceiver",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidReduceQuantity",
     "type": "error"
   },
   {

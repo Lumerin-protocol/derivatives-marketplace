@@ -17,7 +17,7 @@ import {
   defaultSeries,
   HASHRATE_INDEX_PRICE_E8,
   HASHRATE_LOCAL_OPTIONS_STRIKES_E8,
-  HASHRATE_USD_PER_100TH_DAY,
+  HASHRATE_USD_PER_PH_DAY,
   LIQUIDATION_FEE_BPS,
   INSURANCE_DEPOSIT,
   MIN_OBSERVATIONS,
@@ -29,27 +29,6 @@ import { computeExpectedFunding as _computeExpectedFunding } from "./utils.ts";
 type Conn = NetworkConnection;
 
 const MULTICALL3_ADDRESS = "0xcA11bde05977b3631167028862bE2a173976CA11" as const;
-
-/**
- * Fixed mark multiplier applied on top of the oracle answer:
- * `CONTRACT_SIZE_HPS_DAY / ORACLE_UNIT_HPS_DAY = 1e15 / 1e14 = 10`.
- *
- * `getMarketPrice()` returns the oracle-derived price (scaled to collateral
- * decimals) multiplied by this factor and then rounded to `minimumPriceIncrement`.
- * One contract settles 1 PH/s/day while the oracle quotes 100 TH/s/day.
- */
-export const MARK_MULTIPLIER = 10n;
-
-/**
- * Oracle answer (in oracle decimals) that produces `markPrice` from
- * `getMarketPrice()` before rounding. Use this when a test wants to move the
- * mark to a target expressed in mark-price units: the oracle must be fed the
- * mark divided by {@link MARK_MULTIPLIER}, otherwise the fixed x10 factor is
- * double-counted.
- */
-export function oracleAnswerForMark(markPrice: bigint): bigint {
-  return markPrice / MARK_MULTIPLIER;
-}
 
 // Contract ABIs mapping from Hardhat's artifact map.
 type ContractAbis = {
@@ -135,7 +114,7 @@ export async function deployPerpsFixture(conn: Conn) {
   const topUpBalanceUSDC = parseUnits("1000", tokenDecimals);
 
   const oracleDecimals = 6;
-  const initialPrice = parseUnits(HASHRATE_USD_PER_100TH_DAY, oracleDecimals);
+  const initialPrice = parseUnits(HASHRATE_USD_PER_PH_DAY, oracleDecimals);
   const priceOracle = await deployContract<"PriceOracleMock">(
     owner,
     pc,
@@ -357,10 +336,9 @@ export async function deployPerpsWithLiquidatablePositionFixture(conn: Conn) {
     ...data,
     config: { ...config, initialPrice, qty, minCollateral },
     async makeLiquidatable() {
-      // Double the mark. `initialPrice` is a mark price (already x10), so feed
-      // the oracle the mark target divided by the fixed multiplier.
+      // Double the mark. Oracle quotes 1 PH/s/day (= contract unit), so write the mark directly.
       const newMark = initialPrice * 2n;
-      await priceOracle.write.setPrice([oracleAnswerForMark(newMark), config.oracle.decimals]);
+      await priceOracle.write.setPrice([newMark, config.oracle.decimals]);
       return newMark;
     },
   };
@@ -388,10 +366,9 @@ export async function deployPerpsWithBatchLiquidatableFixture(conn: Conn) {
     ...data,
     config: { ...config, initialPrice, qty, minCollateral },
     async makeLiquidatable() {
-      // Double the mark. `initialPrice` is a mark price (already x10), so feed
-      // the oracle the mark target divided by the fixed multiplier.
+      // Double the mark. Oracle quotes 1 PH/s/day (= contract unit), so write the mark directly.
       const newMark = initialPrice * 2n;
-      await priceOracle.write.setPrice([oracleAnswerForMark(newMark), config.oracle.decimals]);
+      await priceOracle.write.setPrice([newMark, config.oracle.decimals]);
       return newMark;
     },
   };
@@ -454,7 +431,7 @@ export async function deployPerpsWithFundingAndPositionsFixture(conn: Conn) {
 /**
  * Full local stack: HashPowerPerpsDEX + CollateralVault + PortfolioMarginEngine with real
  * OptionMarginEngine, OptionOrderBook, OptionMatchingRouter, and OptionSettlement (same wiring as prod tests).
- * Oracle / index: hashrate USD per 100 TH/s per day (`HASHRATE_INDEX_PRICE_E8`, 8-dec oracle).
+ * Oracle / index: hashrate USD per 1 PH/s per day (`HASHRATE_INDEX_PRICE_E8`, 8-dec oracle).
  */
 export async function deployLocalFullStackFixture(conn: Conn) {
   const { viem, networkHelpers } = conn;
