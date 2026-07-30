@@ -1,6 +1,6 @@
 {
   "name": "@hashpower/perps-abi",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "ABIs and deployment addresses for the Hashpower perpetuals CLOB (HashPowerPerpsDEX) on Base",
   "license": "MIT",
   "type": "module",
