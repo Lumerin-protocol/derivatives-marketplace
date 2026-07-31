@@ -14,6 +14,7 @@ import { AggregatorV3Interface } from "./interfaces/AggregatorV3Interface.sol";
 import { ICollateralVault } from "collateral-margin/contracts/contracts/interfaces/ICollateralVault.sol";
 import { IPortfolioMarginEngine } from "collateral-margin/contracts/contracts/interfaces/IPortfolioMarginEngine.sol";
 import { IPointsHook } from "collateral-margin/contracts/contracts/interfaces/IPointsHook.sol";
+import { PriceLadderLib } from "./libs/PriceLadderLib.sol";
 import { Versionable } from "./interfaces/Versionable.sol";
 
 /// @title HashPower Perps DEX
@@ -1240,68 +1241,17 @@ contract HashPowerPerpsDEX is
     }
 
     /// @notice Add a price level to the sorted price list if not already present
-    /// @param _price The price level to add
-    /// @param _isBid True for bid (buy) prices, false for ask (sell) prices
     function _addPriceLevel(uint256 _price, bool _isBid) private {
         StructuredLinkedList.List storage priceList = _isBid ? activeBidPrices : activeAskPrices;
-
-        // Check if price level already exists
-        if (priceList.nodeExists(_price)) {
-            return;
-        }
-
-        // Enforce max price levels per side
-        uint256 size = priceList.sizeOf();
-        if (size >= MAX_PRICE_LEVELS_PER_SIDE) {
-            revert MaxPriceLevelsReached();
-        }
-
-        // Find insertion point for sorted order
-        // Bids: highest first (descending), Asks: lowest first (ascending)
-        if (size == 0) {
-            priceList.pushFront(_price);
-            return;
-        }
-
-        // Iterate through list to find insertion point
-        (, uint256 current) = priceList.getNextNode(0); // Get head
-        uint256 prev = 0;
-
-        while (current != 0) {
-            if (_isBid) {
-                // Bids: insert before first price that is smaller
-                if (current < _price) {
-                    priceList.insertBefore(current, _price);
-                    return;
-                }
-            } else {
-                // Asks: insert before first price that is larger
-                if (current > _price) {
-                    priceList.insertBefore(current, _price);
-                    return;
-                }
-            }
-            prev = current;
-            (, current) = priceList.getNextNode(current);
-        }
-
-        // If we get here, insert at end (after the last element)
-        priceList.insertAfter(prev, _price);
+        PriceLadderLib.insertPrice(priceList, _price, _isBid, MAX_PRICE_LEVELS_PER_SIDE);
     }
 
     /// @notice Remove a price level from the sorted price list if order queue is empty
-    /// @param _price The price level to potentially remove
-    /// @param _isBid True for bid (buy) prices, false for ask (sell) prices
     function _removePriceLevelIfEmpty(uint256 _price, bool _isBid) private {
         StructuredLinkedList.List storage orderQueue =
             _isBid ? priceOrdersLongQueue[_price] : priceOrdersShortQueue[_price];
-
-        if (orderQueue.sizeOf() == 0) {
-            StructuredLinkedList.List storage priceList = _isBid ? activeBidPrices : activeAskPrices;
-            if (priceList.nodeExists(_price)) {
-                priceList.remove(_price);
-            }
-        }
+        StructuredLinkedList.List storage priceList = _isBid ? activeBidPrices : activeAskPrices;
+        PriceLadderLib.removeIfEmpty(orderQueue, priceList, _price);
     }
 
     /// @notice Get the best bid price (highest)

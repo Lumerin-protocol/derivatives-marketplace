@@ -113,6 +113,11 @@
     "type": "error"
   },
   {
+    "inputs": [],
+    "name": "MaxPriceLevelsReached",
+    "type": "error"
+  },
+  {
     "inputs": [
       {
         "internalType": "uint256",
