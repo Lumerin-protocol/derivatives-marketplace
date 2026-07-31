@@ -461,8 +461,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
 
       const balanceAfter = await perps.read.balanceOf([buyer.account.address]);
       const notionalValue = (marketPrice * quantity) / 10n ** BigInt(config.quantityDecimals);
-      const bpsFee = (notionalValue * config.takerFeeBps) / 10000n;
-      const expectedFee = bpsFee > config.liquidationFee ? bpsFee : config.liquidationFee;
+      const expectedFee = (notionalValue * config.takerFeeBps) / 10000n;
 
       assert.equal(balanceBefore - balanceAfter, expectedFee);
     });
@@ -472,13 +471,14 @@ describe("HashPowerPerpsDEX - createOrder", function () {
         deployPerpsWithCollateralFixture,
       );
       const { perps } = contracts;
-      const { buyer, seller } = accounts;
+      const { buyer, seller, owner } = accounts;
 
       const marketPrice = await perps.read.getMarketPrice();
       const quantity = parseUnits("1", config.quantityDecimals);
       const feeBps = 0;
 
-      await perps.write.setMatchFee([feeBps, feeBps]);
+      await perps.write.setMakerFeeBps([feeBps], { account: owner.account });
+      await perps.write.setTakerFeeBps([feeBps], { account: owner.account });
 
       await perps.write.createOrder([marketPrice, -quantity], { account: seller.account });
 

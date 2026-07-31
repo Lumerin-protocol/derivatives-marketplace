@@ -15,9 +15,9 @@ type Perps @entity(immutable: false) {
   minimumPriceIncrement: BigInt!
 
   # Configuration
-  marginPercent: Int!
-  maintenanceMarginPercent: Int!
   liquidationFee: BigInt!
+  liquidationFeeBps: Int!
+  liquidatorShareBps: Int!
   takerFeeBps: Int!
   makerFeeBps: Int!
 

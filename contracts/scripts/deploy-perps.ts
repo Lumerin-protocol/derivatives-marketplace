@@ -83,11 +83,11 @@ async function main() {
   // Deploy HashPowerPerpsDEX implementation
   logInfo("Deploy HashPowerPerpsDEX implementation", {
     contract: "HashPowerPerpsDEX",
-    args: `minimumPriceIncrement=${env.MINIMUM_PRICE_INCREMENT}`,
+    args: `vault=${env.VAULT_ADDRESS}`,
   });
   await logPrompt("Proceed?");
   console.log("Deploying HashPowerPerpsDEX implementation...");
-  const args = [BigInt(env.MINIMUM_PRICE_INCREMENT)] as const;
+  const args = [getAddress(env.VAULT_ADDRESS)] as const;
   const perpsImpl = await viem.deployContract("HashPowerPerpsDEX", args);
   logStep("Deployed", addrUrl(pc, perpsImpl.address));
 

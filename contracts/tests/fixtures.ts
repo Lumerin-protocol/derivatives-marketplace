@@ -166,7 +166,7 @@ export async function deployPerpsFixture(conn: Conn) {
     owner,
     pc,
     "../artifacts/contracts/HashPowerPerpsDEX.sol/HashPowerPerpsDEX.json",
-    [minimumPriceIncrement],
+    [vault.address],
   );
   const perpsProxy = await deployContract<"ERC1967Proxy">(
     owner,
@@ -220,18 +220,16 @@ export async function deployPerpsFixture(conn: Conn) {
     address: pmeProxy.address,
     client: { public: pc, wallet: owner },
   });
-  await pme.write.setPerps([perps.address], { account: owner.account });
-  await pme.write.setOptions([optionsMock.address], { account: owner.account });
+  await pme.write.setPerps([perps.address]);
+  await pme.write.setOptions([optionsMock.address]);
 
   // Wire vault ↔ perps ↔ PME
   await vault.write.setMarginEngine([pme.address]);
   await vault.write.setAuthorizedCaller([perps.address, true]);
-  await perps.write.setPortfolioMargin([pme.address], { account: owner.account });
+  await perps.write.setPortfolioMargin([pme.address]);
 
-  await perps.write.setMatchFee([Number(takerFeeBps), Number(makerFeeBps)], {
-    account: owner.account,
-  });
-  await perps.write.setLiquidationFee([liquidationFee], { account: owner.account });
+  await perps.write.setMakerFeeBps([Number(makerFeeBps)]);
+  await perps.write.setTakerFeeBps([Number(takerFeeBps)]);
 
   // Users approve the vault (not the perps contract)
   for (const w of [seller, buyer, buyer2, seller2, owner]) {
@@ -491,7 +489,7 @@ export async function deployLocalFullStackFixture(conn: Conn) {
   ]);
   const vault = await viem.getContractAt("CollateralVault", vaultProxy.address);
 
-  const perpsImpl = await viem.deployContract("HashPowerPerpsDEX", [minimumPriceIncrement]);
+  const perpsImpl = await viem.deployContract("HashPowerPerpsDEX", [vault.address]);
   const perpsProxy = await viem.deployContract("ERC1967Proxy", [
     perpsImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -531,14 +529,12 @@ export async function deployLocalFullStackFixture(conn: Conn) {
   await vault.write.setMarginEngine([pme.address]);
   await vault.write.setAuthorizedCaller([perps.address, true]);
   await vault.write.setAuthorizedCaller([optionMarginEngine.address, true]);
-  await perps.write.setPortfolioMargin([pme.address], { account: owner.account });
+  await perps.write.setPortfolioMargin([pme.address]);
   await optionMarginEngine.write.setPortfolioMargin([pme.address], { account: owner.account });
   await optionMarginEngine.write.setPerpsDex([perps.address], { account: owner.account });
 
-  await perps.write.setMatchFee([Number(takerFeeBps), Number(makerFeeBps)], {
-    account: owner.account,
-  });
-  await perps.write.setLiquidationFee([liquidationFee], { account: owner.account });
+  await perps.write.setMakerFeeBps([Number(makerFeeBps)]);
+  await perps.write.setTakerFeeBps([Number(takerFeeBps)]);
 
   const bookImpl = await viem.deployContract("OptionOrderBook", []);
   const bookProxy = await viem.deployContract("ERC1967Proxy", [

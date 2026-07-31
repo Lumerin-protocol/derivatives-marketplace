@@ -14,9 +14,11 @@ import {
   OrderMatched,
   PositionLiquidated,
   MatchFeeUpdated,
-  MarginPercentUpdated,
-  MaintenanceMarginPercentUpdated,
   LiquidationFeeUpdated,
+  LiquidationFeeBpsUpdated,
+  LiquidatorShareBpsUpdated,
+  OracleUpdated,
+  PortfolioMarginUpdated,
   FundingUpdated,
   FundingSettled,
   FundingParametersUpdated,
@@ -50,9 +52,7 @@ function getOrCreatePerps(): Perps {
     perps.priceOracle = Bytes.empty();
     perps.collateralVault = Bytes.empty();
     perps.portfolioMarginEngine = Bytes.empty();
-    perps.marginPercent = 0;
     perps.quantityDecimals = 0;
-    perps.maintenanceMarginPercent = 0;
     perps.liquidationFee = BigInt.zero();
     perps.minimumPriceIncrement = BigInt.zero();
     perps.takerFeeBps = 0;
@@ -89,16 +89,6 @@ function loadPerpsFromContract(perps: Perps): void {
   const priceOracle = contract.try_priceOracle();
   if (!priceOracle.reverted) {
     perps.priceOracle = priceOracle.value;
-  }
-
-  const marginPercent = contract.try_marginPercent();
-  if (!marginPercent.reverted) {
-    perps.marginPercent = marginPercent.value;
-  }
-
-  const maintenanceMarginPercent = contract.try_maintenanceMarginPercent();
-  if (!maintenanceMarginPercent.reverted) {
-    perps.maintenanceMarginPercent = maintenanceMarginPercent.value;
   }
 
   const liquidationFee = contract.try_liquidationFee();
@@ -1183,28 +1173,7 @@ export function handleMatchFeeUpdated(event: MatchFeeUpdated): void {
   perps.save();
 }
 
-export function handleMarginPercentUpdated(event: MarginPercentUpdated): void {
-  log.info("Margin percent updated: {}", [
-    event.params.newMarginPercent.toString(),
-  ]);
-  const perps = getOrCreatePerps();
-  perps.marginPercent = event.params.newMarginPercent;
-  perps.lastUpdatedAt = event.block.timestamp;
-  perps.save();
-}
-
-export function handleMaintenanceMarginPercentUpdated(
-  event: MaintenanceMarginPercentUpdated,
-): void {
-  log.info("Maintenance margin percent updated: {}", [
-    event.params.newMaintenanceMarginPercent.toString(),
-  ]);
-  const perps = getOrCreatePerps();
-  perps.maintenanceMarginPercent = event.params.newMaintenanceMarginPercent;
-  perps.lastUpdatedAt = event.block.timestamp;
-  perps.save();
-}
-
+export function handleFundingParametersUpdated(
 export function handleLiquidationFeeUpdated(
   event: LiquidationFeeUpdated,
 ): void {
@@ -1213,6 +1182,44 @@ export function handleLiquidationFeeUpdated(
   ]);
   const perps = getOrCreatePerps();
   perps.liquidationFee = event.params.newLiquidationFee;
+  perps.lastUpdatedAt = event.block.timestamp;
+  perps.save();
+}
+
+export function handleLiquidationFeeBpsUpdated(event: LiquidationFeeBpsUpdated): void {
+  log.info("Liquidation fee bps updated: {}", [
+    event.params.newLiquidationFeeBps.toString(),
+  ]);
+  const perps = getOrCreatePerps();
+  perps.lastUpdatedAt = event.block.timestamp;
+  perps.save();
+}
+
+export function handleLiquidatorShareBpsUpdated(event: LiquidatorShareBpsUpdated): void {
+  log.info("Liquidator share bps updated: {}", [
+    event.params.newLiquidatorShareBps.toString(),
+  ]);
+  const perps = getOrCreatePerps();
+  perps.lastUpdatedAt = event.block.timestamp;
+  perps.save();
+}
+
+export function handleOracleUpdated(event: OracleUpdated): void {
+  log.info("Oracle updated: {}", [
+    event.params.newOracle.toHexString(),
+  ]);
+  const perps = getOrCreatePerps();
+  perps.priceOracle = event.params.newOracle;
+  perps.lastUpdatedAt = event.block.timestamp;
+  perps.save();
+}
+
+export function handlePortfolioMarginUpdated(event: PortfolioMarginUpdated): void {
+  log.info("Portfolio margin updated: {}", [
+    event.params.newPortfolioMargin.toHexString(),
+  ]);
+  const perps = getOrCreatePerps();
+  perps.portfolioMarginEngine = event.params.newPortfolioMargin;
   perps.lastUpdatedAt = event.block.timestamp;
   perps.save();
 }

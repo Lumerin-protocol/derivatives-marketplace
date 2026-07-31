@@ -14,7 +14,6 @@ import { AggregatorV3Interface } from "./interfaces/AggregatorV3Interface.sol";
 import { ICollateralVault } from "collateral-margin/contracts/contracts/interfaces/ICollateralVault.sol";
 import { IPortfolioMarginEngine } from "collateral-margin/contracts/contracts/interfaces/IPortfolioMarginEngine.sol";
 import { IPointsHook } from "collateral-margin/contracts/contracts/interfaces/IPointsHook.sol";
-import { console } from "hardhat/console.sol";
 import { Versionable } from "./interfaces/Versionable.sol";
 
 /// @title HashPower Perps DEX
@@ -41,7 +40,8 @@ contract HashPowerPerpsDEX is
     uint8 public constant MAX_ORDERS_PER_PARTICIPANT = 100;
     uint8 public constant QUANTITY_DECIMALS = 6;
     uint256 public constant MAX_PRICE_LEVELS_PER_SIDE = 200; // Max active price levels per side (bid/ask)
-    uint256 public immutable minimumPriceIncrement; // Minimum price increment for orders
+    /// @notice Minimum price increment for orders: $0.01 in USDC (6 decimals).
+    uint256 public constant minimumPriceIncrement = 0.01e6;
     /// @notice Contract size in hashes/s·day: the hashes produced by a given hashrate sustained over one day.
     ///         Fixed at 1e15 (1 PH/s over a day) so one contract equals 1 PH/s/day. Matches the hashprice
     ///         oracle quote basis (1 PH/s per day) — no unit rebase is applied in `getMarketPrice()`.
@@ -49,17 +49,20 @@ contract HashPowerPerpsDEX is
     uint256 public constant CONTRACT_SIZE_HPS_DAY = 1e15;
     string public constant VERSION = "2.12.0";
 
+    // Immutables (set in constructor, derived from vault)
+    ICollateralVault public immutable vault;
+    uint8 private immutable collateralDecimals;
+
     // State variables
-    IERC20 public collateralToken;
+    address private _gapCollateralToken;
     AggregatorV3Interface public priceOracle;
-    uint8 public marginPercent; // Initial margin requirement as percentage (e.g., 10 = 10%)
-    uint8 public maintenanceMarginPercent; // Maintenance margin percentage (e.g., 5 = 5%)
-    /// @notice Flat liquidation fee in collateral token units. Paid once per call to a
-    ///         permissionless liquidation entry point: per cancelled order in `liquidateOrder`
-    ///         (composable as N-shot via `multicallStopOnFailure`) and per closed position in
-    ///         `liquidatePosition`. Also acts as the minimum taker fee in `_calculateMatchFee`.
-    uint256 public liquidationFee;
-    uint8 private tokenDecimals;
+    /// @dev Dead — former marginPercent. Margin is now delegated to PortfolioMarginEngine.
+    uint8 private _gapMarginPercent;
+    /// @dev Dead — former maintenanceMarginPercent. Margin is now delegated to PortfolioMarginEngine.
+    uint8 private _gapMaintenanceMarginPercent;
+    /// @dev Dead — former liquidationFee (flat). Now bps-based via liquidationFeeBps.
+    uint256 private _gapLiquidationFee;
+    uint8 private _gapTokenDecimals;
     uint8 private oracleDecimals;
     uint256 private nonce; // Nonce for order IDs
 
@@ -94,8 +97,8 @@ contract HashPowerPerpsDEX is
     mapping(address => uint256) private userBuyOrderValue; // Cached total buy order value per user
     mapping(address => uint256) private userSellOrderValue; // Cached total sell order value per user
 
-    // Level 2: Unified collateral vault
-    ICollateralVault public vault;
+    // Level 2: Unified collateral vault (moved to immutable)
+    address private _gapVault;
     IPortfolioMarginEngine public portfolioMargin;
 
     /// @notice Optional points/rewards hook notified on fills and liquidations.
@@ -105,6 +108,16 @@ contract HashPowerPerpsDEX is
     ///      liquidation. The hook is a simple, owner-controlled contract and can be unplugged
     ///      instantly via `setHook(address(0))`; unplug it before finalizing the POINTS token.
     IPointsHook public hook;
+
+    /// @notice Liquidation fee in basis points on the liquidated notional.
+    ///         e.g., 50 = 0.5% of the closed position or cancelled order value.
+    /// @dev Appended at end of storage to preserve the upgradeable layout.
+    uint16 public liquidationFeeBps;
+    /// @notice Share of the liquidation fee paid to the keeper (msg.sender).
+    ///         In basis points: 10_000 = 100% to liquidator, 5_000 = 50/50 split.
+    ///         The remainder goes to the insurance fund.
+    /// @dev Appended at end of storage to preserve the upgradeable layout.
+    uint16 public liquidatorShareBps;
 
     /// @notice Represents an order in the order book
     struct Order {
@@ -166,9 +179,12 @@ contract HashPowerPerpsDEX is
         uint256 takerEntryPriceAfter
     );
     event MatchFeeUpdated(int16 newTakerFeeBps, int16 newMakerFeeBps);
-    event MarginPercentUpdated(uint8 newMarginPercent);
-    event MaintenanceMarginPercentUpdated(uint8 newMaintenanceMarginPercent);
-    event LiquidationFeeUpdated(uint256 newLiquidationFee);
+    event MakerFeeBpsUpdated(int16 newMakerFeeBps);
+    event TakerFeeBpsUpdated(int16 newTakerFeeBps);
+    event LiquidationFeeBpsUpdated(uint16 newLiquidationFeeBps);
+    event LiquidatorShareBpsUpdated(uint16 newLiquidatorShareBps);
+    event OracleUpdated(address newOracle);
+    event PortfolioMarginUpdated(address newPortfolioMargin);
     event PositionLiquidated(
         address indexed user, address indexed liquidator, int256 positionSize, int256 pnl, uint256 liquidatorFee
     );
@@ -207,58 +223,43 @@ contract HashPowerPerpsDEX is
     error InvalidReduceQuantity();
     error OrderNotExists();
 
+    /// @param _vault The shared collateral vault. Its `collateralToken()` becomes the underlying ERC20.
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor(uint256 _minimumPriceIncrement) {
+    constructor(ICollateralVault _vault) {
+        if (address(_vault) == address(0)) revert InsufficientCollateral();
+        vault = _vault;
+        collateralDecimals = IERC20Metadata(address(_vault.collateralToken())).decimals();
         _disableInitializers();
-        if (_minimumPriceIncrement == 0) {
-            revert InvalidPrice();
-        }
-        minimumPriceIncrement = _minimumPriceIncrement;
     }
 
     /// @notice Initialize the contract
     /// @param _priceOracle The Chainlink-style price oracle
-    /// @param _vault The shared collateral vault. Its `collateralToken()` is used as the underlying ERC20.
+    /// @param _vault Ignored — vault is now an immutable set in the constructor.
+    ///        Kept for backwards compatibility with existing proxy deployments.
     function initialize(AggregatorV3Interface _priceOracle, ICollateralVault _vault) external initializer {
         if (address(_priceOracle) == address(0)) {
             revert InvalidOracle();
-        }
-        if (address(_vault) == address(0)) {
-            revert InsufficientCollateral();
         }
 
         __Ownable_init(_msgSender());
         __UUPSUpgradeable_init();
         __Multicall_init();
 
-        vault = _vault;
-        IERC20Metadata vaultToken = IERC20Metadata(address(_vault.collateralToken()));
-        collateralToken = vaultToken;
         priceOracle = _priceOracle;
-        tokenDecimals = vaultToken.decimals();
         oracleDecimals = _priceOracle.decimals();
     }
 
     /// @notice Authorize upgrade (only owner)
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
 
-    /// @notice One-shot post-upgrade migration to wire up the collateral vault
-    ///         and (optionally) the portfolio margin engine added in v2.
+    /// @notice One-shot post-upgrade migration to wire up the portfolio margin engine added in v2.
     /// @dev Intended to be invoked atomically via `upgradeToAndCall`:
     ///      `proxy.upgradeToAndCall(newImpl, abi.encodeCall(this.initializeV2, (vault, pm)))`.
-    /// @param _vault The shared collateral vault. Its `collateralToken()` becomes the underlying ERC20.
+    /// @param _vault Ignored — vault is now an immutable set in the constructor.
+    ///        Kept for backwards compatibility.
     /// @param _pm The portfolio margin engine (may be `address(0)` to set later via `setPortfolioMargin`).
     function initializeV2(ICollateralVault _vault, IPortfolioMarginEngine _pm) external reinitializer(2) onlyOwner {
-        if (address(_vault) == address(0)) {
-            revert InsufficientCollateral();
-        }
-
-        vault = _vault;
         portfolioMargin = _pm;
-
-        IERC20Metadata vaultToken = IERC20Metadata(address(_vault.collateralToken()));
-        collateralToken = vaultToken;
-        tokenDecimals = vaultToken.decimals();
     }
 
     // ── Vault integration ───────────────────────────────────────────────────
@@ -266,6 +267,7 @@ contract HashPowerPerpsDEX is
     /// @notice Set the portfolio margin engine for cross-product margin checks.
     function setPortfolioMargin(IPortfolioMarginEngine _pm) external onlyOwner {
         portfolioMargin = _pm;
+        emit PortfolioMarginUpdated(address(_pm));
     }
 
     /// @notice Emitted whenever the points hook address changes.
@@ -307,7 +309,7 @@ contract HashPowerPerpsDEX is
         (, int256 answer,, uint256 updatedAt,) = priceOracle.latestRoundData();
         if (answer <= 0) return 0;
         if (block.timestamp - updatedAt > MAX_ORACLE_STALENESS) return 0;
-        uint256 price = _scaleDecimals(uint256(answer), oracleDecimals, tokenDecimals);
+        uint256 price = _scaleDecimals(uint256(answer), oracleDecimals, collateralDecimals);
         return _roundToNearest(price, minimumPriceIncrement);
     }
 
@@ -353,7 +355,7 @@ contract HashPowerPerpsDEX is
         }
 
         // Convert oracle price to collateral token decimals (oracle already quotes 1 PH/s/day)
-        uint256 price = _scaleDecimals(uint256(answer), oracleDecimals, tokenDecimals);
+        uint256 price = _scaleDecimals(uint256(answer), oracleDecimals, collateralDecimals);
 
         // Round to nearest minimumPriceIncrement
         price = _roundToNearest(price, minimumPriceIncrement);
@@ -628,8 +630,8 @@ contract HashPowerPerpsDEX is
         int256 takerQty = _toSignedQuantity(matchAmt, _remainingQty);
         uint256 notionalValue = _calculateValue(makerPrice, matchAmt);
 
-        int256 takerFee = _calculateMatchFee(notionalValue, true);
-        int256 makerFee = _calculateMatchFee(notionalValue, false);
+        int256 takerFee = int256(notionalValue) * int256(takerFeeBps) / 10_000;
+        int256 makerFee = int256(notionalValue) * int256(makerFeeBps) / 10_000;
 
         _createPosition(_makerOrderId, makerParticipant, _taker, makerPrice, takerQty, takerFee, makerFee);
 
@@ -656,7 +658,9 @@ contract HashPowerPerpsDEX is
 
     /// @notice Get absolute value of int256
     function _abs(int256 _value) private pure returns (uint256) {
-        return _value > 0 ? uint256(_value) : uint256(-_value);
+        unchecked {
+            return _value >= 0 ? uint256(_value) : uint256(-_value);
+        }
     }
 
     /// @notice Check if two quantities have the same sign
@@ -890,8 +894,7 @@ contract HashPowerPerpsDEX is
         return balanceOf(_user) < portfolioMargin.computePortfolioMM(_user);
     }
 
-    /// @notice Force-close a single underwater user's position. Permissionless; pays
-    ///         `liquidationFee` from the user's vault to `msg.sender`.
+    /// @notice Force-close a single underwater user's position. Permissionless.
     /// @dev Strict orders-first invariant: reverts with `OrdersStillOpen` if the user has any
     ///      open orders. The keeper must clear them first by composing
     ///      `multicallStopOnFailure([liquidateOrder × N, liquidatePosition])` so the position
@@ -933,16 +936,18 @@ contract HashPowerPerpsDEX is
 
         (int256 pnl, int256 signedClose) = _doPartialLiquidatePosition(_user, position, closeAbs);
 
+        // Charge liquidation fee on the closed notional
+        uint256 currentPrice = getMarketPrice();
+        uint256 closedNotional = _calculateValue(currentPrice, closeAbs);
+        uint256 liqFee = _chargeLiquidationFee(_user, closedNotional);
+
         // Over-liquidation guard: a position remains here, so if there is a real IM buffer
         // (`im > mm`) the leftover balance must sit at/under IM.
         uint256 im = portfolioMargin.computePortfolioIM(_user);
         uint256 mm = portfolioMargin.computePortfolioMM(_user);
         if (im > mm && balanceOf(_user) > im) revert OverLiquidation();
 
-        // Keeper-incentive payout is DISABLED for now: the protocol runs the only liquidator,
-        // so no `liquidationFee` is transferred. The state var / setter / `liquidatorFee` event
-        // field are retained (emitting 0) for a future incentive iteration.
-        emit PositionLiquidated(_user, _msgSender(), signedClose, pnl, 0);
+        emit PositionLiquidated(_user, _msgSender(), signedClose, pnl, liqFee);
     }
 
     /// @dev Closes `_closeAbs` (< |netQuantity|) of a verified-underwater user's position at the
@@ -1002,22 +1007,25 @@ contract HashPowerPerpsDEX is
 
     /// @dev Cancels a single order on behalf of a (verified-underwater) user. Caller must have
     ///      already verified `_underwater(_user)` and that `_order.participant == _user`.
-    ///      Keeper-incentive payout is DISABLED for now (see `liquidatePosition`): no
-    ///      `liquidationFee` is transferred; `OrderLiquidated` carries 0.
+    ///      Charges a liquidation fee on the order's notional value.
     function _doLiquidateOrder(address _user, bytes32 _orderId, Order memory _order) private {
         bool isBid = _order.quantity > 0;
-        _getOrderValue(isBid)[_user] -= _calculateValue(_order.price, _abs(_order.quantity));
+        uint256 orderAbsQty = _abs(_order.quantity);
+        uint256 orderNotional = _calculateValue(_order.price, orderAbsQty);
+        _getOrderValue(isBid)[_user] -= orderNotional;
         _removeOrder(_orderId, _user, _order.price, isBid);
         _removePriceLevelIfEmpty(_order.price, isBid);
 
+        uint256 liqFee = _chargeLiquidationFee(_user, orderNotional);
+
         emit OrderCancelled(_orderId, _user);
-        emit OrderLiquidated(_orderId, _user, _msgSender(), 0);
-        _notifyLiquidation(_msgSender(), 0);
+        emit OrderLiquidated(_orderId, _user, _msgSender(), liqFee);
+        _notifyLiquidation(_msgSender(), liqFee);
     }
 
     /// @dev Closes the user's position and settles PnL against the insurance fund. Caller must
-    ///      have verified all predicates. Keeper-incentive payout is DISABLED for now (see
-    ///      `liquidatePosition`): no `liquidationFee` is transferred; `PositionLiquidated` carries 0.
+    ///      have verified all predicates. Charges a liquidation fee on the closed notional
+    ///      (computed as `currentPrice * |closedQuantity| / 10^QUANTITY_DECIMALS`).
     function _doLiquidatePosition(address _user) private {
         Position memory position = positions[_user];
         uint256 currentPrice = getMarketPrice();
@@ -1043,11 +1051,14 @@ contract HashPowerPerpsDEX is
         }
 
         int256 closedQuantity = position.netQuantity;
+        uint256 closedNotional = _calculateValue(currentPrice, _abs(closedQuantity));
+        uint256 liqFee = _chargeLiquidationFee(_user, closedNotional);
+
         delete positions[_user];
         usersWithPositions.remove(_user);
 
-        emit PositionLiquidated(_user, _msgSender(), closedQuantity, pnl, 0);
-        _notifyLiquidation(_msgSender(), 0);
+        emit PositionLiquidated(_user, _msgSender(), closedQuantity, pnl, liqFee);
+        _notifyLiquidation(_msgSender(), liqFee);
     }
 
     /// @notice Settle a reduced portion of a position (when offsetting)
@@ -1079,6 +1090,40 @@ contract HashPowerPerpsDEX is
                 }
                 emit BadDebt(_user, loss - available);
             }
+        }
+    }
+
+    /// @notice Charge a liquidation fee on the closed notional value, split between
+    ///         liquidator (msg.sender) and insurance fund according to `liquidatorShareBps`.
+    /// @dev Fee is `_notionalValue * liquidationFeeBps / 10000`, capped at the user's
+    ///      actual vault balance. The liquidator receives `fee * liquidatorShareBps / 10000`
+    ///      (also capped at available balance), and the remainder goes to the insurance fund.
+    /// @param _user The liquidated user (fee source)
+    /// @param _notionalValue Notional value of the liquidated position/order
+    /// @return totalFee Total fee actually collected (may be less than computed if balance insufficient)
+    function _chargeLiquidationFee(address _user, uint256 _notionalValue) private returns (uint256 totalFee) {
+        uint16 feeBps = liquidationFeeBps;
+        if (feeBps == 0) return 0;
+
+        uint256 computedFee = _notionalValue * uint256(feeBps) / 10_000;
+        if (computedFee == 0) return 0;
+
+        uint256 userBal = balanceOf(_user);
+        totalFee = computedFee < userBal ? computedFee : userBal;
+        if (totalFee == 0) return 0;
+
+        address liquidator = _msgSender();
+        address insurance = _insuranceFundAccount();
+
+        uint16 liqShareBps = liquidatorShareBps;
+        uint256 liquidatorShare = totalFee * uint256(liqShareBps) / 10_000;
+        uint256 insuranceShare = totalFee - liquidatorShare;
+
+        if (liquidatorShare > 0) {
+            _move(_user, liquidator, liquidatorShare);
+        }
+        if (insuranceShare > 0) {
+            _move(_user, insurance, insuranceShare);
         }
     }
 
@@ -1303,6 +1348,13 @@ contract HashPowerPerpsDEX is
 
             while (orderIdUint != 0 && remaining != 0) {
                 Order storage makerOrder = orders[bytes32(orderIdUint)];
+                // STP: self-cross nets out, not a fill
+                if (makerOrder.participant == msg.sender) {
+                    uint256 selfAmt = _min(_abs(makerOrder.quantity), _abs(remaining));
+                    remaining -= _toSignedQuantity(selfAmt, remaining);
+                    (, orderIdUint) = orderQueue.getNextNode(orderIdUint);
+                    continue;
+                }
                 uint256 matchAmt = _min(_abs(makerOrder.quantity), _abs(remaining));
                 if (matchAmt > 0) {
                     totalNotional += _calculateValue(makerOrder.price, matchAmt);
@@ -1320,23 +1372,6 @@ contract HashPowerPerpsDEX is
         if (totalFilledAbs > 0) {
             averageFillPrice = (totalNotional * (10 ** QUANTITY_DECIMALS)) / totalFilledAbs;
         }
-    }
-
-    /// @notice Calculate match fee for a participant
-    /// @dev Fee is max(notional * feeBps / 10000, liquidationFee) for takers
-    /// @param _notionalValue Notional value of the matched trade
-    /// @param _isTaker Whether the participant is the taker
-    function _calculateMatchFee(uint256 _notionalValue, bool _isTaker) private view returns (int256) {
-        int16 feeBps = _isTaker ? takerFeeBps : makerFeeBps;
-        int256 fee = (int256(_notionalValue) * int256(feeBps)) / 10_000;
-
-        // Use liquidationFee as minimum fee for taker so every trade covers
-        // potential liquidation cost of one party
-        if (_isTaker && fee < int256(liquidationFee)) {
-            fee = int256(liquidationFee);
-        }
-
-        return fee;
     }
 
     /// @notice Transfer a pre-calculated fee between participant and reserve pool
@@ -1590,23 +1625,36 @@ contract HashPowerPerpsDEX is
         }
         priceOracle = _oracle;
         oracleDecimals = _oracle.decimals();
+        emit OracleUpdated(address(_oracle));
     }
 
-    /// @notice Set the flat liquidation fee (in collateral token units). Paid per cancelled
-    ///         order in `liquidateOrder` (composable via `multicallStopOnFailure`) and per
-    ///         closed position in `liquidatePosition`.
-    function setLiquidationFee(uint256 _liquidationFee) external onlyOwner {
-        liquidationFee = _liquidationFee;
-        emit LiquidationFeeUpdated(_liquidationFee);
-    }
-
-    /// @notice Set maker and taker fees in basis points
-    /// @param _takerFeeBps Taker fee (e.g., 5 = 0.05%)
+    /// @notice Set maker fee in basis points
     /// @param _makerFeeBps Maker fee (e.g., 0 = 0%)
-    function setMatchFee(int16 _takerFeeBps, int16 _makerFeeBps) external onlyOwner {
-        takerFeeBps = _takerFeeBps;
+    function setMakerFeeBps(int16 _makerFeeBps) external onlyOwner {
         makerFeeBps = _makerFeeBps;
-        emit MatchFeeUpdated(_takerFeeBps, _makerFeeBps);
+        emit MakerFeeBpsUpdated(_makerFeeBps);
+    }
+
+    /// @notice Set taker fee in basis points
+    /// @param _takerFeeBps Taker fee (e.g., 5 = 0.05%)
+    function setTakerFeeBps(int16 _takerFeeBps) external onlyOwner {
+        takerFeeBps = _takerFeeBps;
+        emit TakerFeeBpsUpdated(_takerFeeBps);
+    }
+
+    /// @notice Set the liquidation fee in basis points on the liquidated notional.
+    /// @param _bps Fee in bps (e.g., 50 = 0.5% of the closed position or cancelled order value).
+    function setLiquidationFeeBps(uint16 _bps) external onlyOwner {
+        liquidationFeeBps = _bps;
+        emit LiquidationFeeBpsUpdated(_bps);
+    }
+
+    /// @notice Set the liquidator's share of the liquidation fee in basis points.
+    /// @param _bps Share in bps (e.g., 5000 = 50% to liquidator, remainder to insurance fund).
+    function setLiquidatorShareBps(uint16 _bps) external onlyOwner {
+        if (_bps > 10_000) revert InvalidMarginPercent();
+        liquidatorShareBps = _bps;
+        emit LiquidatorShareBpsUpdated(_bps);
     }
 
     /// @notice Set minimum margin per resting order (in collateral token units)
@@ -1670,12 +1718,11 @@ contract HashPowerPerpsDEX is
         cumulativeFundingPerUnit = 0;
         lastFundingUpdateTime = 0;
         // nonce = 0;
-        emit LiquidationFeeUpdated(liquidationFee);
+        emit LiquidationFeeBpsUpdated(liquidationFeeBps);
+        emit LiquidatorShareBpsUpdated(liquidatorShareBps);
         emit MatchFeeUpdated(takerFeeBps, makerFeeBps);
         emit MinimumMarginPerOrderUpdated(minimumMarginPerOrder);
         emit FundingParametersUpdated(fundingRateMaxBps, fundingPeriod);
-        emit MarginPercentUpdated(marginPercent);
-        emit MaintenanceMarginPercentUpdated(maintenanceMarginPercent);
     }
 
     /// @notice Clear all orders at a single price level and remove them from participant indexes
@@ -1711,6 +1758,6 @@ contract HashPowerPerpsDEX is
 
     /// @notice Decimals of the underlying collateral token (mirrors the vault).
     function decimals() public view returns (uint8) {
-        return IERC20Metadata(address(vault)).decimals();
+        return collateralDecimals;
     }
 }
