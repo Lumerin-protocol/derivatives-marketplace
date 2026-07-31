@@ -43,4 +43,9 @@ library MathLib {
     function min(uint256 a, uint256 b) internal pure returns (uint256) {
         return a < b ? a : b;
     }
+
+    /// @notice Signed quantity from an absolute value and a direction flag.
+    function toSigned(bool isPositive, uint256 absValue) internal pure returns (int256) {
+        return isPositive ? int256(absValue) : -int256(absValue);
+    }
 }

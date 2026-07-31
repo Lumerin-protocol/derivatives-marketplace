@@ -609,7 +609,7 @@ contract HashPowerPerpsDEX is
             emit OrderCancelled(_makerOrderId, _taker);
         } else {
             uint256 reducedMakerAbs = makerAbs - cancelAmt;
-            int256 newMakerQty = makerQty > 0 ? int256(reducedMakerAbs) : -int256(reducedMakerAbs);
+            int256 newMakerQty = MathLib.toSigned(makerQty > 0, reducedMakerAbs);
             _makerOrder.quantity = newMakerQty;
             emit OrderUpdated(_makerOrderId, _taker, newMakerQty);
         }
@@ -665,12 +665,12 @@ contract HashPowerPerpsDEX is
 
     /// @notice Convert absolute quantity to signed based on reference sign
     function _toSignedQuantity(uint256 _absQuantity, int256 _referenceSign) private pure returns (int256) {
-        return _referenceSign > 0 ? int256(_absQuantity) : -int256(_absQuantity);
+        return MathLib.toSigned(_referenceSign > 0, _absQuantity);
     }
 
     /// @notice Reduce absolute value of signed quantity
     function _reduceQuantity(int256 _quantity, uint256 _reduction) private pure returns (int256) {
-        return _quantity > 0 ? _quantity - int256(_reduction) : _quantity + int256(_reduction);
+        return _quantity - MathLib.toSigned(_quantity > 0, _reduction);
     }
 
     /// @notice Cancel an order
@@ -950,13 +950,13 @@ contract HashPowerPerpsDEX is
         int256 priceDiff = int256(currentPrice) - int256(_position.aggregatedEntryPrice);
 
         bool isLong = _position.netQuantity > 0;
-        signedClose = isLong ? int256(_closeAbs) : -int256(_closeAbs);
+        signedClose = MathLib.toSigned(isLong, _closeAbs);
 
         pnl = _settleReducedPosition(_user, priceDiff, signedClose);
 
         // Reduce magnitude toward zero; aggregatedEntryPrice is unchanged by a reducing close.
         positions[_user].netQuantity =
-            isLong ? _position.netQuantity - int256(_closeAbs) : _position.netQuantity + int256(_closeAbs);
+            isLong ? _position.netQuantity - MathLib.toSigned(isLong, _closeAbs) : _position.netQuantity + MathLib.toSigned(isLong, _closeAbs);
     }
 
     /// @notice Force-cancel a single resting order owned by an underwater user. Permissionless.
