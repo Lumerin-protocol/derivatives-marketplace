@@ -1274,8 +1274,7 @@ contract HashPowerPerpsDEX is
             if (isBuy && currentPrice > _price) break;
             if (!isBuy && currentPrice < _price) break;
 
-            StructuredLinkedList.List storage orderQueue =
-                isBuy ? priceOrdersShortQueue[currentPrice] : priceOrdersLongQueue[currentPrice];
+            StructuredLinkedList.List storage orderQueue = _priceOrderIds(currentPrice, !isBuy);
             (, uint256 orderIdUint) = orderQueue.getNextNode(0);
 
             while (orderIdUint != 0 && remaining != 0) {
@@ -1513,8 +1512,7 @@ contract HashPowerPerpsDEX is
     /// @param _isBid True for bid side, false for ask side
     /// @return totalQuantity The total absolute quantity at this price level
     function getQuantityAtPrice(uint256 _price, bool _isBid) external view returns (uint256 totalQuantity) {
-        StructuredLinkedList.List storage orderQueue =
-            _isBid ? priceOrdersLongQueue[_price] : priceOrdersShortQueue[_price];
+        StructuredLinkedList.List storage orderQueue = _priceOrderIds(_price, _isBid);
 
         (, uint256 orderId) = orderQueue.getNextNode(0);
         while (orderId != 0) {
@@ -1659,7 +1657,7 @@ contract HashPowerPerpsDEX is
 
     /// @notice Clear all orders at a single price level and remove them from participant indexes
     function _clearPriceLevelOrders(uint256 _price, bool _isBid) private {
-        StructuredLinkedList.List storage queue = _isBid ? priceOrdersLongQueue[_price] : priceOrdersShortQueue[_price];
+        StructuredLinkedList.List storage queue = _priceOrderIds(_price, _isBid);
         (, uint256 orderIdUint) = queue.getNextNode(0);
         while (orderIdUint != 0) {
             (, uint256 nextOrderIdUint) = queue.getNextNode(orderIdUint);
