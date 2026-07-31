@@ -15,6 +15,7 @@ import { ICollateralVault } from "collateral-margin/contracts/contracts/interfac
 import { IPortfolioMarginEngine } from "collateral-margin/contracts/contracts/interfaces/IPortfolioMarginEngine.sol";
 import { IPointsHook } from "collateral-margin/contracts/contracts/interfaces/IPointsHook.sol";
 import { PriceLadderLib } from "./libs/PriceLadderLib.sol";
+import { MathLib } from "./libs/MathLib.sol";
 import { Versionable } from "./interfaces/Versionable.sol";
 
 /// @title HashPower Perps DEX
@@ -310,8 +311,8 @@ contract HashPowerPerpsDEX is
         (, int256 answer,, uint256 updatedAt,) = priceOracle.latestRoundData();
         if (answer <= 0) return 0;
         if (block.timestamp - updatedAt > MAX_ORACLE_STALENESS) return 0;
-        uint256 price = _scaleDecimals(uint256(answer), oracleDecimals, collateralDecimals);
-        return _roundToNearest(price, minimumPriceIncrement);
+        uint256 price = MathLib.scaleDecimals(uint256(answer), oracleDecimals, collateralDecimals);
+        return MathLib.roundToNearest(price, minimumPriceIncrement);
     }
 
     /// @dev Notify the points hook of a liquidation. Skipped when no hook is configured. Not
@@ -356,10 +357,10 @@ contract HashPowerPerpsDEX is
         }
 
         // Convert oracle price to collateral token decimals (oracle already quotes 1 PH/s/day)
-        uint256 price = _scaleDecimals(uint256(answer), oracleDecimals, collateralDecimals);
+        uint256 price = MathLib.scaleDecimals(uint256(answer), oracleDecimals, collateralDecimals);
 
         // Round to nearest minimumPriceIncrement
-        price = _roundToNearest(price, minimumPriceIncrement);
+        price = MathLib.roundToNearest(price, minimumPriceIncrement);
 
         return price;
     }
@@ -482,7 +483,7 @@ contract HashPowerPerpsDEX is
             if (remainingQuantity != 0) {
                 // Validate minimum margin per resting order
                 if (minimumMarginPerOrder > 0) {
-                    uint256 restingValue = _calculateValue(_price, _abs(remainingQuantity));
+                    uint256 restingValue = _calculateValue(_price, MathLib.abs(remainingQuantity));
                     uint256 restingMargin = (restingValue * portfolioMargin.imSpotShock()) / 1e18;
                     if (restingMargin < minimumMarginPerOrder) {
                         revert OrderMarginTooLow();
@@ -497,7 +498,7 @@ contract HashPowerPerpsDEX is
 
                 // Create order with quantity that was not matched
                 orders[orderId] = Order({ participant: sender, price: _price, quantity: remainingQuantity });
-                _getOrderValue(isBuy)[sender] += _calculateValue(_price, _abs(remainingQuantity));
+                _getOrderValue(isBuy)[sender] += _calculateValue(_price, MathLib.abs(remainingQuantity));
                 participantOrders.add(orderId);
                 StructuredLinkedList.List storage orderQueue = _priceOrderIds(_price, isBuy);
                 orderQueue.pushBack(uint256(orderId));
@@ -513,7 +514,7 @@ contract HashPowerPerpsDEX is
 
         // Opposite side and combined reducing size (resting + this intent) ≤ position.
         isReduceOnly = positionBefore != 0 && (positionBefore > 0 ? _quantity < 0 : _quantity > 0)
-            && _abs(_quantity) + reducingBefore <= _abs(positionBefore);
+            && MathLib.abs(_quantity) + reducingBefore <= MathLib.abs(positionBefore);
     }
 
     /// @dev Absolute qty of resting orders that reduce `_net`.
@@ -525,7 +526,7 @@ contract HashPowerPerpsDEX is
             Order memory order = orders[ids.at(i)];
             if (order.quantity == 0) continue;
             if (_net > 0 ? order.quantity < 0 : order.quantity > 0) {
-                total += _abs(order.quantity);
+                total += MathLib.abs(order.quantity);
             }
         }
     }
@@ -581,7 +582,7 @@ contract HashPowerPerpsDEX is
         }
 
         // Remove price level once after finishing this level, instead of after every filled order.
-        _removePriceLevelIfEmpty(_price, !_isBuy);
+        _removePriceLevelIfEmpty(makerOrderQueue, _price, !_isBuy);
 
         return _remainingQty;
     }
@@ -596,8 +597,8 @@ contract HashPowerPerpsDEX is
     ) private returns (int256) {
         uint256 makerPrice = _makerOrder.price;
         int256 makerQty = _makerOrder.quantity;
-        uint256 makerAbs = _abs(makerQty);
-        uint256 remainingAbs = _abs(_remainingQty);
+        uint256 makerAbs = MathLib.abs(makerQty);
+        uint256 remainingAbs = MathLib.abs(_remainingQty);
         uint256 cancelAmt = makerAbs < remainingAbs ? makerAbs : remainingAbs;
         bool makerIsBid = makerQty > 0;
 
@@ -627,7 +628,7 @@ contract HashPowerPerpsDEX is
         uint256 makerPrice = _makerOrder.price;
         address makerParticipant = _makerOrder.participant;
         int256 makerQty = _makerOrder.quantity;
-        uint256 matchAmt = _min(_abs(makerQty), _abs(_remainingQty));
+        uint256 matchAmt = _min(MathLib.abs(makerQty), MathLib.abs(_remainingQty));
         int256 takerQty = _toSignedQuantity(matchAmt, _remainingQty);
         uint256 notionalValue = _calculateValue(makerPrice, matchAmt);
 
@@ -655,18 +656,6 @@ contract HashPowerPerpsDEX is
         unchecked {
             return _remainingQty - takerQty;
         }
-    }
-
-    /// @notice Get absolute value of int256
-    function _abs(int256 _value) private pure returns (uint256) {
-        unchecked {
-            return _value >= 0 ? uint256(_value) : uint256(-_value);
-        }
-    }
-
-    /// @notice Check if two quantities have the same sign
-    function _isSameSign(int256 _a, int256 _b) private pure returns (bool) {
-        return (_a > 0 && _b > 0) || (_a < 0 && _b < 0);
     }
 
     /// @notice Calculate value (price * quantity / decimals)
@@ -705,10 +694,10 @@ contract HashPowerPerpsDEX is
         }
 
         bool isBid = order.quantity > 0;
-        _getOrderValue(isBid)[order.participant] -= _calculateValue(order.price, _abs(order.quantity));
+        _getOrderValue(isBid)[order.participant] -= _calculateValue(order.price, MathLib.abs(order.quantity));
 
         _removeOrder(_orderId, order.participant, order.price, isBid);
-        _removePriceLevelIfEmpty(order.price, isBid);
+        _removePriceLevelIfEmpty(_priceOrderIds(order.price, isBid), order.price, isBid);
         emit OrderCancelled(_orderId, order.participant);
     }
 
@@ -720,8 +709,8 @@ contract HashPowerPerpsDEX is
 
         int256 oldQty = order.quantity;
         if (_newQuantity == 0 || (_newQuantity > 0) != (oldQty > 0)) revert InvalidReduceQuantity();
-        uint256 oldAbs = _abs(oldQty);
-        uint256 newAbs = _abs(_newQuantity);
+        uint256 oldAbs = MathLib.abs(oldQty);
+        uint256 newAbs = MathLib.abs(_newQuantity);
         if (newAbs >= oldAbs) revert InvalidReduceQuantity();
 
         if (minimumMarginPerOrder > 0) {
@@ -770,7 +759,7 @@ contract HashPowerPerpsDEX is
 
         // Use absolute quantity for position updates
         // Buyer always gets positive (long), seller always gets negative (short)
-        int256 absQty = int256(_abs(_takerQty));
+        int256 absQty = int256(MathLib.abs(_takerQty));
 
         // Skip funding settlement for the taker — already settled once before the loop.
         if (buyer != taker) _settleFunding(buyer);
@@ -838,11 +827,11 @@ contract HashPowerPerpsDEX is
         }
 
         // Same direction - add to position with weighted average entry price
-        if (_isSameSign(position.netQuantity, _quantity)) {
-            uint256 oldValue = _abs(position.netQuantity) * position.aggregatedEntryPrice;
-            uint256 newValue = _abs(_quantity) * _tradePrice;
+        if (MathLib.isSameSign(position.netQuantity, _quantity)) {
+            uint256 oldValue = MathLib.abs(position.netQuantity) * position.aggregatedEntryPrice;
+            uint256 newValue = MathLib.abs(_quantity) * _tradePrice;
             int256 newNet = position.netQuantity + _quantity;
-            position.aggregatedEntryPrice = (oldValue + newValue) / _abs(newNet);
+            position.aggregatedEntryPrice = (oldValue + newValue) / MathLib.abs(newNet);
             position.netQuantity = newNet;
             return;
         }
@@ -854,8 +843,8 @@ contract HashPowerPerpsDEX is
     /// @notice Handle opposite-direction trade (partial/full close or flip)
     function _settleOpposite(address _user, int256 _quantity, uint256 _tradePrice) private {
         Position storage position = positions[_user];
-        uint256 absQuantity = _abs(_quantity);
-        uint256 oldAbsQuantity = _abs(position.netQuantity);
+        uint256 absQuantity = MathLib.abs(_quantity);
+        uint256 oldAbsQuantity = MathLib.abs(position.netQuantity);
         uint256 settledAbs = absQuantity < oldAbsQuantity ? absQuantity : oldAbsQuantity;
         _settleReducedPosition(
             _user,
@@ -925,7 +914,7 @@ contract HashPowerPerpsDEX is
         if (participantOrderIdsIndex[_user].length() != 0) revert OrdersStillOpen();
         if (_closeQty == 0) revert InvalidSize();
 
-        uint256 absNet = _abs(position.netQuantity);
+        uint256 absNet = MathLib.abs(position.netQuantity);
         uint256 closeAbs = _closeQty < absNet ? _closeQty : absNet;
 
         // Full close: delete the position and settle the whole PnL (bad-debt path). No IM buffer
@@ -1011,11 +1000,11 @@ contract HashPowerPerpsDEX is
     ///      Charges a liquidation fee on the order's notional value.
     function _doLiquidateOrder(address _user, bytes32 _orderId, Order memory _order) private {
         bool isBid = _order.quantity > 0;
-        uint256 orderAbsQty = _abs(_order.quantity);
+        uint256 orderAbsQty = MathLib.abs(_order.quantity);
         uint256 orderNotional = _calculateValue(_order.price, orderAbsQty);
         _getOrderValue(isBid)[_user] -= orderNotional;
         _removeOrder(_orderId, _user, _order.price, isBid);
-        _removePriceLevelIfEmpty(_order.price, isBid);
+        _removePriceLevelIfEmpty(_priceOrderIds(_order.price, isBid), _order.price, isBid);
 
         uint256 liqFee = _chargeLiquidationFee(_user, orderNotional);
 
@@ -1052,7 +1041,7 @@ contract HashPowerPerpsDEX is
         }
 
         int256 closedQuantity = position.netQuantity;
-        uint256 closedNotional = _calculateValue(currentPrice, _abs(closedQuantity));
+        uint256 closedNotional = _calculateValue(currentPrice, MathLib.abs(closedQuantity));
         uint256 liqFee = _chargeLiquidationFee(_user, closedNotional);
 
         delete positions[_user];
@@ -1166,7 +1155,7 @@ contract HashPowerPerpsDEX is
 
         if (position.netQuantity != 0) {
             uint256 currentPrice = getMarketPrice();
-            uint256 positionValue = _calculateValue(currentPrice, _abs(position.netQuantity));
+            uint256 positionValue = _calculateValue(currentPrice, MathLib.abs(position.netQuantity));
 
             // Offset risk-reducing orders against the position
             uint256 reducingVal;
@@ -1247,9 +1236,7 @@ contract HashPowerPerpsDEX is
     }
 
     /// @notice Remove a price level from the sorted price list if order queue is empty
-    function _removePriceLevelIfEmpty(uint256 _price, bool _isBid) private {
-        StructuredLinkedList.List storage orderQueue =
-            _isBid ? priceOrdersLongQueue[_price] : priceOrdersShortQueue[_price];
+    function _removePriceLevelIfEmpty(StructuredLinkedList.List storage orderQueue, uint256 _price, bool _isBid) private {
         StructuredLinkedList.List storage priceList = _isBid ? activeBidPrices : activeAskPrices;
         PriceLadderLib.removeIfEmpty(orderQueue, priceList, _price);
     }
@@ -1300,12 +1287,12 @@ contract HashPowerPerpsDEX is
                 Order storage makerOrder = orders[bytes32(orderIdUint)];
                 // STP: self-cross nets out, not a fill
                 if (makerOrder.participant == msg.sender) {
-                    uint256 selfAmt = _min(_abs(makerOrder.quantity), _abs(remaining));
+                    uint256 selfAmt = _min(MathLib.abs(makerOrder.quantity), MathLib.abs(remaining));
                     remaining -= _toSignedQuantity(selfAmt, remaining);
                     (, orderIdUint) = orderQueue.getNextNode(orderIdUint);
                     continue;
                 }
-                uint256 matchAmt = _min(_abs(makerOrder.quantity), _abs(remaining));
+                uint256 matchAmt = _min(MathLib.abs(makerOrder.quantity), MathLib.abs(remaining));
                 if (matchAmt > 0) {
                     totalNotional += _calculateValue(makerOrder.price, matchAmt);
                     totalFilledAbs += matchAmt;
@@ -1537,7 +1524,7 @@ contract HashPowerPerpsDEX is
         (, uint256 orderId) = orderQueue.getNextNode(0);
         while (orderId != 0) {
             Order storage order = orders[bytes32(orderId)];
-            totalQuantity += _abs(order.quantity);
+            totalQuantity += MathLib.abs(order.quantity);
             (, orderId) = orderQueue.getNextNode(orderId);
         }
 
@@ -1555,7 +1542,7 @@ contract HashPowerPerpsDEX is
         uint256 reducingVal;
         if (position.netQuantity != 0) {
             uint256 currentPrice = getMarketPrice();
-            uint256 positionValue = _calculateValue(currentPrice, _abs(position.netQuantity));
+            uint256 positionValue = _calculateValue(currentPrice, MathLib.abs(position.netQuantity));
             if (position.netQuantity > 0) {
                 reducingVal = sellVal < positionValue ? sellVal : positionValue;
             } else {
@@ -1689,21 +1676,6 @@ contract HashPowerPerpsDEX is
             queue.remove(orderIdUint);
             orderIdUint = nextOrderIdUint;
         }
-    }
-
-    /// @notice Scale a value from one decimal precision to another
-    function _scaleDecimals(uint256 _value, uint8 _fromDecimals, uint8 _toDecimals) private pure returns (uint256) {
-        if (_fromDecimals > _toDecimals) {
-            return _value / (10 ** (_fromDecimals - _toDecimals));
-        } else if (_fromDecimals < _toDecimals) {
-            return _value * (10 ** (_toDecimals - _fromDecimals));
-        }
-        return _value;
-    }
-
-    /// @notice Round a value to the nearest multiple of an increment
-    function _roundToNearest(uint256 _value, uint256 _increment) private pure returns (uint256) {
-        return (_value + _increment / 2) / _increment * _increment;
     }
 
     /// @notice Decimals of the underlying collateral token (mirrors the vault).

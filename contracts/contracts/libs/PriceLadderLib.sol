@@ -5,9 +5,8 @@ import { StructuredLinkedList } from "solidity-linked-list/contracts/StructuredL
 
 using StructuredLinkedList for StructuredLinkedList.List;
 
-/// @title PriceLadderLib — Sorted price ladder insertion + removal
-/// @notice Shared by Perps and Futures for maintaining bid/ask price levels
-///         in a StructuredLinkedList. Callers resolve the correct list
+/// @title PriceLadderLib — Sorted price ladder insertion + removal + shared math
+/// @notice Shared by Perps and Futures. Callers resolve the correct list
 ///         (global or per-expiration) before calling.
 library PriceLadderLib {
     error MaxPriceLevelsReached();
