@@ -628,7 +628,7 @@ contract HashPowerPerpsDEX is
         uint256 makerPrice = _makerOrder.price;
         address makerParticipant = _makerOrder.participant;
         int256 makerQty = _makerOrder.quantity;
-        uint256 matchAmt = _min(MathLib.abs(makerQty), MathLib.abs(_remainingQty));
+        uint256 matchAmt = MathLib.min(MathLib.abs(makerQty), MathLib.abs(_remainingQty));
         int256 takerQty = _toSignedQuantity(matchAmt, _remainingQty);
         uint256 notionalValue = _calculateValue(makerPrice, matchAmt);
 
@@ -666,11 +666,6 @@ contract HashPowerPerpsDEX is
     /// @notice Convert absolute quantity to signed based on reference sign
     function _toSignedQuantity(uint256 _absQuantity, int256 _referenceSign) private pure returns (int256) {
         return _referenceSign > 0 ? int256(_absQuantity) : -int256(_absQuantity);
-    }
-
-    /// @notice Get minimum of two values
-    function _min(uint256 _a, uint256 _b) private pure returns (uint256) {
-        return _a < _b ? _a : _b;
     }
 
     /// @notice Reduce absolute value of signed quantity
@@ -1287,12 +1282,12 @@ contract HashPowerPerpsDEX is
                 Order storage makerOrder = orders[bytes32(orderIdUint)];
                 // STP: self-cross nets out, not a fill
                 if (makerOrder.participant == msg.sender) {
-                    uint256 selfAmt = _min(MathLib.abs(makerOrder.quantity), MathLib.abs(remaining));
+                    uint256 selfAmt = MathLib.min(MathLib.abs(makerOrder.quantity), MathLib.abs(remaining));
                     remaining -= _toSignedQuantity(selfAmt, remaining);
                     (, orderIdUint) = orderQueue.getNextNode(orderIdUint);
                     continue;
                 }
-                uint256 matchAmt = _min(MathLib.abs(makerOrder.quantity), MathLib.abs(remaining));
+                uint256 matchAmt = MathLib.min(MathLib.abs(makerOrder.quantity), MathLib.abs(remaining));
                 if (matchAmt > 0) {
                     totalNotional += _calculateValue(makerOrder.price, matchAmt);
                     totalFilledAbs += matchAmt;
@@ -1490,8 +1485,8 @@ contract HashPowerPerpsDEX is
         view
         returns (uint256[] memory bidPrices, uint256[] memory askPrices)
     {
-        uint256 bidCount = _min(activeBidPrices.sizeOf(), _maxLevels);
-        uint256 askCount = _min(activeAskPrices.sizeOf(), _maxLevels);
+        uint256 bidCount = MathLib.min(activeBidPrices.sizeOf(), _maxLevels);
+        uint256 askCount = MathLib.min(activeAskPrices.sizeOf(), _maxLevels);
 
         bidPrices = new uint256[](bidCount);
         askPrices = new uint256[](askCount);
