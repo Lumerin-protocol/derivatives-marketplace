@@ -57,15 +57,15 @@ contract HashPowerPerpsDEX is
     uint8 private immutable collateralDecimals;
 
     // State variables
-    address private _gapCollateralToken;
+    address private __gap0;
     AggregatorV3Interface public priceOracle;
     /// @dev Dead — former marginPercent. Margin is now delegated to PortfolioMarginEngine.
-    uint8 private _gapMarginPercent;
+    uint8 private __gap1;
     /// @dev Dead — former maintenanceMarginPercent. Margin is now delegated to PortfolioMarginEngine.
-    uint8 private _gapMaintenanceMarginPercent;
+    uint8 private __gap2;
     /// @dev Dead — former liquidationFee (flat). Now bps-based via liquidationFeeBps.
-    uint256 private _gapLiquidationFee;
-    uint8 private _gapTokenDecimals;
+    uint256 private __gap3;
+    uint8 private __gap4;
     uint8 private oracleDecimals;
     uint256 private nonce; // Nonce for order IDs
 
@@ -74,7 +74,7 @@ contract HashPowerPerpsDEX is
     mapping(uint256 => StructuredLinkedList.List) private priceOrdersLongQueue; // FIFO queue of long orders by price
     mapping(uint256 => StructuredLinkedList.List) private priceOrdersShortQueue; // FIFO queue of short orders by price
     mapping(address => EnumerableSet.Bytes32Set) private participantOrderIdsIndex; // Orders by participant
-    mapping(address => uint256) private _gap;
+    mapping(address => uint256) private __gap5;
 
     // Price level tracking for limit order matching
     StructuredLinkedList.List private activeBidPrices; // Sorted bid prices (highest first)
@@ -101,7 +101,7 @@ contract HashPowerPerpsDEX is
     mapping(address => uint256) private userSellOrderValue; // Cached total sell order value per user
 
     // Level 2: Unified collateral vault (moved to immutable)
-    address private _gapVault;
+    address private __gap6;
     IPortfolioMarginEngine public portfolioMargin;
 
     /// @notice Optional points/rewards hook notified on fills and liquidations.
