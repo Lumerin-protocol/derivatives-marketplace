@@ -41,7 +41,8 @@ contract HashPowerPerpsDEX is
     uint8 public constant FUNDING_DECIMALS = 18;
     uint8 public constant MAX_ORDERS_PER_PARTICIPANT = 100;
     uint8 public constant QUANTITY_DECIMALS = 6;
-    uint256 public constant MAX_PRICE_LEVELS_PER_SIDE = 200; // Max active price levels per side (bid/ask)
+    uint256 public constant MAX_PRICE_LEVELS_PER_SIDE = 200;
+    uint256 private constant BPS = 10_000; // Basis points denominator
     /// @notice Minimum price increment for orders: $0.01 in USDC (6 decimals).
     uint256 public constant minimumPriceIncrement = 0.01e6;
     /// @notice Contract size in hashes/s·day: the hashes produced by a given hashrate sustained over one day.
@@ -330,7 +331,6 @@ contract HashPowerPerpsDEX is
 
     /// @dev Move collateral between two accounts via the vault.
     function _move(address _from, address _to, uint256 _amount) private {
-        if (_amount == 0) return;
         vault.internalTransfer(_from, _to, _amount);
     }
 
@@ -632,8 +632,8 @@ contract HashPowerPerpsDEX is
         int256 takerQty = _toSignedQuantity(matchAmt, _remainingQty);
         uint256 notionalValue = _calculateValue(makerPrice, matchAmt);
 
-        int256 takerFee = int256(notionalValue) * int256(takerFeeBps) / 10_000;
-        int256 makerFee = int256(notionalValue) * int256(makerFeeBps) / 10_000;
+        int256 takerFee = int256(notionalValue) * int256(takerFeeBps) / int256(BPS);
+        int256 makerFee = int256(notionalValue) * int256(makerFeeBps) / int256(BPS);
 
         _createPosition(_makerOrderId, makerParticipant, _taker, makerPrice, takerQty, takerFee, makerFee);
 
@@ -1090,7 +1090,7 @@ contract HashPowerPerpsDEX is
         uint16 feeBps = liquidationFeeBps;
         if (feeBps == 0) return 0;
 
-        uint256 computedFee = _notionalValue * uint256(feeBps) / 10_000;
+        uint256 computedFee = _notionalValue * uint256(feeBps) / BPS;
         if (computedFee == 0) return 0;
 
         uint256 userBal = balanceOf(_user);
@@ -1101,15 +1101,11 @@ contract HashPowerPerpsDEX is
         address insurance = _insuranceFundAccount();
 
         uint16 liqShareBps = liquidatorShareBps;
-        uint256 liquidatorShare = totalFee * uint256(liqShareBps) / 10_000;
+        uint256 liquidatorShare = totalFee * uint256(liqShareBps) / BPS;
         uint256 insuranceShare = totalFee - liquidatorShare;
 
-        if (liquidatorShare > 0) {
-            _move(_user, liquidator, liquidatorShare);
-        }
-        if (insuranceShare > 0) {
-            _move(_user, insurance, insuranceShare);
-        }
+        _move(_user, liquidator, liquidatorShare);
+        _move(_user, insurance, insuranceShare);
     }
 
     /// @notice Calculate PnL for a position at a given price
@@ -1309,9 +1305,9 @@ contract HashPowerPerpsDEX is
     /// @param _participant Address of the participant
     /// @param _fee Signed fee amount (positive = participant pays, negative = rebate)
     function _transferFee(address _participant, int256 _fee) private {
-        if (_fee > 0) {
+        if (_fee >= 0) {
             _move(_participant, _insuranceFundAccount(), uint256(_fee));
-        } else if (_fee < 0) {
+        } else {
             _move(_insuranceFundAccount(), _participant, uint256(-_fee));
         }
     }
@@ -1345,7 +1341,7 @@ contract HashPowerPerpsDEX is
         int256 fundingRateScaled = (priceDiff * int256(10 ** FUNDING_DECIMALS)) / int256(indexPrice);
 
         // Clamp to [-maxRate, maxRate]
-        int256 maxRateScaled = (int256(fundingRateMaxBps) * int256(10 ** FUNDING_DECIMALS)) / 10_000;
+        int256 maxRateScaled = (int256(fundingRateMaxBps) * int256(10 ** FUNDING_DECIMALS)) / int256(BPS);
         if (fundingRateScaled > maxRateScaled) fundingRateScaled = maxRateScaled;
         if (fundingRateScaled < -maxRateScaled) fundingRateScaled = -maxRateScaled;
 
@@ -1582,7 +1578,7 @@ contract HashPowerPerpsDEX is
     /// @notice Set the liquidator's share of the liquidation fee in basis points.
     /// @param _bps Share in bps (e.g., 5000 = 50% to liquidator, remainder to insurance fund).
     function setLiquidatorShareBps(uint16 _bps) external onlyOwner {
-        if (_bps > 10_000) revert InvalidMarginPercent();
+        if (_bps > BPS) revert InvalidMarginPercent();
         liquidatorShareBps = _bps;
         emit LiquidatorShareBpsUpdated(_bps);
     }
