@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { network } from "hardhat";
 import { parseUnits } from "viem";
 import { deployPerpsWithCollateralFixture, deployPerpsWithOrdersFixture } from "./fixtures.ts";
+import { TimeInForce } from "../fixtures/timeInForce.ts";
 
 const { viem, networkHelpers } = await network.connect();
 
@@ -19,7 +20,7 @@ async function createOrderAndLogGas(
   account: { address: string },
   matchCount = 0,
 ) {
-  const hash = await perps.write.createOrder(args, { account });
+  const hash = await perps.write.createOrder([...args, TimeInForce.GTC], { account });
   const receipt = await publicClient.waitForTransactionReceipt({ hash });
   const gas = Number(receipt.gasUsed);
   const totalLine = `  ${scenarioName}: ${gas.toLocaleString()} gas`;
@@ -33,7 +34,7 @@ async function createOrderAndLogGas(
 
 async function placeAsksAtPrice(perps: any, seller: any, price: bigint, qty: bigint, count: number) {
   for (let i = 0; i < count; i++) {
-    await perps.write.createOrder([price, -qty], { account: seller.account });
+    await perps.write.createOrder([price, -qty, TimeInForce.GTC], { account: seller.account });
   }
 }
 
@@ -49,7 +50,7 @@ async function placeAsksMultiLevel(
   for (let l = 0; l < levels; l++) {
     const price = marketPrice + BigInt(l + 1) * tick;
     for (let o = 0; o < ordersPerLevel; o++) {
-      await perps.write.createOrder([price, -qty], { account: seller.account });
+      await perps.write.createOrder([price, -qty, TimeInForce.GTC], { account: seller.account });
     }
   }
 }
@@ -91,9 +92,9 @@ describe("Gas: createOrder", function () {
     const tick = config.minimumPriceIncrement;
     const qty = parseUnits("1", config.quantityDecimals);
 
-    await perps.write.createOrder([marketPrice + tick, -qty], { account: seller.account });
-    await perps.write.createOrder([marketPrice + tick, -qty], { account: seller.account });
-    await perps.write.createOrder([marketPrice + tick, -qty], { account: seller.account });
+    await perps.write.createOrder([marketPrice + tick, -qty, TimeInForce.GTC], { account: seller.account });
+    await perps.write.createOrder([marketPrice + tick, -qty, TimeInForce.GTC], { account: seller.account });
+    await perps.write.createOrder([marketPrice + tick, -qty, TimeInForce.GTC], { account: seller.account });
 
     await createOrderAndLogGas(perps, pc, "createOrder_3Matches (one price level)", [marketPrice + tick, qty * 3n], buyer2.account, 3);
 

@@ -5,6 +5,7 @@ import hre, { network } from "hardhat";
 import type { Hex } from "viem";
 import { parseUnits, formatUnits } from "viem";
 import { deployLocalFullStackFixture } from "../tests/fixtures.ts";
+import { TimeInForce } from "../fixtures/timeInForce.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "../..");
@@ -116,16 +117,16 @@ async function main() {
   const tick = config.minimumPriceIncrement;
   const qty = parseUnits("1", config.quantityDecimals);
 
-  await perps.write.createOrder([marketPrice + tick, -3n * qty], { account: seller.account });
-  await perps.write.createOrder([marketPrice + 2n * tick, -2n * qty], { account: seller.account });
-  await perps.write.createOrder([marketPrice + 3n * tick, -qty], { account: seller.account });
+  await perps.write.createOrder([marketPrice + tick, -3n * qty, TimeInForce.GTC], { account: seller.account });
+  await perps.write.createOrder([marketPrice + 2n * tick, -2n * qty, TimeInForce.GTC], { account: seller.account });
+  await perps.write.createOrder([marketPrice + 3n * tick, -qty, TimeInForce.GTC], { account: seller.account });
 
-  await perps.write.createOrder([marketPrice - tick, 3n * qty], { account: buyer.account });
-  await perps.write.createOrder([marketPrice - 2n * tick, 2n * qty], { account: buyer.account });
-  await perps.write.createOrder([marketPrice - 3n * tick, qty], { account: buyer.account });
+  await perps.write.createOrder([marketPrice - tick, 3n * qty, TimeInForce.GTC], { account: buyer.account });
+  await perps.write.createOrder([marketPrice - 2n * tick, 2n * qty, TimeInForce.GTC], { account: buyer.account });
+  await perps.write.createOrder([marketPrice - 3n * tick, qty, TimeInForce.GTC], { account: buyer.account });
 
-  await perps.write.createOrder([marketPrice, -4n * qty], { account: seller.account });
-  await perps.write.createOrder([marketPrice, 4n * qty], { account: buyer.account });
+  await perps.write.createOrder([marketPrice, -4n * qty, TimeInForce.GTC], { account: seller.account });
+  await perps.write.createOrder([marketPrice, 4n * qty, TimeInForce.GTC], { account: buyer.account });
 
   const accountLabels: [string, typeof seller][] = [
     ["Seller", seller],

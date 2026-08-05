@@ -958,18 +958,23 @@ export const OptionMarginEngineAbi = [
           },
           {
             "internalType": "uint256",
-            "name": "perpIM",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint256",
-            "name": "perpMM",
+            "name": "perpOrderMargin",
             "type": "uint256"
           },
           {
             "internalType": "bool",
             "name": "perpIsLiquidatable",
             "type": "bool"
+          },
+          {
+            "internalType": "uint256",
+            "name": "portfolioIM",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "portfolioMM",
+            "type": "uint256"
           }
         ],
         "internalType": "struct OptionMarginEngine.PortfolioOverview",

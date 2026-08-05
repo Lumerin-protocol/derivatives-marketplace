@@ -42,7 +42,7 @@ export async function deployOrderBookFixture(conn: NetworkConnection) {
   const book = await viem.getContractAt("OptionOrderBook", bookProxy.address);
 
   // Owner acts as router for Phase 2 tests
-  await book.write.setRouter([owner.account.address], { account: owner.account });
+  await book.write.setRouter([owner.account.address]);
 
   return { ...data, book };
 }
@@ -101,6 +101,7 @@ async function deployVaultAndPME(
   const vault = await viem.getContractAt("CollateralVault", vaultProxy.address);
 
   const perpsMock = await viem.deployContract("PerpsDEXMock", []);
+  const oracle = await viem.deployContract("PriceOracleMock", [INITIAL_PRICE_E8, ORACLE_DECIMALS]);
 
   const pmeImpl = await viem.deployContract("PortfolioMarginEngine", []);
   const pmeProxy = await viem.deployContract("ERC1967Proxy", [
@@ -112,8 +113,11 @@ async function deployVaultAndPME(
     }),
   ]);
   const pme = await viem.getContractAt("PortfolioMarginEngine", pmeProxy.address);
-  await pme.write.setPerps([perpsMock.address]);
+  // The PME pins each product to its own vault at registration.
+  await perpsMock.write.setVault([vault.address]);
+  await pme.write.addLinearMarket([perpsMock.address]);
   await pme.write.setOptions([engineAddress]);
+  await pme.write.setOracle([oracle.address]);
 
   await vault.write.setMarginEngine([pme.address]);
   await vault.write.setAuthorizedCaller([engineAddress, true]);
@@ -177,11 +181,8 @@ export async function deployMarginEngineFixture(conn: NetworkConnection) {
   ]);
   const engine = await viem.getContractAt("OptionMarginEngine", engineProxy.address);
 
-  // Deploy PME with perps mock
+  // Deploy PME with perps mock; PME reads spot from its own oracle reference.
   const perpsMock = await viem.deployContract("PerpsDEXMock", []);
-  // PME reads spot price from perpsDex.getMarketPrice() — set it to match the oracle
-  // INITIAL_PRICE_E8 = 50000_00000000 (8 dec) → token decimals (6): 50_000_000_000
-  await perpsMock.write.setMarketPrice([50_000_000_000n]);
 
   const pmeImpl = await viem.deployContract("PortfolioMarginEngine", []);
   const pmeProxy = await viem.deployContract("ERC1967Proxy", [
@@ -189,20 +190,24 @@ export async function deployMarginEngineFixture(conn: NetworkConnection) {
     encodeFunctionData({
       abi: pmeImpl.abi,
       functionName: "initialize",
-      args: [vault.address],
+      args: [],
     }),
   ]);
   const pme = await viem.getContractAt("PortfolioMarginEngine", pmeProxy.address);
-  await pme.write.setPerps([perpsMock.address], { account: owner.account });
-  await pme.write.setOptions([engine.address], { account: owner.account });
+  // The PME pins each product to its own vault at registration.
+  await pme.write.setVault([vault.address]);
+  await perpsMock.write.setVault([vault.address]);
+  await pme.write.addLinearMarket([perpsMock.address]);
+  await pme.write.setOptions([engine.address]);
+  await pme.write.setOracle([oracle.address]);
 
   // Wire vault ↔ engine ↔ PME
   await vault.write.setMarginEngine([pme.address]);
   await vault.write.setAuthorizedCaller([engine.address, true]);
-  await engine.write.setPortfolioMargin([pme.address], { account: owner.account });
+  await engine.write.setPortfolioMargin([pme.address]);
 
   // Owner acts as router for Phase 3 tests
-  await engine.write.setRouter([owner.account.address], { account: owner.account });
+  await engine.write.setRouter([owner.account.address]);
 
   // Get wallets for trader accounts
   const wallets = await viem.getWalletClients();
@@ -212,12 +217,12 @@ export async function deployMarginEngineFixture(conn: NetworkConnection) {
   // Transfer USDC and approve the vault (not the engine)
   const topUp = 100_000_000_000n; // 100k USDC (6 decimals)
   for (const w of [trader1, trader2]) {
-    await usdc.write.transfer([w.account.address, topUp], { account: owner.account });
+    await usdc.write.transfer([w.account.address, topUp]);
     const usdcAs = await viem.getContractAt("USDCMock", usdc.address, { client: { wallet: w } });
     await usdcAs.write.approve([vault.address, maxUint256]);
   }
   // Also approve for owner
-  await usdc.write.approve([vault.address, maxUint256], { account: owner.account });
+  await usdc.write.approve([vault.address, maxUint256]);
 
   return { ...data, engine, usdc, oracle, vault, pme, perpsMock, traders: { trader1, trader2 } };
 }
@@ -231,8 +236,7 @@ export const INSURANCE_DEPOSIT = 10_000_000_000n; // 10k USDC (6 dec)
 
 export async function deployMatchingRouterFixture(conn: NetworkConnection) {
   const data = await deployMarginEngineFixture(conn);
-  const { registry, book, engine, accounts, traders, usdc, vault } = data;
-  const { owner } = accounts;
+  const { registry, book, engine,  traders,  vault } = data;
   const { viem } = conn;
 
   const routerImpl = await viem.deployContract("OptionMatchingRouter", []);
@@ -247,8 +251,8 @@ export async function deployMatchingRouterFixture(conn: NetworkConnection) {
   const router = await viem.getContractAt("OptionMatchingRouter", routerProxy.address);
 
   // Set router as the authorized caller on book and engine
-  await book.write.setRouter([router.address], { account: owner.account });
-  await engine.write.setRouter([router.address], { account: owner.account });
+  await book.write.setRouter([router.address]);
+  await engine.write.setRouter([router.address]);
 
   // Fund traders with collateral via vault.deposit (vault is already approved)
   const depositAmount = 50_000_000_000n; // 50k USDC
@@ -325,9 +329,8 @@ export async function deploySettlementFixture(conn: NetworkConnection) {
   ]);
   const engine = await viem.getContractAt("OptionMarginEngine", engineProxy.address);
 
-  // ── PME (with perps mock) ─────────────────────────────────────────────
+  // ── PME (with perps mock; reads spot from its own oracle reference) ────
   const perpsMock = await viem.deployContract("PerpsDEXMock", []);
-  await perpsMock.write.setMarketPrice([50_000_000_000n]);
 
   const pmeImpl = await viem.deployContract("PortfolioMarginEngine", []);
   const pmeProxy = await viem.deployContract("ERC1967Proxy", [
@@ -335,12 +338,16 @@ export async function deploySettlementFixture(conn: NetworkConnection) {
     encodeFunctionData({
       abi: pmeImpl.abi,
       functionName: "initialize",
-      args: [vault.address],
+      args: [],
     }),
   ]);
   const pme = await viem.getContractAt("PortfolioMarginEngine", pmeProxy.address);
-  await pme.write.setPerps([perpsMock.address], { account: owner.account });
-  await pme.write.setOptions([engine.address], { account: owner.account });
+  // The PME pins each product to its own vault at registration.
+  await pme.write.setVault([vault.address]);
+  await perpsMock.write.setVault([vault.address]);
+  await pme.write.addLinearMarket([perpsMock.address]);
+  await pme.write.setOptions([engine.address]);
+  await pme.write.setOracle([oracle.address]);
 
   // ── MatchingRouter ────────────────────────────────────────────────────
   const routerImpl = await viem.deployContract("OptionMatchingRouter", []);
@@ -375,13 +382,13 @@ export async function deploySettlementFixture(conn: NetworkConnection) {
   // ── Wiring ────────────────────────────────────────────────────────────
   await vault.write.setMarginEngine([pme.address]);
   await vault.write.setAuthorizedCaller([engine.address, true]);
-  await engine.write.setPortfolioMargin([pme.address], { account: owner.account });
+  await engine.write.setPortfolioMargin([pme.address]);
 
-  await book.write.setRouter([router.address], { account: owner.account });
-  await engine.write.setRouter([router.address], { account: owner.account });
-  await engine.write.setSettlement([stl.address], { account: owner.account });
-  await engine.write.setLiquidationFeeBps([LIQUIDATION_FEE_BPS], { account: owner.account });
-  await registry.write.setAuthorizedContract([stl.address, true], { account: owner.account });
+  await book.write.setRouter([router.address]);
+  await engine.write.setRouter([router.address]);
+  await engine.write.setSettlement([stl.address]);
+  await engine.write.setLiquidationFeeBps([LIQUIDATION_FEE_BPS]);
+  await registry.write.setAuthorizedContract([stl.address, true]);
 
   // ── Create a series expiring in 7 days ─────────────────────────────────
   const latest = BigInt(await networkHelpers.time.latest());
@@ -410,15 +417,15 @@ export async function deploySettlementFixture(conn: NetworkConnection) {
   const depositAmount = 50_000_000_000n; // 50k USDC deposited into engine
 
   for (const w of [trader1, trader2, trader3]) {
-    await usdc.write.transfer([w.account.address, topUp], { account: owner.account });
+    await usdc.write.transfer([w.account.address, topUp]);
     const usdcAs = await viem.getContractAt("USDCMock", usdc.address, { client: { wallet: w } });
     await usdcAs.write.approve([vault.address, maxUint256]);
     await vault.write.deposit([depositAmount], { account: w.account });
   }
 
   // Owner funds insurance fund directly via the vault
-  await usdc.write.approve([vault.address, maxUint256], { account: owner.account });
-  await vault.write.depositInsuranceFund([INSURANCE_DEPOSIT], { account: owner.account });
+  await usdc.write.approve([vault.address, maxUint256]);
+  await vault.write.depositInsuranceFund([INSURANCE_DEPOSIT]);
 
   return {
     registry,

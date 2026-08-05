@@ -23,6 +23,7 @@ import { network } from "hardhat";
 import { parseEventLogs, parseUnits } from "viem";
 import type { EntityFields } from "matchstick-ts";
 import { deployPerpsFixture } from "../../contracts/tests/fixtures.ts";
+import { TimeInForce } from "../../contracts/fixtures/timeInForce.ts";
 
 const conn = await network.getOrCreate();
 const { matchstick } = conn;
@@ -53,12 +54,12 @@ async function deployPerpsUnderwaterWithRestingOrderFixture(
   await vault.write.deposit([minCollateral * 2n], { account: buyer.account });
 
   // Matched position: seller short / buyer long at initialPrice.
-  await perps.write.createOrder([initialPrice, -qty], { account: seller.account });
-  await perps.write.createOrder([initialPrice, qty], { account: buyer.account });
+  await perps.write.createOrder([initialPrice, -qty, TimeInForce.GTC], { account: seller.account });
+  await perps.write.createOrder([initialPrice, qty, TimeInForce.GTC], { account: buyer.account });
 
   // One resting short for the seller, above the matched price so it doesn't cross.
   const restingQty = parseUnits("0.1", config.quantityDecimals);
-  await perps.write.createOrder([initialPrice + 5n * tick, -restingQty], {
+  await perps.write.createOrder([initialPrice + 5n * tick, -restingQty, TimeInForce.GTC], {
     account: seller.account,
   });
 

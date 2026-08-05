@@ -54,28 +54,30 @@ async function deployPerpsIntegrationFixture(conn: NetworkConnection) {
 
   // ── PerpsDEXMock ──────────────────────────────────────────────────────
   const perpsMock = await v.deployContract("PerpsDEXMock", []);
-  // PME reads spot from perpsDex.getMarketPrice() — set to match oracle
-  await perpsMock.write.setMarketPrice([50_000_000_000n]);
 
-  // ── PME ───────────────────────────────────────────────────────────────
+  // ── PME (reads spot from its own oracle reference) ────────────────────
   const pmeImpl = await v.deployContract("PortfolioMarginEngine", []);
   const pmeProxy = await v.deployContract("ERC1967Proxy", [
     pmeImpl.address as `0x${string}`,
     encodeFunctionData({
       abi: pmeImpl.abi,
       functionName: "initialize",
-      args: [vault.address],
+      args: [],
     }),
   ]);
   const pme = await v.getContractAt("PortfolioMarginEngine", pmeProxy.address);
-  await pme.write.setPerps([perpsMock.address], { account: owner.account });
-  await pme.write.setOptions([engine.address], { account: owner.account });
+  // The PME pins each product to its own vault at registration.
+  await pme.write.setVault([vault.address]);
+  await perpsMock.write.setVault([vault.address]);
+  await pme.write.addLinearMarket([perpsMock.address]);
+  await pme.write.setOptions([engine.address]);
+  await pme.write.setOracle([oracle.address]);
 
   // ── Wiring ────────────────────────────────────────────────────────────
   await vault.write.setMarginEngine([pme.address]);
   await vault.write.setAuthorizedCaller([engine.address, true]);
-  await engine.write.setPortfolioMargin([pme.address], { account: owner.account });
-  await engine.write.setPerpsDex([perpsMock.address], { account: owner.account });
+  await engine.write.setPortfolioMargin([pme.address]);
+  await engine.write.setPerpsDex([perpsMock.address]);
 
   // ── OrderBook + Router ────────────────────────────────────────────────
   const bookImpl = await v.deployContract("OptionOrderBook", []);
@@ -100,8 +102,8 @@ async function deployPerpsIntegrationFixture(conn: NetworkConnection) {
   ]);
   const router = await v.getContractAt("OptionMatchingRouter", routerProxy.address);
 
-  await book.write.setRouter([router.address], { account: owner.account });
-  await engine.write.setRouter([router.address], { account: owner.account });
+  await book.write.setRouter([router.address]);
+  await engine.write.setRouter([router.address]);
 
   // ── Create series ─────────────────────────────────────────────────────
   const latest = BigInt(await nh.time.latest());
@@ -127,7 +129,7 @@ async function deployPerpsIntegrationFixture(conn: NetworkConnection) {
 
   const depositAmount = 50_000_000_000n; // 50k USDC
   for (const w of [trader1, trader2]) {
-    await usdc.write.transfer([w.account.address, depositAmount * 2n], { account: owner.account });
+    await usdc.write.transfer([w.account.address, depositAmount * 2n]);
     const usdcAs = await v.getContractAt("USDCMock", usdc.address, { client: { wallet: w } });
     await usdcAs.write.approve([vault.address, maxUint256]);
     await vault.write.deposit([depositAmount], { account: w.account });
@@ -188,9 +190,9 @@ async function deployNoPerpsFixture(conn: NetworkConnection) {
   ]);
   const engine = await v.getContractAt("OptionMarginEngine", engineProxy.address);
 
-  // PME with a perps mock (no perps linked to engine, but PME is mandatory)
+  // PME with a perps mock (no perps linked to engine, but PME is mandatory);
+  // PME reads spot from its own oracle reference.
   const perpsMock = await v.deployContract("PerpsDEXMock", []);
-  await perpsMock.write.setMarketPrice([50_000_000_000n]);
 
   const pmeImpl = await v.deployContract("PortfolioMarginEngine", []);
   const pmeProxy = await v.deployContract("ERC1967Proxy", [
@@ -198,16 +200,19 @@ async function deployNoPerpsFixture(conn: NetworkConnection) {
     encodeFunctionData({
       abi: pmeImpl.abi,
       functionName: "initialize",
-      args: [vault.address],
+      args: [],
     }),
   ]);
   const pme = await v.getContractAt("PortfolioMarginEngine", pmeProxy.address);
-  await pme.write.setPerps([perpsMock.address], { account: owner.account });
-  await pme.write.setOptions([engine.address], { account: owner.account });
+  await pme.write.setVault([vault.address]);
+  await perpsMock.write.setVault([vault.address]);
+  await pme.write.addLinearMarket([perpsMock.address]);
+  await pme.write.setOptions([engine.address]);
+  await pme.write.setOracle([oracle.address]);
 
   await vault.write.setMarginEngine([pme.address]);
   await vault.write.setAuthorizedCaller([engine.address, true]);
-  await engine.write.setPortfolioMargin([pme.address], { account: owner.account });
+  await engine.write.setPortfolioMargin([pme.address]);
 
   return { engine, traders: { trader1 } };
 }
@@ -279,13 +284,12 @@ describe("Level 1 Perps Integration", () => {
 
       assert.equal(p.perpNetQuantity, 0n);
       assert.equal(p.perpUnrealizedPnl, 0n);
-      assert.equal(p.perpIM, 0n);
-      assert.equal(p.perpMM, 0n);
+      assert.equal(p.perpOrderMargin, 0n);
       assert.equal(p.perpIsLiquidatable, false);
     });
 
     it("returns combined options + perps data", async () => {
-      const { engine, router, perpsMock, traders, seriesId } = await networkHelpers.loadFixture(
+      const { engine, pme, router, perpsMock, traders, seriesId } = await networkHelpers.loadFixture(
         deployPerpsIntegrationFixture,
       );
 
@@ -325,11 +329,10 @@ describe("Level 1 Perps Integration", () => {
       ]);
       await perpsMock.write.setBalance([traders.trader1.account.address, 20_000_000_000n]);
       await perpsMock.write.setUnrealizedPnl([traders.trader1.account.address, 1_500_000_000n]);
-      await perpsMock.write.setMargins([
-        traders.trader1.account.address,
-        5_000_000_000n,
-        3_000_000_000n,
-      ]);
+      // Resting asks on top of an existing short: the sell leg takes the account to
+      // net short 2 lots, so the orders genuinely cost margin.
+      await perpsMock.write.setOrderDeltas([traders.trader1.account.address, 0n, 1_000_000n]);
+      await perpsMock.write.setMaintenanceMargin([traders.trader1.account.address, 3_000_000_000n]);
 
       const p = await engine.read.getPortfolioOverview([traders.trader1.account.address]);
 
@@ -338,8 +341,12 @@ describe("Level 1 Perps Integration", () => {
 
       assert.equal(p.perpNetQuantity, -1_000_000n);
       assert.equal(p.perpUnrealizedPnl, 1_500_000_000n);
-      assert.equal(p.perpIM, 5_000_000_000n);
-      assert.equal(p.perpMM, 3_000_000_000n);
+      // Order margin is now the engine's cross-product figure, not a perps-only scalar.
+      assert.ok(p.perpOrderMargin > 0n);
+      assert.equal(
+        p.perpOrderMargin,
+        await pme.read.orderMarginOf([traders.trader1.account.address]),
+      );
       assert.equal(p.perpIsLiquidatable, false);
     });
 
@@ -353,11 +360,7 @@ describe("Level 1 Perps Integration", () => {
         -5_000_000n,
         50000_000_000n,
       ]);
-      await perpsMock.write.setMargins([
-        traders.trader1.account.address,
-        10_000_000_000n,
-        8_000_000_000n,
-      ]);
+      await perpsMock.write.setMaintenanceMargin([traders.trader1.account.address, 8_000_000_000n]);
 
       const p = await engine.read.getPortfolioOverview([traders.trader1.account.address]);
       assert.equal(p.perpIsLiquidatable, true, "perps should be flagged as liquidatable");

@@ -520,19 +520,16 @@ describe("Liquidation", () => {
     lots: bigint,
     tick: bigint,
   ) {
-    const { engine, oracle, perpsMock, traders } = fx;
+    const { engine, oracle, traders } = fx;
 
     await createShortPosition(fx, lots, tick);
 
-    // Spike oracle to make MM > collateral.
+    // Spike oracle to make MM > collateral. The PME reads the same oracle,
+    // so the spiked spot flows into its stress math automatically.
     // MM ≈ |delta| * F * mmSpotShock (5%) per lot → need lots * F * 0.05 > ~$50k
     // For 1 lot: F > $1M → use $1.2M. For 2+ lots: $600k is sufficient.
     const spikePrice = lots === 1n ? 1200000_00000000n : 600000_00000000n;
     await oracle.write.setPrice([spikePrice, 8]);
-
-    // Sync perpsMock market price so PME reads the spiked spot
-    const mockPrice = lots === 1n ? 1_200_000_000_000n : 600_000_000_000n;
-    await perpsMock.write.setMarketPrice([mockPrice]);
 
     const healthy = await engine.read.isHealthy([traders.trader1.account.address]);
     assert.ok(!healthy, "account should be underwater after price spike");

@@ -73,7 +73,7 @@ export default defineConfig({
       "collateral-margin/contracts/contracts/interfaces/ICollateralVault.sol",
       "collateral-margin/contracts/contracts/interfaces/IPointsHook.sol",
       "collateral-margin/contracts/contracts/interfaces/IPortfolioMarginEngine.sol",
-      "collateral-margin/contracts/contracts/interfaces/IHashPowerPerpsDEX.sol",
+      "collateral-margin/contracts/contracts/interfaces/ILinearMarket.sol",
       "collateral-margin/contracts/contracts/interfaces/IOptionsEnginePortfolioView.sol",
       "collateral-margin/contracts/contracts/mocks/PerpsDEXMock.sol",
       "collateral-margin/contracts/contracts/mocks/OptionsEngineMock.sol",

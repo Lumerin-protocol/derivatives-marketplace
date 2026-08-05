@@ -26,65 +26,8 @@ export const IHashPowerPerpsDEXAbi = [
     "type": "function"
   },
   {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "user",
-        "type": "address"
-      }
-    ],
-    "name": "getInitialMargin",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "user",
-        "type": "address"
-      }
-    ],
-    "name": "getMaintenanceMargin",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
     "inputs": [],
     "name": "getMarketPrice",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "user",
-        "type": "address"
-      }
-    ],
-    "name": "getOrderMargin",
     "outputs": [
       {
         "internalType": "uint256",
@@ -178,6 +121,86 @@ export const IHashPowerPerpsDEXAbi = [
         "internalType": "bool",
         "name": "",
         "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      }
+    ],
+    "name": "getRiskView",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "int256",
+            "name": "netPositionDelta",
+            "type": "int256"
+          },
+          {
+            "internalType": "int256",
+            "name": "unrealizedPnl",
+            "type": "int256"
+          },
+          {
+            "internalType": "int256",
+            "name": "pendingFunding",
+            "type": "int256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "buyOrderDelta",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "sellOrderDelta",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "buyOrderFillLoss",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "sellOrderFillLoss",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct ILinearMarket.RiskView",
+        "name": "view_",
+        "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      }
+    ],
+    "name": "getOrderValues",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "buyValue",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "sellValue",
+        "type": "uint256"
       }
     ],
     "stateMutability": "view",

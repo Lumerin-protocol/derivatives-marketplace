@@ -7,6 +7,7 @@ import {
   deployPerpsWithOrdersFixture,
   deployPerpsWithLiquidatablePositionFixture,
 } from "./fixtures.ts";
+import { TimeInForce } from "../fixtures/timeInForce.ts";
 
 const { viem, networkHelpers } = await network.connect();
 
@@ -23,7 +24,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       const price = marketPrice - config.minimumPriceIncrement;
       const quantity = parseUnits("1", 6);
 
-      await perps.write.createOrder([price, quantity], { account: buyer.account });
+      await perps.write.createOrder([price, quantity, TimeInForce.GTC], { account: buyer.account });
 
       const orders = await perps.read.getUserOrders([buyer.account.address]);
       assert.equal(orders.length, 1);
@@ -45,7 +46,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       const price = marketPrice + config.minimumPriceIncrement;
       const quantity = parseUnits("1", config.quantityDecimals);
 
-      await perps.write.createOrder([price, -quantity], { account: seller.account });
+      await perps.write.createOrder([price, -quantity, TimeInForce.GTC], { account: seller.account });
 
       const orders = await perps.read.getUserOrders([seller.account.address]);
       assert.equal(orders.length, 1);
@@ -65,7 +66,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       const marketPrice = await perps.read.getMarketPrice();
 
       await viem.assertions.revertWithCustomError(
-        perps.write.createOrder([marketPrice, 0n], { account: buyer.account }),
+        perps.write.createOrder([marketPrice, 0n, TimeInForce.GTC], { account: buyer.account }),
         perps,
         "InvalidSize",
       );
@@ -81,7 +82,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       const quantity = parseUnits("1", config.quantityDecimals);
 
       await viem.assertions.revertWithCustomError(
-        perps.write.createOrder([0n, quantity], { account: buyer.account }),
+        perps.write.createOrder([0n, quantity, TimeInForce.GTC], { account: buyer.account }),
         perps,
         "InvalidPrice",
       );
@@ -99,7 +100,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       const quantity = parseUnits("1", config.quantityDecimals);
 
       await viem.assertions.revertWithCustomError(
-        perps.write.createOrder([invalidPrice, quantity], { account: buyer.account }),
+        perps.write.createOrder([invalidPrice, quantity, TimeInForce.GTC], { account: buyer.account }),
         perps,
         "InvalidPrice",
       );
@@ -118,7 +119,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
 
       const buyPrice = marketPrice + 2n * tick;
 
-      const hash = await perps.write.createOrder([buyPrice, qty], { account: buyer2.account });
+      const hash = await perps.write.createOrder([buyPrice, qty, TimeInForce.GTC], { account: buyer2.account });
       const receipt = await pc.waitForTransactionReceipt({ hash });
 
       const [orderMatchedEvent] = parseEventLogs({
@@ -144,7 +145,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       const sellPrice = marketPrice - 2n * tick;
 
       const { buyer2 } = accounts;
-      await perps.write.createOrder([sellPrice, -qty], { account: buyer2.account });
+      await perps.write.createOrder([sellPrice, -qty, TimeInForce.GTC], { account: buyer2.account });
 
       const position = await perps.read.getUserPosition([buyer2.account.address]);
       assert.equal(position.netQuantity, -qty);
@@ -163,7 +164,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       const buyPrice = marketPrice + tick;
       const largeQty = qty * 2n;
 
-      await perps.write.createOrder([buyPrice, largeQty], { account: buyer2.account });
+      await perps.write.createOrder([buyPrice, largeQty, TimeInForce.GTC], { account: buyer2.account });
 
       const position = await perps.read.getUserPosition([buyer2.account.address]);
       assert.equal(position.netQuantity, qty);
@@ -187,7 +188,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       const buyPrice = marketPrice + tick;
       const originalQty = qty * 2n;
 
-      const hash = await perps.write.createOrder([buyPrice, originalQty], {
+      const hash = await perps.write.createOrder([buyPrice, originalQty, TimeInForce.GTC], {
         account: buyer2.account,
       });
       const receipt = await pc.waitForTransactionReceipt({ hash });
@@ -243,12 +244,12 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       const price = marketPrice;
       const qty = parseUnits("1", config.quantityDecimals);
 
-      await perps.write.createOrder([price, qty], { account: buyer.account });
+      await perps.write.createOrder([price, qty, TimeInForce.GTC], { account: buyer.account });
 
       let orders = await perps.read.getUserOrders([buyer.account.address]);
       assert.equal(orders.length, 1);
 
-      await perps.write.createOrder([price, -qty], { account: buyer.account });
+      await perps.write.createOrder([price, -qty, TimeInForce.GTC], { account: buyer.account });
 
       orders = await perps.read.getUserOrders([buyer.account.address]);
       assert.equal(orders.length, 0);
@@ -269,8 +270,8 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       const qty = parseUnits("2", 6);
       const halfQty = parseUnits("1", 6);
 
-      await perps.write.createOrder([price, qty], { account: buyer.account });
-      await perps.write.createOrder([price, -BigInt(halfQty)], { account: buyer.account });
+      await perps.write.createOrder([price, qty, TimeInForce.GTC], { account: buyer.account });
+      await perps.write.createOrder([price, -BigInt(halfQty), TimeInForce.GTC], { account: buyer.account });
 
       const orders = await perps.read.getUserOrders([buyer.account.address]);
       assert.equal(orders.length, 1);
@@ -295,7 +296,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       const quantity = maxQuantity * 2n;
 
       await viem.assertions.revertWithCustomError(
-        perps.write.createOrder([marketPrice, BigInt(quantity)], { account: buyer.account }),
+        perps.write.createOrder([marketPrice, BigInt(quantity), TimeInForce.GTC], { account: buyer.account }),
         perps,
         "InsufficientMargin",
       );
@@ -304,7 +305,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
     it("should allow reduce-only order when margin is tight", async function () {
       const data = await networkHelpers.loadFixture(deployPerpsWithLiquidatablePositionFixture);
       const { contracts, accounts, config } = data;
-      const { perps, priceOracle } = contracts;
+      const { perps, pme, priceOracle } = contracts;
       const { seller } = accounts;
 
       // Move price against the short seller (up) so margin is tight but not liquidatable
@@ -315,7 +316,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
 
       // Verify seller is in the buffer zone: above maintenance (5%) but below initial (10%)
       const balance = await perps.read.balanceOf([seller.account.address]);
-      const maintenanceMargin = await perps.read.getMaintenanceMargin([seller.account.address]);
+      const maintenanceMargin = await pme.read.computePortfolioMM([seller.account.address]);
       assert.ok(balance > maintenanceMargin, "balance should be above maintenance margin");
       assert.ok(
         !(await perps.read.isLiquidatable([seller.account.address])),
@@ -325,7 +326,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       // Closing buy order (reduce-only) should succeed even though a resting order
       // would push total margin above collateral balance
       const closingPrice = config.initialPrice - tick * 10n;
-      await perps.write.createOrder([closingPrice, config.qty], { account: seller.account });
+      await perps.write.createOrder([closingPrice, config.qty, TimeInForce.GTC], { account: seller.account });
 
       const orders = await perps.read.getUserOrders([seller.account.address]);
       assert.equal(orders.length, 1, "closing order should be resting on the book");
@@ -334,7 +335,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
     it("should not become liquidatable after placing a reduce-only order", async function () {
       const data = await networkHelpers.loadFixture(deployPerpsWithLiquidatablePositionFixture);
       const { contracts, accounts, config } = data;
-      const { perps, priceOracle } = contracts;
+      const { perps, pme, priceOracle } = contracts;
       const { seller } = accounts;
 
       // Move price against seller enough that adding a resting closing order's value
@@ -346,7 +347,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
 
       // Verify seller is in the buffer zone and not liquidatable
       const balance = await perps.read.balanceOf([seller.account.address]);
-      const maintenanceMargin = await perps.read.getMaintenanceMargin([seller.account.address]);
+      const maintenanceMargin = await pme.read.computePortfolioMM([seller.account.address]);
       assert.ok(balance > maintenanceMargin, "balance should be above maintenance margin");
       assert.ok(
         !(await perps.read.isLiquidatable([seller.account.address])),
@@ -355,7 +356,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
 
       // Place a reduce-only closing order at a price that will rest
       const closingPrice = config.initialPrice - tick * 10n;
-      await perps.write.createOrder([closingPrice, config.qty], { account: seller.account });
+      await perps.write.createOrder([closingPrice, config.qty, TimeInForce.GTC], { account: seller.account });
 
       // The resting closing order should NOT push the user into liquidation
       assert.ok(
@@ -367,7 +368,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
     it("should reject position-increasing order when margin is tight", async function () {
       const data = await networkHelpers.loadFixture(deployPerpsWithLiquidatablePositionFixture);
       const { contracts, accounts, config } = data;
-      const { perps, priceOracle } = contracts;
+      const { perps, pme, priceOracle } = contracts;
       const { seller } = accounts;
 
       const tick = config.minimumPriceIncrement;
@@ -377,7 +378,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
 
       // Verify seller is in the buffer zone: above maintenance (5%) but below initial (10%)
       const balance = await perps.read.balanceOf([seller.account.address]);
-      const maintenanceMargin = await perps.read.getMaintenanceMargin([seller.account.address]);
+      const maintenanceMargin = await pme.read.computePortfolioMM([seller.account.address]);
       assert.ok(balance > maintenanceMargin, "balance should be above maintenance margin");
       assert.ok(
         !(await perps.read.isLiquidatable([seller.account.address])),
@@ -386,7 +387,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
 
       // Adding to short position should fail — same side, not reduce-only
       await viem.assertions.revertWithCustomError(
-        perps.write.createOrder([newPrice + tick, -config.qty], { account: seller.account }),
+        perps.write.createOrder([newPrice + tick, -config.qty, TimeInForce.GTC], { account: seller.account }),
         perps,
         "InsufficientMargin",
       );
@@ -395,7 +396,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
     it("should reject order exceeding position size even if opposite side", async function () {
       const data = await networkHelpers.loadFixture(deployPerpsWithLiquidatablePositionFixture);
       const { contracts, accounts, config } = data;
-      const { perps, priceOracle } = contracts;
+      const { perps, pme, priceOracle } = contracts;
       const { seller } = accounts;
 
       const tick = config.minimumPriceIncrement;
@@ -405,7 +406,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
 
       // Verify seller is in the buffer zone: above maintenance (5%) but below initial (10%)
       const balance = await perps.read.balanceOf([seller.account.address]);
-      const maintenanceMargin = await perps.read.getMaintenanceMargin([seller.account.address]);
+      const maintenanceMargin = await pme.read.computePortfolioMM([seller.account.address]);
       assert.ok(balance > maintenanceMargin, "balance should be above maintenance margin");
       assert.ok(
         !(await perps.read.isLiquidatable([seller.account.address])),
@@ -415,7 +416,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       // Buy order larger than position — would flip to long, not reduce-only
       const closingPrice = config.initialPrice - tick * 10n;
       await viem.assertions.revertWithCustomError(
-        perps.write.createOrder([closingPrice, config.qty * 2n], { account: seller.account }),
+        perps.write.createOrder([closingPrice, config.qty * 2n, TimeInForce.GTC], { account: seller.account }),
         perps,
         "InsufficientMargin",
       );
@@ -435,7 +436,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       const quantity = parseUnits("1", 6);
 
       await perps.write.createOrder(
-        [marketPrice - config.minimumPriceIncrement, BigInt(quantity)],
+        [marketPrice - config.minimumPriceIncrement, BigInt(quantity), TimeInForce.GTC],
         { account: buyer.account },
       );
 
@@ -443,7 +444,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       assert.equal(balanceBefore - balanceAfter, 0n);
     });
 
-    it("should charge taker fee on match with liquidationFee as floor", async function () {
+    it("should charge taker fee on match", async function () {
       const { contracts, accounts, config } = await networkHelpers.loadFixture(
         deployPerpsWithCollateralFixture,
       );
@@ -453,11 +454,11 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       const marketPrice = await perps.read.getMarketPrice();
       const quantity = parseUnits("1", config.quantityDecimals);
 
-      await perps.write.createOrder([marketPrice, -quantity], { account: seller.account });
+      await perps.write.createOrder([marketPrice, -quantity, TimeInForce.GTC], { account: seller.account });
 
       const balanceBefore = await perps.read.balanceOf([buyer.account.address]);
 
-      await perps.write.createOrder([marketPrice, quantity], { account: buyer.account });
+      await perps.write.createOrder([marketPrice, quantity, TimeInForce.GTC], { account: buyer.account });
 
       const balanceAfter = await perps.read.balanceOf([buyer.account.address]);
       const notionalValue = (marketPrice * quantity) / 10n ** BigInt(config.quantityDecimals);
@@ -480,11 +481,11 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       await perps.write.setMakerFeeBps([feeBps], { account: owner.account });
       await perps.write.setTakerFeeBps([feeBps], { account: owner.account });
 
-      await perps.write.createOrder([marketPrice, -quantity], { account: seller.account });
+      await perps.write.createOrder([marketPrice, -quantity, TimeInForce.GTC], { account: seller.account });
 
       const sellerBalanceBefore = await perps.read.balanceOf([seller.account.address]);
 
-      await perps.write.createOrder([marketPrice, quantity], { account: buyer.account });
+      await perps.write.createOrder([marketPrice, quantity, TimeInForce.GTC], { account: buyer.account });
 
       const sellerBalanceAfter = await perps.read.balanceOf([seller.account.address]);
 
@@ -505,13 +506,13 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       const quantity = parseUnits("0.01", 6);
 
       for (let i = 1; i <= 100; i++) {
-        await perps.write.createOrder([marketPrice - BigInt(i) * tick, BigInt(quantity)], {
+        await perps.write.createOrder([marketPrice - BigInt(i) * tick, BigInt(quantity), TimeInForce.GTC], {
           account: buyer.account,
         });
       }
 
       await viem.assertions.revertWithCustomError(
-        perps.write.createOrder([marketPrice - 101n * tick, BigInt(quantity)], {
+        perps.write.createOrder([marketPrice - 101n * tick, BigInt(quantity), TimeInForce.GTC], {
           account: buyer.account,
         }),
         perps,

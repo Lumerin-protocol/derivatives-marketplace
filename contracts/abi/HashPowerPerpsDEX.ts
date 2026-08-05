@@ -64,6 +64,16 @@ export const HashPowerPerpsDEXAbi = [
   },
   {
     "inputs": [],
+    "name": "InvalidDependency",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidFee",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "InvalidFundingParameters",
     "type": "error"
   },
@@ -214,6 +224,16 @@ export const HashPowerPerpsDEXAbi = [
       }
     ],
     "name": "UUPSUnsupportedProxiableUUID",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "VaultMismatch",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ZeroAddress",
     "type": "error"
   },
   {
@@ -816,6 +836,11 @@ export const HashPowerPerpsDEXAbi = [
         "internalType": "int256",
         "name": "_quantity",
         "type": "int256"
+      },
+      {
+        "internalType": "enum HashPowerPerpsDEXBase.TimeInForce",
+        "name": "_tif",
+        "type": "uint8"
       }
     ],
     "name": "createOrder",
@@ -826,29 +851,6 @@ export const HashPowerPerpsDEXAbi = [
   {
     "inputs": [
       {
-        "internalType": "uint256",
-        "name": "_price",
-        "type": "uint256"
-      },
-      {
-        "internalType": "int256",
-        "name": "_quantity",
-        "type": "int256"
-      },
-      {
-        "internalType": "enum HashPowerPerpsDEX.TimeInForce",
-        "name": "_tif",
-        "type": "uint8"
-      }
-    ],
-    "name": "createOrderV2",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
         "components": [
           {
             "internalType": "uint256",
@@ -859,44 +861,19 @@ export const HashPowerPerpsDEXAbi = [
             "internalType": "int256",
             "name": "quantity",
             "type": "int256"
+          },
+          {
+            "internalType": "enum HashPowerPerpsDEXBase.TimeInForce",
+            "name": "timeInForce",
+            "type": "uint8"
           }
         ],
-        "internalType": "struct HashPowerPerpsDEX.OrderIntent[]",
+        "internalType": "struct HashPowerPerpsDEXBase.OrderIntent[]",
         "name": "_intents",
         "type": "tuple[]"
       }
     ],
     "name": "createOrders",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "components": [
-          {
-            "internalType": "uint256",
-            "name": "price",
-            "type": "uint256"
-          },
-          {
-            "internalType": "int256",
-            "name": "quantity",
-            "type": "int256"
-          },
-          {
-            "internalType": "enum HashPowerPerpsDEX.TimeInForce",
-            "name": "timeInForce",
-            "type": "uint8"
-          }
-        ],
-        "internalType": "struct HashPowerPerpsDEX.OrderIntentV2[]",
-        "name": "_intents",
-        "type": "tuple[]"
-      }
-    ],
-    "name": "createOrdersV2",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -909,19 +886,6 @@ export const HashPowerPerpsDEXAbi = [
         "internalType": "int256",
         "name": "",
         "type": "int256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "decimals",
-    "outputs": [
-      {
-        "internalType": "uint8",
-        "name": "",
-        "type": "uint8"
       }
     ],
     "stateMutability": "view",
@@ -980,44 +944,6 @@ export const HashPowerPerpsDEXAbi = [
     "type": "function"
   },
   {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "_user",
-        "type": "address"
-      }
-    ],
-    "name": "getInitialMargin",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "_user",
-        "type": "address"
-      }
-    ],
-    "name": "getMaintenanceMargin",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
     "inputs": [],
     "name": "getMarketPrice",
     "outputs": [
@@ -1025,6 +951,25 @@ export const HashPowerPerpsDEXAbi = [
         "internalType": "uint256",
         "name": "",
         "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      }
+    ],
+    "name": "getNetPositionDelta",
+    "outputs": [
+      {
+        "internalType": "int256",
+        "name": "",
+        "type": "int256"
       }
     ],
     "stateMutability": "view",
@@ -1058,7 +1003,7 @@ export const HashPowerPerpsDEXAbi = [
             "type": "int256"
           }
         ],
-        "internalType": "struct HashPowerPerpsDEX.Order",
+        "internalType": "struct HashPowerPerpsDEXBase.Order",
         "name": "",
         "type": "tuple"
       }
@@ -1098,11 +1043,16 @@ export const HashPowerPerpsDEXAbi = [
         "type": "address"
       }
     ],
-    "name": "getOrderMargin",
+    "name": "getOrderValues",
     "outputs": [
       {
         "internalType": "uint256",
-        "name": "",
+        "name": "buyValue",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "sellValue",
         "type": "uint256"
       }
     ],
@@ -1160,12 +1110,49 @@ export const HashPowerPerpsDEXAbi = [
         "type": "address"
       }
     ],
-    "name": "getRequiredMargin",
+    "name": "getRiskView",
     "outputs": [
       {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
+        "components": [
+          {
+            "internalType": "int256",
+            "name": "netPositionDelta",
+            "type": "int256"
+          },
+          {
+            "internalType": "int256",
+            "name": "unrealizedPnl",
+            "type": "int256"
+          },
+          {
+            "internalType": "int256",
+            "name": "pendingFunding",
+            "type": "int256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "buyOrderDelta",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "sellOrderDelta",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "buyOrderFillLoss",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "sellOrderFillLoss",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct ILinearMarket.RiskView",
+        "name": "view_",
+        "type": "tuple"
       }
     ],
     "stateMutability": "view",
@@ -1232,7 +1219,7 @@ export const HashPowerPerpsDEXAbi = [
             "type": "uint256"
           }
         ],
-        "internalType": "struct HashPowerPerpsDEX.Position",
+        "internalType": "struct HashPowerPerpsDEXBase.Position",
         "name": "",
         "type": "tuple"
       }
@@ -1789,7 +1776,7 @@ export const HashPowerPerpsDEXAbi = [
             "type": "int256"
           }
         ],
-        "internalType": "struct HashPowerPerpsDEX.ReduceIntent[]",
+        "internalType": "struct HashPowerPerpsDEXBase.ReduceIntent[]",
         "name": "_reduces",
         "type": "tuple[]"
       },
@@ -1804,9 +1791,14 @@ export const HashPowerPerpsDEXAbi = [
             "internalType": "int256",
             "name": "quantity",
             "type": "int256"
+          },
+          {
+            "internalType": "enum HashPowerPerpsDEXBase.TimeInForce",
+            "name": "timeInForce",
+            "type": "uint8"
           }
         ],
-        "internalType": "struct HashPowerPerpsDEX.OrderIntent[]",
+        "internalType": "struct HashPowerPerpsDEXBase.OrderIntent[]",
         "name": "_intents",
         "type": "tuple[]"
       }

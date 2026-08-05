@@ -10,7 +10,7 @@ import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableS
 
 import { AggregatorV3Interface } from "./interfaces/AggregatorV3Interface.sol";
 import { OptionMarketRegistry } from "./OptionMarketRegistry.sol";
-import { IHashPowerPerpsDEX } from "collateral-margin/contracts/contracts/interfaces/IHashPowerPerpsDEX.sol";
+import { HashPowerPerpsDEX } from "./HashPowerPerpsDEX.sol";
 import { ICollateralVault } from "collateral-margin/contracts/contracts/interfaces/ICollateralVault.sol";
 import { IOptionsEnginePortfolioView } from "collateral-margin/contracts/contracts/interfaces/IOptionsEnginePortfolioView.sol";
 import { IPortfolioMarginEngine } from "collateral-margin/contracts/contracts/interfaces/IPortfolioMarginEngine.sol";
@@ -40,6 +40,12 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
         uint64 lastTradeBlock;
     }
 
+    /// @dev Second home for risk knobs the `PortfolioMarginEngine` also owns: it holds
+    ///      `imSpotShock`/`mmSpotShock` as WAD fractions, this holds the same two shocks
+    ///      in bps, and the defaults below disagree with the engine's (15%/10% here vs
+    ///      10%/5% there). Nothing keeps them in sync, so raising the shock on the engine
+    ///      leaves options unchanged. Unify when options goes live — see the note on
+    ///      `PortfolioMarginEngine.linearOrderMargin`.
     struct MarginConfig {
         uint16 imSpotShockBps; // e.g., 1500 = 15%
         uint16 mmSpotShockBps; // e.g., 1000 = 10%
@@ -114,7 +120,7 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     uint256 private _deprecatedInsuranceFundWadSlot;
 
     // Phase 6: Level 1 perps integration (read-only awareness)
-    IHashPowerPerpsDEX public perpsDex; // optional, address(0) if not linked
+    HashPowerPerpsDEX public perpsDex; // optional, address(0) if not linked
 
     // Level 2: Unified collateral vault
     ICollateralVault public vault;
@@ -206,7 +212,7 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
 
     /// @notice Link to the perps DEX for Level 1 shared collateral awareness.
     function setPerpsDex(address _perpsDex) external onlyOwner {
-        perpsDex = IHashPowerPerpsDEX(_perpsDex);
+        perpsDex = HashPowerPerpsDEX(_perpsDex);
         emit PerpsDexUpdated(_perpsDex);
     }
 
@@ -480,26 +486,39 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
         // Perps (zero when perpsDex not linked)
         int256 perpNetQuantity; // QUANTITY_DECIMALS (6)
         int256 perpUnrealizedPnl; // perp token decimals
-        uint256 perpIM; // perp token decimals
-        uint256 perpMM; // perp token decimals
+        /// @dev Portfolio-wide, not perps-only: the incremental IM the account's resting
+        ///      orders cost at every registered venue. Order margin stopped being
+        ///      attributable to a single venue when the engine took over netting order
+        ///      delta across products. Zero when portfolioMargin is not linked.
+        uint256 perpOrderMargin; // token decimals
         bool perpIsLiquidatable;
+        // Cross-product requirement — the only figure margin calls are made against
+        uint256 portfolioIM; // token decimals
+        uint256 portfolioMM; // token decimals
     }
 
     /// @notice Combined read of a user's options + perps positions and risk metrics.
-    ///         Returns zeros for perp fields if perpsDex is not linked.
+    ///         Returns zeros for perp fields if perpsDex is not linked, and for the
+    ///         portfolio fields if portfolioMargin is not linked.
+    /// @dev `optionsIM`/`optionsMM` and the perp fields are per-leg breakdowns for display.
+    ///      Solvency is decided by `portfolioIM`/`portfolioMM`, which nets delta across legs
+    ///      and is therefore not the sum of the parts.
     function getPortfolioOverview(address user) external view returns (PortfolioOverview memory p) {
         p.optionsCollateral = _userBalance(user);
         p.optionsIM = computeAccountIM(user);
         p.optionsMM = computeAccountMM(user);
         p.optionsReserved = _reservedMargin[user];
         p.activeSeriesCount = _userActiveSeries[user].length();
+        if (address(portfolioMargin) != address(0)) {
+            p.portfolioIM = portfolioMargin.computePortfolioIM(user);
+            p.portfolioMM = portfolioMargin.computePortfolioMM(user);
+            p.perpOrderMargin = portfolioMargin.orderMarginOf(user);
+        }
 
         if (address(perpsDex) != address(0)) {
-            IHashPowerPerpsDEX.Position memory pos = perpsDex.getUserPosition(user);
+            HashPowerPerpsDEX.Position memory pos = perpsDex.getUserPosition(user);
             p.perpNetQuantity = pos.netQuantity;
             p.perpUnrealizedPnl = perpsDex.getUnrealizedPnl(user);
-            p.perpIM = perpsDex.getInitialMargin(user);
-            p.perpMM = perpsDex.getMaintenanceMargin(user);
             p.perpIsLiquidatable = perpsDex.isLiquidatable(user);
         }
     }
@@ -507,7 +526,7 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     /// @notice Read a user's perp position (convenience wrapper).
     function getPerpPosition(address user) external view returns (int256 netQuantity, uint256 avgEntryPrice) {
         if (address(perpsDex) == address(0)) return (0, 0);
-        IHashPowerPerpsDEX.Position memory pos = perpsDex.getUserPosition(user);
+        HashPowerPerpsDEX.Position memory pos = perpsDex.getUserPosition(user);
         return (pos.netQuantity, pos.aggregatedEntryPrice);
     }
 

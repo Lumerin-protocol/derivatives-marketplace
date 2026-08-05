@@ -3,12 +3,14 @@ import assert from "node:assert/strict";
 import { network } from "hardhat";
 import { encodeFunctionData, getAddress, parseEventLogs, parseUnits } from "viem";
 import { deployPerpsWithCollateralFixture } from "./fixtures.ts";
+import { TimeInForce } from "../fixtures/timeInForce.ts";
 
 const { networkHelpers } = await network.connect();
 
 type OrderIntent = {
   price: bigint;
   quantity: bigint;
+  timeInForce: number;
 };
 
 describe("HashPowerPerpsDEX.createOrders (batch placement)", function () {
@@ -44,9 +46,9 @@ describe("HashPowerPerpsDEX.createOrders (batch placement)", function () {
     const qty = parseUnits("1", config.quantityDecimals);
 
     const intents: OrderIntent[] = [
-      { price: marketPrice - step, quantity: qty },
-      { price: marketPrice - 2n * step, quantity: qty },
-      { price: marketPrice - 3n * step, quantity: qty },
+      { price: marketPrice - step, quantity: qty, timeInForce: TimeInForce.GTC },
+      { price: marketPrice - 2n * step, quantity: qty, timeInForce: TimeInForce.GTC },
+      { price: marketPrice - 3n * step, quantity: qty, timeInForce: TimeInForce.GTC },
     ];
 
     const tx = await perps.write.createOrders([intents], { account: buyer.account });
@@ -85,7 +87,7 @@ describe("HashPowerPerpsDEX.createOrders (batch placement)", function () {
         encodeFunctionData({
           abi: perps.abi,
           functionName: "createOrder",
-          args: [marketPrice + BigInt(i + 1) * step, -qty],
+          args: [marketPrice + BigInt(i + 1) * step, -qty, TimeInForce.GTC],
         }),
       );
     }
@@ -99,6 +101,7 @@ describe("HashPowerPerpsDEX.createOrders (batch placement)", function () {
       intents.push({
         price: marketPrice - BigInt(i + 1) * step,
         quantity: qty,
+        timeInForce: TimeInForce.GTC,
       });
     }
     const batchTx = await perps.write.createOrders([intents], { account: buyer.account });

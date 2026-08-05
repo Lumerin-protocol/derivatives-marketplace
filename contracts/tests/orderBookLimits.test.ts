@@ -4,6 +4,7 @@ import { network } from "hardhat";
 import { parseUnits } from "viem";
 import { deployPerpsWithCollateralFixture } from "./fixtures.ts";
 import { catchError } from "../lib/lib.ts";
+import { TimeInForce } from "../fixtures/timeInForce.ts";
 
 const { viem, networkHelpers } = await network.connect();
 
@@ -45,7 +46,7 @@ describe("HashPowerPerpsDEX - Order Book Limits", function () {
       const tinyQty = parseUnits("1", config.quantityDecimals);
 
       await catchError(perps.abi, "OrderMarginTooLow", async () => {
-        await perps.write.createOrder([price, tinyQty], { account: buyer.account });
+        await perps.write.createOrder([price, tinyQty, TimeInForce.GTC], { account: buyer.account });
       });
     });
 
@@ -61,7 +62,7 @@ describe("HashPowerPerpsDEX - Order Book Limits", function () {
       await perps.write.setMinimumMarginPerOrder([minMargin], { account: owner.account });
 
       const qty = parseUnits("2", config.quantityDecimals);
-      await perps.write.createOrder([price, qty], { account: buyer.account });
+      await perps.write.createOrder([price, qty, TimeInForce.GTC], { account: buyer.account });
 
       const orders = await perps.read.getUserOrders([buyer.account.address]);
       assert.equal(orders.length, 1);
@@ -75,12 +76,12 @@ describe("HashPowerPerpsDEX - Order Book Limits", function () {
       const marketPrice = await perps.read.getMarketPrice();
       const qty1 = parseUnits("1", config.quantityDecimals);
 
-      await perps.write.createOrder([marketPrice, -qty1], { account: seller.account });
+      await perps.write.createOrder([marketPrice, -qty1, TimeInForce.GTC], { account: seller.account });
 
       const minMargin = parseUnits("5", config.tokenDecimals);
       await perps.write.setMinimumMarginPerOrder([minMargin], { account: owner.account });
 
-      await perps.write.createOrder([marketPrice, qty1], { account: buyer.account });
+      await perps.write.createOrder([marketPrice, qty1, TimeInForce.GTC], { account: buyer.account });
 
       const posBuyer = await perps.read.getUserPosition([buyer.account.address]);
       assert.equal(posBuyer.netQuantity, qty1);
@@ -97,12 +98,12 @@ describe("HashPowerPerpsDEX - Order Book Limits", function () {
       await perps.write.setMinimumMarginPerOrder([minMargin], { account: owner.account });
 
       const qty2 = parseUnits("2", config.quantityDecimals);
-      await perps.write.createOrder([marketPrice, -qty2], { account: seller.account });
+      await perps.write.createOrder([marketPrice, -qty2, TimeInForce.GTC], { account: seller.account });
 
       const qty3 = parseUnits("3", config.quantityDecimals);
 
       await catchError(perps.abi, "OrderMarginTooLow", async () => {
-        await perps.write.createOrder([marketPrice, qty3], { account: buyer.account });
+        await perps.write.createOrder([marketPrice, qty3, TimeInForce.GTC], { account: buyer.account });
       });
     });
 
@@ -117,7 +118,7 @@ describe("HashPowerPerpsDEX - Order Book Limits", function () {
       assert.equal(await perps.read.minimumMarginPerOrder(), 0n);
 
       const tinyQty = parseUnits("0.001", config.quantityDecimals);
-      await perps.write.createOrder([price, tinyQty], { account: buyer.account });
+      await perps.write.createOrder([price, tinyQty, TimeInForce.GTC], { account: buyer.account });
 
       const orders = await perps.read.getUserOrders([buyer.account.address]);
       assert.equal(orders.length, 1);
@@ -150,7 +151,7 @@ describe("HashPowerPerpsDEX - Order Book Limits", function () {
 
       const tinyQty = parseUnits("1", config.quantityDecimals);
       await catchError(perps.abi, "OrderMarginTooLow", async () => {
-        await perps.write.createOrder([price, tinyQty], { account: buyer.account });
+        await perps.write.createOrder([price, tinyQty, TimeInForce.GTC], { account: buyer.account });
       });
     });
   });
@@ -173,17 +174,17 @@ describe("HashPowerPerpsDEX - Order Book Limits", function () {
       const qty = parseUnits("0.01", config.quantityDecimals);
 
       for (let i = 1; i <= 100; i++) {
-        await perps.write.createOrder([marketPrice - BigInt(i) * tick, qty], { account: buyer.account });
+        await perps.write.createOrder([marketPrice - BigInt(i) * tick, qty, TimeInForce.GTC], { account: buyer.account });
       }
       for (let i = 101; i <= 200; i++) {
-        await perps.write.createOrder([marketPrice - BigInt(i) * tick, qty], { account: buyer2.account });
+        await perps.write.createOrder([marketPrice - BigInt(i) * tick, qty, TimeInForce.GTC], { account: buyer2.account });
       }
 
       await catchError(perps.abi, "MaxPriceLevelsReached", async () => {
-        await perps.write.createOrder([marketPrice - 201n * tick, qty], { account: seller.account });
+        await perps.write.createOrder([marketPrice - 201n * tick, qty, TimeInForce.GTC], { account: seller.account });
       });
 
-      await perps.write.createOrder([marketPrice - tick, qty], { account: seller.account });
+      await perps.write.createOrder([marketPrice - tick, qty, TimeInForce.GTC], { account: seller.account });
     });
 
     it("should allow new price level after cancellation frees a slot", async function () {
@@ -196,16 +197,16 @@ describe("HashPowerPerpsDEX - Order Book Limits", function () {
       const qty = parseUnits("0.01", config.quantityDecimals);
 
       for (let i = 1; i <= 100; i++) {
-        await perps.write.createOrder([marketPrice - BigInt(i) * tick, qty], { account: buyer.account });
+        await perps.write.createOrder([marketPrice - BigInt(i) * tick, qty, TimeInForce.GTC], { account: buyer.account });
       }
       for (let i = 101; i <= 200; i++) {
-        await perps.write.createOrder([marketPrice - BigInt(i) * tick, qty], { account: buyer2.account });
+        await perps.write.createOrder([marketPrice - BigInt(i) * tick, qty, TimeInForce.GTC], { account: buyer2.account });
       }
 
       const orders = await perps.read.getUserOrders([buyer.account.address]);
       await perps.write.cancelOrder([orders[0]], { account: buyer.account });
 
-      await perps.write.createOrder([marketPrice - 201n * tick, qty], { account: seller.account });
+      await perps.write.createOrder([marketPrice - 201n * tick, qty, TimeInForce.GTC], { account: seller.account });
     });
 
     it("should enforce cap independently per side (bids vs asks)", async function () {
@@ -218,8 +219,8 @@ describe("HashPowerPerpsDEX - Order Book Limits", function () {
       const qty = parseUnits("0.01", config.quantityDecimals);
 
       for (let i = 1; i <= 20; i++) {
-        await perps.write.createOrder([marketPrice - BigInt(i) * tick, qty], { account: buyer.account });
-        await perps.write.createOrder([marketPrice + BigInt(i) * tick, -qty], { account: seller.account });
+        await perps.write.createOrder([marketPrice - BigInt(i) * tick, qty, TimeInForce.GTC], { account: buyer.account });
+        await perps.write.createOrder([marketPrice + BigInt(i) * tick, -qty, TimeInForce.GTC], { account: seller.account });
       }
 
       const ordersBuyer = await perps.read.getUserOrders([buyer.account.address]);

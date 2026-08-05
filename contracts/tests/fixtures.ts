@@ -25,6 +25,7 @@ import {
   SETTLEMENT_WINDOW,
 } from "./optionsFixtures.ts";
 import { computeExpectedFunding as _computeExpectedFunding } from "./utils.ts";
+import { TimeInForce } from "../fixtures/timeInForce.ts";
 
 type Conn = NetworkConnection;
 
@@ -211,7 +212,7 @@ export async function deployPerpsFixture(conn: Conn) {
       encodeFunctionData({
         abi: pmeImpl.abi,
         functionName: "initialize",
-        args: [vault.address],
+        args: [],
       }),
     ],
   );
@@ -220,8 +221,12 @@ export async function deployPerpsFixture(conn: Conn) {
     address: pmeProxy.address,
     client: { public: pc, wallet: owner },
   });
-  await pme.write.setPerps([perps.address]);
+  // The PME pins each product to its own vault at registration.
+  await pme.write.setVault([vault.address]);
+  await optionsMock.write.setVault([vault.address]);
+  await pme.write.addLinearMarket([perps.address]);
   await pme.write.setOptions([optionsMock.address]);
+  await pme.write.setOracle([priceOracle.address]);
 
   // Wire vault ↔ perps ↔ PME
   await vault.write.setMarginEngine([pme.address]);
@@ -290,12 +295,12 @@ export async function deployPerpsWithOrdersFixture(conn: Conn) {
   const tick = config.minimumPriceIncrement;
   const qty = parseUnits("1", config.quantityDecimals);
 
-  await perps.write.createOrder([marketPrice + tick, -qty], { account: seller.account });
-  await perps.write.createOrder([marketPrice + 2n * tick, -qty], { account: seller.account });
-  await perps.write.createOrder([marketPrice + 3n * tick, -qty], { account: seller.account });
-  await perps.write.createOrder([marketPrice - tick, qty], { account: buyer.account });
-  await perps.write.createOrder([marketPrice - 2n * tick, qty], { account: buyer.account });
-  await perps.write.createOrder([marketPrice - 3n * tick, qty], { account: buyer.account });
+  await perps.write.createOrder([marketPrice + tick, -qty, TimeInForce.GTC], { account: seller.account });
+  await perps.write.createOrder([marketPrice + 2n * tick, -qty, TimeInForce.GTC], { account: seller.account });
+  await perps.write.createOrder([marketPrice + 3n * tick, -qty, TimeInForce.GTC], { account: seller.account });
+  await perps.write.createOrder([marketPrice - tick, qty, TimeInForce.GTC], { account: buyer.account });
+  await perps.write.createOrder([marketPrice - 2n * tick, qty, TimeInForce.GTC], { account: buyer.account });
+  await perps.write.createOrder([marketPrice - 3n * tick, qty, TimeInForce.GTC], { account: buyer.account });
 
   return { ...data, config: { ...config, marketPrice, qty } };
 }
@@ -309,8 +314,8 @@ export async function deployPerpsWithPositionsFixture(conn: Conn) {
   const marketPrice = await perps.read.getMarketPrice();
   const qty = parseUnits("1", config.quantityDecimals);
 
-  await perps.write.createOrder([marketPrice, -qty], { account: seller.account });
-  await perps.write.createOrder([marketPrice, qty], { account: buyer.account });
+  await perps.write.createOrder([marketPrice, -qty, TimeInForce.GTC], { account: seller.account });
+  await perps.write.createOrder([marketPrice, qty, TimeInForce.GTC], { account: buyer.account });
 
   return { ...data, config: { ...config, marketPrice, qty } };
 }
@@ -327,8 +332,8 @@ export async function deployPerpsWithLiquidatablePositionFixture(conn: Conn) {
 
   await vault.write.deposit([minCollateral], { account: seller.account });
   await vault.write.deposit([minCollateral * 2n], { account: buyer.account });
-  await perps.write.createOrder([initialPrice, -qty], { account: seller.account });
-  await perps.write.createOrder([initialPrice, qty], { account: buyer.account });
+  await perps.write.createOrder([initialPrice, -qty, TimeInForce.GTC], { account: seller.account });
+  await perps.write.createOrder([initialPrice, qty, TimeInForce.GTC], { account: buyer.account });
 
   return {
     ...data,
@@ -356,9 +361,9 @@ export async function deployPerpsWithBatchLiquidatableFixture(conn: Conn) {
   await vault.write.deposit([minCollateral], { account: seller2.account });
   await vault.write.deposit([minCollateral * 3n], { account: buyer.account });
 
-  await perps.write.createOrder([initialPrice, -qty], { account: seller.account });
-  await perps.write.createOrder([initialPrice, -qty], { account: seller2.account });
-  await perps.write.createOrder([initialPrice, qty * 2n], { account: buyer.account });
+  await perps.write.createOrder([initialPrice, -qty, TimeInForce.GTC], { account: seller.account });
+  await perps.write.createOrder([initialPrice, -qty, TimeInForce.GTC], { account: seller2.account });
+  await perps.write.createOrder([initialPrice, qty * 2n, TimeInForce.GTC], { account: buyer.account });
 
   return {
     ...data,
@@ -420,8 +425,8 @@ export async function deployPerpsWithFundingAndPositionsFixture(conn: Conn) {
   const marketPrice = await perps.read.getMarketPrice();
   const qty = parseUnits("10", config.quantityDecimals);
 
-  await perps.write.createOrder([marketPrice, -qty], { account: seller.account });
-  await perps.write.createOrder([marketPrice, qty], { account: buyer.account });
+  await perps.write.createOrder([marketPrice, -qty, TimeInForce.GTC], { account: seller.account });
+  await perps.write.createOrder([marketPrice, qty, TimeInForce.GTC], { account: buyer.account });
 
   return { ...data, config: { ...config, marketPrice, qty } };
 }
@@ -523,8 +528,9 @@ export async function deployLocalFullStackFixture(conn: Conn) {
     }),
   ]);
   const pme = await viem.getContractAt("PortfolioMarginEngine", pmeProxy.address);
-  await pme.write.setPerps([perps.address], { account: owner.account });
+  await pme.write.addLinearMarket([perps.address], { account: owner.account });
   await pme.write.setOptions([optionMarginEngine.address], { account: owner.account });
+  await pme.write.setOracle([priceOracle.address], { account: owner.account });
 
   await vault.write.setMarginEngine([pme.address]);
   await vault.write.setAuthorizedCaller([perps.address, true]);

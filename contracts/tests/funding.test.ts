@@ -8,6 +8,7 @@ import {
   deployPerpsWithFundingAndPositionsFixture,
 } from "./fixtures.ts";
 import { catchError } from "../lib/lib.ts";
+import { TimeInForce } from "../fixtures/timeInForce.ts";
 
 const { viem, networkHelpers } = await network.connect();
 
@@ -92,7 +93,7 @@ describe("HashPowerPerpsDEX - Funding Fees", function () {
       const tick = config.minimumPriceIncrement;
 
       const qty = parseUnits("1", config.quantityDecimals);
-      await perps.write.createOrder([config.marketPrice - tick, qty], { account: buyer2.account });
+      await perps.write.createOrder([config.marketPrice - tick, qty, TimeInForce.GTC], { account: buyer2.account });
 
       await networkHelpers.time.increase(86400);
 
@@ -107,7 +108,7 @@ describe("HashPowerPerpsDEX - Funding Fees", function () {
       const tick = config.minimumPriceIncrement;
 
       const qty = parseUnits("1", config.quantityDecimals);
-      await perps.write.createOrder([config.marketPrice + tick, -qty], { account: seller.account });
+      await perps.write.createOrder([config.marketPrice + tick, -qty, TimeInForce.GTC], { account: seller.account });
 
       await networkHelpers.time.increase(86400);
 
@@ -127,8 +128,8 @@ describe("HashPowerPerpsDEX - Funding Fees", function () {
       const askPrice = config.marketPrice + 3n * tick;
       const smallQty = parseUnits("1", config.quantityDecimals);
 
-      await perps.write.createOrder([bidPrice, smallQty], { account: buyer2.account });
-      await perps.write.createOrder([askPrice, -smallQty], { account: seller.account });
+      await perps.write.createOrder([bidPrice, smallQty, TimeInForce.GTC], { account: buyer2.account });
+      await perps.write.createOrder([askPrice, -smallQty, TimeInForce.GTC], { account: seller.account });
 
       await networkHelpers.time.increase(86400);
 
@@ -149,8 +150,8 @@ describe("HashPowerPerpsDEX - Funding Fees", function () {
       const askPrice = config.marketPrice + 3n * tick;
       const smallQty = parseUnits("1", config.quantityDecimals);
 
-      await perps.write.createOrder([bidPrice, smallQty], { account: buyer2.account });
-      await perps.write.createOrder([askPrice, -smallQty], { account: seller.account });
+      await perps.write.createOrder([bidPrice, smallQty, TimeInForce.GTC], { account: buyer2.account });
+      await perps.write.createOrder([askPrice, -smallQty, TimeInForce.GTC], { account: seller.account });
 
       await networkHelpers.time.increase(86400);
 
@@ -170,8 +171,8 @@ describe("HashPowerPerpsDEX - Funding Fees", function () {
       const askPrice = config.marketPrice + 3n * tick;
       const smallQty = parseUnits("1", config.quantityDecimals);
 
-      await perps.write.createOrder([bidPrice, smallQty], { account: buyer2.account });
-      await perps.write.createOrder([askPrice, -smallQty], { account: seller.account });
+      await perps.write.createOrder([bidPrice, smallQty, TimeInForce.GTC], { account: buyer2.account });
+      await perps.write.createOrder([askPrice, -smallQty, TimeInForce.GTC], { account: seller.account });
 
       const elapsed = 86400n;
       await networkHelpers.time.increase(Number(elapsed));
@@ -196,8 +197,8 @@ describe("HashPowerPerpsDEX - Funding Fees", function () {
       const askPrice = config.marketPrice - tick;
       const smallQty = parseUnits("1", config.quantityDecimals);
 
-      await perps.write.createOrder([bidPrice, smallQty], { account: buyer2.account });
-      await perps.write.createOrder([askPrice, -smallQty], { account: seller.account });
+      await perps.write.createOrder([bidPrice, smallQty, TimeInForce.GTC], { account: buyer2.account });
+      await perps.write.createOrder([askPrice, -smallQty, TimeInForce.GTC], { account: seller.account });
 
       await networkHelpers.time.increase(86400);
 
@@ -218,8 +219,8 @@ describe("HashPowerPerpsDEX - Funding Fees", function () {
       const askPrice = config.marketPrice - tick;
       const smallQty = parseUnits("1", config.quantityDecimals);
 
-      await perps.write.createOrder([bidPrice, smallQty], { account: buyer2.account });
-      await perps.write.createOrder([askPrice, -smallQty], { account: seller.account });
+      await perps.write.createOrder([bidPrice, smallQty, TimeInForce.GTC], { account: buyer2.account });
+      await perps.write.createOrder([askPrice, -smallQty, TimeInForce.GTC], { account: seller.account });
 
       const elapsed = 86400n;
       await networkHelpers.time.increase(Number(elapsed));
@@ -245,8 +246,8 @@ describe("HashPowerPerpsDEX - Funding Fees", function () {
       const askPrice = config.marketPrice + 3n * tick;
       const smallQty = parseUnits("1", config.quantityDecimals);
 
-      await perps.write.createOrder([bidPrice, smallQty], { account: buyer2.account });
-      await perps.write.createOrder([askPrice, -smallQty], { account: seller.account });
+      await perps.write.createOrder([bidPrice, smallQty, TimeInForce.GTC], { account: buyer2.account });
+      await perps.write.createOrder([askPrice, -smallQty, TimeInForce.GTC], { account: seller.account });
 
       await networkHelpers.time.increase(3600);
       const pendingAt1h = await perps.read.getPendingFunding([buyer.account.address]);
@@ -280,8 +281,8 @@ describe("HashPowerPerpsDEX - Funding Fees", function () {
       const askPrice = config.marketPrice + 200n * tick;
       const smallQty = parseUnits("1", config.quantityDecimals);
 
-      await perps.write.createOrder([bidPrice, smallQty], { account: buyer2.account });
-      await perps.write.createOrder([askPrice, -smallQty], { account: seller.account });
+      await perps.write.createOrder([bidPrice, smallQty, TimeInForce.GTC], { account: buyer2.account });
+      await perps.write.createOrder([askPrice, -smallQty, TimeInForce.GTC], { account: seller.account });
 
       const elapsed = 86400n;
       await networkHelpers.time.increase(Number(elapsed));
@@ -316,8 +317,8 @@ describe("HashPowerPerpsDEX - Funding Fees", function () {
       const tick = config.minimumPriceIncrement;
 
       const smallQty = parseUnits("1", config.quantityDecimals);
-      await perps.write.createOrder([config.marketPrice + tick, smallQty], { account: buyer2.account });
-      await perps.write.createOrder([config.marketPrice + 3n * tick, -smallQty], { account: seller.account });
+      await perps.write.createOrder([config.marketPrice + tick, smallQty, TimeInForce.GTC], { account: buyer2.account });
+      await perps.write.createOrder([config.marketPrice + 3n * tick, -smallQty, TimeInForce.GTC], { account: seller.account });
 
       await networkHelpers.time.increase(3600);
 
@@ -334,8 +335,8 @@ describe("HashPowerPerpsDEX - Funding Fees", function () {
       const tick = config.minimumPriceIncrement;
 
       const smallQty = parseUnits("1", config.quantityDecimals);
-      await perps.write.createOrder([config.marketPrice + tick, smallQty], { account: buyer2.account });
-      await perps.write.createOrder([config.marketPrice + 3n * tick, -smallQty], { account: seller.account });
+      await perps.write.createOrder([config.marketPrice + tick, smallQty, TimeInForce.GTC], { account: buyer2.account });
+      await perps.write.createOrder([config.marketPrice + 3n * tick, -smallQty, TimeInForce.GTC], { account: seller.account });
 
       await networkHelpers.time.increase(3600);
 
@@ -360,15 +361,15 @@ describe("HashPowerPerpsDEX - Funding Fees", function () {
       const tick = config.minimumPriceIncrement;
 
       const smallQty = parseUnits("1", config.quantityDecimals);
-      await perps.write.createOrder([config.marketPrice + tick, smallQty], { account: buyer2.account });
-      await perps.write.createOrder([config.marketPrice + 3n * tick, -smallQty], { account: seller.account });
+      await perps.write.createOrder([config.marketPrice + tick, smallQty, TimeInForce.GTC], { account: buyer2.account });
+      await perps.write.createOrder([config.marketPrice + 3n * tick, -smallQty, TimeInForce.GTC], { account: seller.account });
 
       await networkHelpers.time.increase(86400);
 
       const pendingBefore = await perps.read.getPendingFunding([buyer.account.address]);
       assert.ok(pendingBefore > 0n);
 
-      await perps.write.createOrder([config.marketPrice + tick, -smallQty], { account: buyer.account });
+      await perps.write.createOrder([config.marketPrice + tick, -smallQty, TimeInForce.GTC], { account: buyer.account });
 
       const pendingAfter = await perps.read.getPendingFunding([buyer.account.address]);
       assert.equal(pendingAfter, 0n);
@@ -381,15 +382,15 @@ describe("HashPowerPerpsDEX - Funding Fees", function () {
       const tick = config.minimumPriceIncrement;
 
       const smallQty = parseUnits("1", config.quantityDecimals);
-      await perps.write.createOrder([config.marketPrice - 3n * tick, smallQty], { account: buyer2.account });
-      await perps.write.createOrder([config.marketPrice - tick, -smallQty], { account: seller.account });
+      await perps.write.createOrder([config.marketPrice - 3n * tick, smallQty, TimeInForce.GTC], { account: buyer2.account });
+      await perps.write.createOrder([config.marketPrice - tick, -smallQty, TimeInForce.GTC], { account: seller.account });
 
       await networkHelpers.time.increase(86400);
 
       const pendingBefore = await perps.read.getPendingFunding([buyer.account.address]);
       assert.ok(pendingBefore < 0n);
 
-      await perps.write.createOrder([config.marketPrice - tick, smallQty], { account: buyer.account });
+      await perps.write.createOrder([config.marketPrice - tick, smallQty, TimeInForce.GTC], { account: buyer.account });
 
       const pendingAfter = await perps.read.getPendingFunding([buyer.account.address]);
       assert.equal(pendingAfter, 0n);
@@ -402,12 +403,12 @@ describe("HashPowerPerpsDEX - Funding Fees", function () {
       const tick = config.minimumPriceIncrement;
 
       const smallQty = parseUnits("1", config.quantityDecimals);
-      await perps.write.createOrder([config.marketPrice + tick, smallQty], { account: buyer2.account });
-      await perps.write.createOrder([config.marketPrice + 3n * tick, -smallQty], { account: seller.account });
+      await perps.write.createOrder([config.marketPrice + tick, smallQty, TimeInForce.GTC], { account: buyer2.account });
+      await perps.write.createOrder([config.marketPrice + 3n * tick, -smallQty, TimeInForce.GTC], { account: seller.account });
 
       await networkHelpers.time.increase(86400);
 
-      const hash = await perps.write.createOrder([config.marketPrice + tick, -smallQty], { account: buyer.account });
+      const hash = await perps.write.createOrder([config.marketPrice + tick, -smallQty, TimeInForce.GTC], { account: buyer.account });
       const receipt = await pc.waitForTransactionReceipt({ hash });
       const events = parseEventLogs({
         logs: receipt.logs,
@@ -438,12 +439,12 @@ describe("HashPowerPerpsDEX - Funding Fees", function () {
       await vault.write.deposit([minCollateral], { account: seller.account });
       await vault.write.deposit([minCollateral * 2n], { account: buyer.account });
 
-      await perps.write.createOrder([initialPrice, -qty], { account: seller.account });
-      await perps.write.createOrder([initialPrice, qty], { account: buyer.account });
+      await perps.write.createOrder([initialPrice, -qty, TimeInForce.GTC], { account: seller.account });
+      await perps.write.createOrder([initialPrice, qty, TimeInForce.GTC], { account: buyer.account });
 
       const smallQty = parseUnits("0.1", config.quantityDecimals);
-      await perps.write.createOrder([initialPrice + tick, smallQty], { account: buyer.account });
-      await perps.write.createOrder([initialPrice + 3n * tick, -smallQty], { account: seller.account });
+      await perps.write.createOrder([initialPrice + tick, smallQty, TimeInForce.GTC], { account: buyer.account });
+      await perps.write.createOrder([initialPrice + 3n * tick, -smallQty, TimeInForce.GTC], { account: seller.account });
 
       await networkHelpers.time.increase(86400);
 
@@ -479,40 +480,64 @@ describe("HashPowerPerpsDEX - Funding Fees", function () {
   describe("Funding and margin requirements", function () {
     it("should include pending funding owed in maintenance margin", async function () {
       const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithFundingAndPositionsFixture);
-      const { perps } = contracts;
+      const { perps, pme } = contracts;
       const { buyer, seller, buyer2 } = accounts;
       const tick = config.minimumPriceIncrement;
 
-      const maintenanceBefore = await perps.read.getMaintenanceMargin([buyer.account.address]);
+      const maintenanceBefore = await pme.read.computePortfolioMM([buyer.account.address]);
 
       const smallQty = parseUnits("1", config.quantityDecimals);
-      await perps.write.createOrder([config.marketPrice + tick, smallQty], { account: buyer2.account });
-      await perps.write.createOrder([config.marketPrice + 3n * tick, -smallQty], { account: seller.account });
+      await perps.write.createOrder([config.marketPrice + tick, smallQty, TimeInForce.GTC], { account: buyer2.account });
+      await perps.write.createOrder([config.marketPrice + 3n * tick, -smallQty, TimeInForce.GTC], { account: seller.account });
 
       await networkHelpers.time.increase(86400);
 
-      const maintenanceAfter = await perps.read.getMaintenanceMargin([buyer.account.address]);
+      const maintenanceAfter = await pme.read.computePortfolioMM([buyer.account.address]);
       const pendingFunding = await perps.read.getPendingFunding([buyer.account.address]);
 
       assert.ok(pendingFunding > 0n);
+      // Exactly once: the engine adds `unrealizedPnl` losses and `pendingFunding`
+      // as independent terms, so `getRiskView` must not net funding into the PnL.
       assert.equal(maintenanceAfter, maintenanceBefore + pendingFunding);
     });
 
-    it("should not increase margin when user receives funding", async function () {
+    it("should report mark PnL to the margin engine without netting funding", async function () {
       const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithFundingAndPositionsFixture);
       const { perps } = contracts;
       const { buyer, seller, buyer2 } = accounts;
       const tick = config.minimumPriceIncrement;
 
-      const marginBefore = await perps.read.getMaintenanceMargin([buyer.account.address]);
-
       const smallQty = parseUnits("1", config.quantityDecimals);
-      await perps.write.createOrder([config.marketPrice - 3n * tick, smallQty], { account: buyer2.account });
-      await perps.write.createOrder([config.marketPrice - tick, -smallQty], { account: seller.account });
+      await perps.write.createOrder([config.marketPrice + tick, smallQty, TimeInForce.GTC], { account: buyer2.account });
+      await perps.write.createOrder([config.marketPrice + 3n * tick, -smallQty, TimeInForce.GTC], { account: seller.account });
 
       await networkHelpers.time.increase(86400);
 
-      const marginAfter = await perps.read.getMaintenanceMargin([buyer.account.address]);
+      const view = await perps.read.getRiskView([buyer.account.address]);
+      const pendingFunding = await perps.read.getPendingFunding([buyer.account.address]);
+      const uxPnl = await perps.read.getUnrealizedPnl([buyer.account.address]);
+
+      assert.ok(pendingFunding > 0n);
+      assert.equal(view.pendingFunding, pendingFunding);
+      // The margin input carries mark PnL only; the UX view still nets funding out.
+      assert.equal(view.unrealizedPnl - pendingFunding, uxPnl);
+    });
+
+    it("should not increase margin when user receives funding", async function () {
+      const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithFundingAndPositionsFixture);
+      const { perps, pme } = contracts;
+      const { buyer, seller, buyer2 } = accounts;
+      const tick = config.minimumPriceIncrement;
+
+      const marginBefore = await pme.read.computePortfolioMM([buyer.account.address]);
+
+      const smallQty = parseUnits("1", config.quantityDecimals);
+      await perps.write.createOrder([config.marketPrice - 3n * tick, smallQty, TimeInForce.GTC], { account: buyer2.account });
+      await perps.write.createOrder([config.marketPrice - tick, -smallQty, TimeInForce.GTC], { account: seller.account });
+
+      await networkHelpers.time.increase(86400);
+
+      const marginAfter = await pme.read.computePortfolioMM([buyer.account.address]);
       const pendingFunding = await perps.read.getPendingFunding([buyer.account.address]);
 
       assert.ok(pendingFunding < 0n);
@@ -528,8 +553,8 @@ describe("HashPowerPerpsDEX - Funding Fees", function () {
       const tick = config.minimumPriceIncrement;
 
       const smallQty = parseUnits("1", config.quantityDecimals);
-      await perps.write.createOrder([config.marketPrice + tick, smallQty], { account: buyer2.account });
-      await perps.write.createOrder([config.marketPrice + 3n * tick, -smallQty], { account: seller.account });
+      await perps.write.createOrder([config.marketPrice + tick, smallQty, TimeInForce.GTC], { account: buyer2.account });
+      await perps.write.createOrder([config.marketPrice + 3n * tick, -smallQty, TimeInForce.GTC], { account: seller.account });
 
       await networkHelpers.time.increase(86400);
 
@@ -547,8 +572,8 @@ describe("HashPowerPerpsDEX - Funding Fees", function () {
       const tick = config.minimumPriceIncrement;
 
       const smallQty = parseUnits("1", config.quantityDecimals);
-      await perps.write.createOrder([config.marketPrice - 3n * tick, smallQty], { account: buyer2.account });
-      await perps.write.createOrder([config.marketPrice - tick, -smallQty], { account: seller.account });
+      await perps.write.createOrder([config.marketPrice - 3n * tick, smallQty, TimeInForce.GTC], { account: buyer2.account });
+      await perps.write.createOrder([config.marketPrice - tick, -smallQty, TimeInForce.GTC], { account: seller.account });
 
       await networkHelpers.time.increase(86400);
 
