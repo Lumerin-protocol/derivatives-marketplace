@@ -1,11 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
-import { parseUnits, getAddress, encodeFunctionData, zeroAddress } from "viem";
+import { parseUnits, getAddress, encodeFunctionData, } from "viem";
 import { deployPerpsWithCollateralFixture, deployPerpsWithOrdersFixture } from "./fixtures.ts";
 import { TimeInForce } from "../fixtures/timeInForce.ts";
 
-const { viem, networkHelpers } = await network.connect();
+const { networkHelpers } = await network.getOrCreate();
 
 describe("HashPowerPerpsDEX - multicall", function () {
   describe("Batch Create Orders", function () {

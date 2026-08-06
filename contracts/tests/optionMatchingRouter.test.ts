@@ -764,7 +764,7 @@ describe("OptionMatchingRouter", () => {
 
   describe("reduceOnly", () => {
     it("reduceOnly buy caps at short position size", async () => {
-      const { router, engine, traders, seriesId, accounts } = await networkHelpers.loadFixture(
+      const { router, engine, traders, seriesId } = await networkHelpers.loadFixture(
         deployMatchingRouterFixture,
       );
       const { trader1, trader2 } = traders;

@@ -5,7 +5,7 @@ import { parseUnits, getAddress, zeroHash } from "viem";
 import { deployPerpsWithCollateralFixture, deployPerpsWithOrdersFixture } from "./fixtures.ts";
 import { TimeInForce } from "../fixtures/timeInForce.ts";
 
-const { viem, networkHelpers } = await network.connect();
+const { networkHelpers } = await network.getOrCreate();
 
 describe("HashPowerPerpsDEX - getOrder", function () {
   it("should return order details", async function () {

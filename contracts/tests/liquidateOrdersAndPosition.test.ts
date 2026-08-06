@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
 import { encodeFunctionData, maxUint256, parseEventLogs, parseUnits, zeroHash } from "viem";
-import type { Hex } from "viem";
+import type { Hex, } from "viem";
 import {
   deployPerpsFixture,
   deployPerpsWithCollateralFixture,
@@ -200,8 +200,8 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
       assert.ok(!ordersAfter.includes(targetId));
 
       const events = parseEventLogs({ abi: perps.abi, logs: receipt.logs });
-      const cancelled = events.find((e: any) => e.eventName === "OrderCancelled") as any;
-      const liquidated = events.find((e: any) => e.eventName === "OrderLiquidated") as any;
+      const cancelled = events.find((e) => e.eventName === "OrderCancelled");
+      const liquidated = events.find((e) => e.eventName === "OrderLiquidated");
       assert.ok(cancelled, "OrderCancelled should be emitted for indexer compatibility");
       assert.equal(cancelled.args.orderId, targetId);
       assert.ok(liquidated);
@@ -363,7 +363,7 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
 
     it("succeeds after orders are cleared via multicallStopOnFailure(liquidateOrder × N)", async function () {
       const data = await networkHelpers.loadFixture(deployUnderwaterWithOrdersFixture);
-      const { contracts, accounts, config } = data;
+      const { contracts, accounts } = data;
       const { perps } = contracts;
       const { seller, buyer2 } = accounts;
 
@@ -401,8 +401,8 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
       const receipt = await pc.waitForTransactionReceipt({ hash });
       const events = parseEventLogs({ abi: perps.abi, logs: receipt.logs });
       const positionLiquidated = events.find(
-        (e: any) => e.eventName === "PositionLiquidated",
-      ) as any;
+        (e) => e.eventName === "PositionLiquidated",
+      );
       assert.ok(positionLiquidated);
       assert.equal(
         positionLiquidated.args.user.toLowerCase(),

@@ -52,6 +52,8 @@ async function main() {
     throw new Error(`Deployer ${deployer.account.address} is not the proxy owner ${currentOwner}`);
   }
 
+  const vaultAddress = env.VAULT_ADDRESS as Hex;
+
   // Decide whether the upgrade needs to run `initializeV2` atomically.
   const needsV2Init = currentInitVersion < TARGET_INIT_VERSION;
   let initData: Hex = "0x";
@@ -81,7 +83,6 @@ async function main() {
   console.log();
 
   // Deploy new HashPowerPerpsDEX implementation
-  const vaultAddress = env.VAULT_ADDRESS as Hex;
   logInfo("Deploy new HashPowerPerpsDEX implementation", {
     contract: "HashPowerPerpsDEX",
     args: `vault=${vaultAddress}`,

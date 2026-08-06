@@ -1,11 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
-import { parseUnits } from "viem";
 import { deployPerpsWithCollateralFixture, deployPerpsWithOrdersFixture } from "./fixtures.ts";
 import { TimeInForce } from "../fixtures/timeInForce.ts";
 
-const { viem, networkHelpers } = await network.connect();
+const { networkHelpers } = await network.getOrCreate();
 
 describe("HashPowerPerpsDEX - getUserOrders", function () {
   it("should return empty array when user has no orders", async function () {

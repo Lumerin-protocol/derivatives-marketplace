@@ -241,7 +241,7 @@ export async function deployPerpsFixture(conn: Conn) {
     await usdcMock.write.approve([vault.address, maxUint256], { account: w.account });
   }
 
-  await vault.write.depositInsuranceFund([collateralAmount], { account: owner.account });
+  await vault.write.depositInsuranceFund([collateralAmount]);
 
   return {
     config: {
@@ -524,20 +524,21 @@ export async function deployLocalFullStackFixture(conn: Conn) {
     encodeFunctionData({
       abi: pmeImpl.abi,
       functionName: "initialize",
-      args: [vault.address],
+      args: [],
     }),
   ]);
   const pme = await viem.getContractAt("PortfolioMarginEngine", pmeProxy.address);
-  await pme.write.addLinearMarket([perps.address], { account: owner.account });
-  await pme.write.setOptions([optionMarginEngine.address], { account: owner.account });
-  await pme.write.setOracle([priceOracle.address], { account: owner.account });
+  await pme.write.setVault([vault.address])
+  await pme.write.addLinearMarket([perps.address]);
+  await pme.write.setOptions([optionMarginEngine.address]);
+  await pme.write.setOracle([priceOracle.address]);
 
   await vault.write.setMarginEngine([pme.address]);
   await vault.write.setAuthorizedCaller([perps.address, true]);
   await vault.write.setAuthorizedCaller([optionMarginEngine.address, true]);
   await perps.write.setPortfolioMargin([pme.address]);
-  await optionMarginEngine.write.setPortfolioMargin([pme.address], { account: owner.account });
-  await optionMarginEngine.write.setPerpsDex([perps.address], { account: owner.account });
+  await optionMarginEngine.write.setPortfolioMargin([pme.address]);
+  await optionMarginEngine.write.setPerpsDex([perps.address]);
 
   await perps.write.setMakerFeeBps([Number(makerFeeBps)]);
   await perps.write.setTakerFeeBps([Number(takerFeeBps)]);
@@ -584,7 +585,7 @@ export async function deployLocalFullStackFixture(conn: Conn) {
   ]);
   const optionSettlement = await viem.getContractAt("OptionSettlement", settlementProxy.address);
 
-  await optionOrderBook.write.setRouter([optionMatchingRouter.address], { account: owner.account });
+  await optionOrderBook.write.setRouter([optionMatchingRouter.address]);
   await optionMarginEngine.write.setRouter([optionMatchingRouter.address], {
     account: owner.account,
   });
@@ -641,8 +642,8 @@ export async function deployLocalFullStackFixture(conn: Conn) {
     await usdcMock.write.approve([vault.address, maxUint256], { account: w.account });
   }
 
-  await vault.write.depositInsuranceFund([collateralAmount], { account: owner.account });
-  await vault.write.depositInsuranceFund([INSURANCE_DEPOSIT], { account: owner.account });
+  await vault.write.depositInsuranceFund([collateralAmount]);
+  await vault.write.depositInsuranceFund([INSURANCE_DEPOSIT]);
 
   return {
     config: {

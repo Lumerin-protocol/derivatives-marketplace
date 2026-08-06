@@ -2,9 +2,9 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
 import { parseUnits, zeroAddress } from "viem";
-import { deployPerpsFixture, deployPerpsWithCollateralFixture } from "./fixtures.ts";
+import { deployPerpsFixture } from "./fixtures.ts";
 
-const { viem, networkHelpers } = await network.connect();
+const { viem, networkHelpers } = await network.getOrCreate();
 
 describe("HashPowerPerpsDEX - Admin Functions", function () {
   describe("setOracle", function () {

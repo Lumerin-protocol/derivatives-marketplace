@@ -5,7 +5,7 @@ import { encodeFunctionData, maxUint256 } from "viem";
 import type { NetworkConnection } from "hardhat/types/network";
 import { defaultSeries, INITIAL_PRICE_E8, ORACLE_DECIMALS } from "./optionsFixtures.ts";
 
-const { viem, networkHelpers } = await network.connect();
+const { networkHelpers } = await network.getOrCreate();
 
 const LOT = BigInt(defaultSeries.lotSize);
 const LIMIT = 0;
@@ -124,8 +124,8 @@ async function deployPerpsIntegrationFixture(conn: NetworkConnection) {
 
   // ── Fund traders (approve vault) ──────────────────────────────────────
   const wallets = await v.getWalletClients();
-  const trader1 = wallets[3]!;
-  const trader2 = wallets[4]!;
+  const trader1 = wallets[3];
+  const trader2 = wallets[4];
 
   const depositAmount = 50_000_000_000n; // 50k USDC
   for (const w of [trader1, trader2]) {
@@ -153,9 +153,9 @@ async function deployPerpsIntegrationFixture(conn: NetworkConnection) {
 
 async function deployNoPerpsFixture(conn: NetworkConnection) {
   const { viem: v } = conn;
-  const [owner] = await v.getWalletClients();
+  const [_owner] = await v.getWalletClients();
   const wallets = await v.getWalletClients();
-  const trader1 = wallets[3]!;
+  const trader1 = wallets[3];
 
   const registryImpl = await v.deployContract("OptionMarketRegistry", []);
   const registryProxy = await v.deployContract("ERC1967Proxy", [

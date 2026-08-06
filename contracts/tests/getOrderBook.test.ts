@@ -5,7 +5,7 @@ import { parseUnits } from "viem";
 import { deployPerpsWithCollateralFixture, deployPerpsWithOrdersFixture } from "./fixtures.ts";
 import { TimeInForce } from "../fixtures/timeInForce.ts";
 
-const { viem, networkHelpers } = await network.connect();
+const { networkHelpers } = await network.getOrCreate();
 
 describe("HashPowerPerpsDEX - Order Book View Functions", function () {
   describe("getOrderBookPrices", function () {

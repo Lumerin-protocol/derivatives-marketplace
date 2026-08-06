@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { network } from "hardhat";
 import type { NetworkConnection } from "hardhat/types/network";
 
-const { viem, networkHelpers } = await network.connect();
+const { networkHelpers } = await network.getOrCreate();
 
 async function deployHarness(conn: NetworkConnection) {
   const harness = await conn.viem.deployContract("OrderQueueHarness", []);

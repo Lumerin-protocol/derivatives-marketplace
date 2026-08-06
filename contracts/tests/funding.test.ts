@@ -10,7 +10,7 @@ import {
 import { catchError } from "../lib/lib.ts";
 import { TimeInForce } from "../fixtures/timeInForce.ts";
 
-const { viem, networkHelpers } = await network.connect();
+const { networkHelpers } = await network.connect();
 
 describe("HashPowerPerpsDEX - Funding Fees", function () {
   describe("setFundingParameters", function () {
@@ -421,7 +421,7 @@ describe("HashPowerPerpsDEX - Funding Fees", function () {
         (e) => e.args.user.toLowerCase() === buyer.account.address.toLowerCase(),
       );
       assert.ok(buyerEvent !== undefined);
-      assert.ok(buyerEvent!.args.amount > 0n);
+      assert.ok(buyerEvent?.args.amount > 0n);
     });
 
     it("should settle funding before liquidation", async function () {

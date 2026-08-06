@@ -5,7 +5,7 @@ import { parseUnits } from "viem";
 import { deployPerpsWithCollateralFixture } from "./fixtures.ts";
 import { TimeInForce } from "../fixtures/timeInForce.ts";
 
-const { viem, networkHelpers } = await network.connect();
+const { networkHelpers } = await network.getOrCreate();
 
 describe("HashPowerPerpsDEX - Self-Trade Prevention", function () {
   it("partial self-cross: buy nets out own sell, no net position or fill", async function () {

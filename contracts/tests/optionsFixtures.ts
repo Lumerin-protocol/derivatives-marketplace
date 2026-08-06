@@ -63,7 +63,7 @@ export async function deployBookWithSeriesFixture(conn: NetworkConnection) {
   const { registry, accounts } = data;
   const { owner } = accounts;
 
-  const hash = await registry.write.createSeries(
+  const _hash = await registry.write.createSeries(
     [
       defaultSeries.strikeE8,
       defaultSeries.expiryTs,
@@ -82,7 +82,7 @@ export async function deployBookWithSeriesFixture(conn: NetworkConnection) {
 
 // ── Vault + PME helper ────────────────────────────────────────────────────
 
-async function deployVaultAndPME(
+async function _deployVaultAndPME(
   conn: NetworkConnection,
   usdcAddress: `0x${string}`,
   engineAddress: `0x${string}`,
@@ -109,11 +109,12 @@ async function deployVaultAndPME(
     encodeFunctionData({
       abi: pmeImpl.abi,
       functionName: "initialize",
-      args: [vault.address],
+      args: [],
     }),
   ]);
   const pme = await viem.getContractAt("PortfolioMarginEngine", pmeProxy.address);
   // The PME pins each product to its own vault at registration.
+  await pme.write.setVault([vault.address]);
   await perpsMock.write.setVault([vault.address]);
   await pme.write.addLinearMarket([perpsMock.address]);
   await pme.write.setOptions([engineAddress]);
@@ -211,8 +212,11 @@ export async function deployMarginEngineFixture(conn: NetworkConnection) {
 
   // Get wallets for trader accounts
   const wallets = await viem.getWalletClients();
-  const trader1 = wallets[3]!;
-  const trader2 = wallets[4]!;
+  if (wallets.length < 6) {
+    throw new Error("not enough wallets")
+  }
+  const trader1 = wallets[3];
+  const trader2 = wallets[4];
 
   // Transfer USDC and approve the vault (not the engine)
   const topUp = 100_000_000_000n; // 100k USDC (6 decimals)
@@ -409,9 +413,12 @@ export async function deploySettlementFixture(conn: NetworkConnection) {
 
   // ── Fund traders (approve vault, not engine) ───────────────────────────
   const wallets = await viem.getWalletClients();
-  const trader1 = wallets[3]!;
-  const trader2 = wallets[4]!;
-  const trader3 = wallets[5]!; // extra trader for liquidation tests
+  if (wallets.length < 6) {
+    throw new Error("not enough wallets");
+  }
+  const trader1 = wallets[3];
+  const trader2 = wallets[4];
+  const trader3 = wallets[5]; // extra trader for liquidation tests
 
   const topUp = 100_000_000_000n; // 100k USDC
   const depositAmount = 50_000_000_000n; // 50k USDC deposited into engine
