@@ -5,11 +5,11 @@ export const PerpsStatsQuery = gql`
   query PerpsStats {
     perps(id: 0) {
       contractAddress
-      collateralToken
+      collateralVault
       priceOracle
-      marginPercent
-      maintenanceMarginPercent
-      liquidationFee
+      portfolioMarginEngine
+      liquidationFeeBps
+      liquidatorShareBps
       minimumPriceIncrement
       takerFeeBps
       makerFeeBps

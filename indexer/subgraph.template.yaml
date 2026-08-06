@@ -54,14 +54,22 @@ dataSources:
         - event: BadDebt(indexed address,uint256)
           handler: handleBadDebt
         # Config events
+        # MatchFeeUpdated is only emitted by resetState; the individual setters
+        # emit the per-side events below.
         - event: MatchFeeUpdated(int16,int16)
           handler: handleMatchFeeUpdated
-        - event: MarginPercentUpdated(uint8)
-          handler: handleMarginPercentUpdated
-        - event: MaintenanceMarginPercentUpdated(uint8)
-          handler: handleMaintenanceMarginPercentUpdated
-        - event: LiquidationFeeUpdated(uint256)
-          handler: handleLiquidationFeeUpdated
+        - event: MakerFeeBpsUpdated(int16)
+          handler: handleMakerFeeBpsUpdated
+        - event: TakerFeeBpsUpdated(int16)
+          handler: handleTakerFeeBpsUpdated
+        - event: LiquidationFeeBpsUpdated(uint16)
+          handler: handleLiquidationFeeBpsUpdated
+        - event: LiquidatorShareBpsUpdated(uint16)
+          handler: handleLiquidatorShareBpsUpdated
+        - event: OracleUpdated(address)
+          handler: handleOracleUpdated
+        - event: PortfolioMarginUpdated(address)
+          handler: handlePortfolioMarginUpdated
         - event: FundingParametersUpdated(uint256,uint256)
           handler: handleFundingParametersUpdated
         - event: MinimumMarginPerOrderUpdated(uint256)
@@ -69,6 +77,8 @@ dataSources:
         # Upgradeable events
         - event: Initialized(uint64)
           handler: handleInitialized
+        - event: Upgraded(indexed address)
+          handler: handleUpgraded
       file: ./src/perps.ts
 # Required when deploying with `goldsky subgraph deploy ... --graft-from <name>/<version>`
 features:

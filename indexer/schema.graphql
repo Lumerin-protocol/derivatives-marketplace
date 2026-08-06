@@ -5,9 +5,9 @@ type Perps @entity(immutable: false) {
 
   # Contract addresses
   contractAddress: Bytes!
-  collateralToken: Bytes!
-  priceOracle: Bytes!
+  "Vault holding user collateral; the ERC-20 itself is read off the vault."
   collateralVault: Bytes!
+  priceOracle: Bytes!
   portfolioMarginEngine: Bytes!
 
   # Constants
@@ -15,7 +15,6 @@ type Perps @entity(immutable: false) {
   minimumPriceIncrement: BigInt!
 
   # Configuration
-  liquidationFee: BigInt!
   liquidationFeeBps: Int!
   liquidatorShareBps: Int!
   takerFeeBps: Int!
