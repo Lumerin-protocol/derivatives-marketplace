@@ -357,78 +357,9 @@ abstract contract HashPowerPerpsDEXBase is
 
     // ── Internal helpers: order placement / matching ──────────────────────────
 
-    /// @dev Shared body for create paths. Returns true when the leg is reduce-only
-    ///      (single-order callers may skip the IM check); batch callers always check once.
-    ///      Caller must have already run `_updateGlobalFunding()` for this tx.
-    function _createOrderInternal(address sender, uint256 _price, int256 _quantity, TimeInForce _tif)
-        internal
-        returns (bool isReduceOnly)
-    {
-        if (uint8(_tif) > uint8(TimeInForce.FOK)) revert InvalidTimeInForce();
-
-        _validateQuantity(_quantity);
-        _validatePrice(_price);
-
-        // Settle taker's funding once before matching so per-match _updateUserPosition
-        // calls can skip it (cumulativeFundingPerUnit is constant within this tx).
-        _settleFunding(sender);
-
-        bool isBuy = _quantity > 0;
-        bytes32 orderId = bytes32(++nonce);
-        emit OrderCreated(orderId, sender, _price, _quantity);
-
-        // Snapshot before matching — reduce-only vs position minus already-resting reduces.
-        int256 positionBefore = positions[sender].netQuantity;
-        uint256 reducingBefore = _restingReduceAbs(sender, positionBefore);
-
-        int256 remainingQuantity = _matchWithOppositeOrders(sender, _price, _quantity);
-        bool partiallyOrFullyFilled = remainingQuantity != _quantity;
-
-        if (_tif == TimeInForce.FOK && remainingQuantity != 0) revert TimeInForceNotFilled();
-        // IOC with zero fill is a noop — revert rather than emit a closed empty order.
-        if (_tif == TimeInForce.IOC && !partiallyOrFullyFilled) revert TimeInForceNotFilled();
-
-        if (_tif == TimeInForce.GTC) {
-            if (partiallyOrFullyFilled) {
-                emit OrderUpdated(orderId, sender, remainingQuantity);
-            }
-
-            if (remainingQuantity != 0) {
-                // Validate minimum margin per resting order
-                if (minimumMarginPerOrder > 0) {
-                    uint256 restingValue = _calculateValue(_price, M.abs(remainingQuantity));
-                    uint256 restingMargin = portfolioMargin.linearOrderMargin(restingValue);
-                    if (restingMargin < minimumMarginPerOrder) {
-                        revert OrderMarginTooLow();
-                    }
-                }
-
-                // Validate max orders per participant
-                EnumerableSet.Bytes32Set storage participantOrders = participantOrderIdsIndex[sender];
-                if (participantOrders.length() >= MAX_ORDERS_PER_PARTICIPANT) {
-                    revert MaxOrdersPerParticipantReached();
-                }
-
-                // Create order with quantity that was not matched
-                orders[orderId] = Order({ participant: sender, price: _price, quantity: remainingQuantity });
-                _getOrderValue(isBuy)[sender] += _calculateValue(_price, M.abs(remainingQuantity));
-                _getOrderQty(isBuy)[sender] += M.abs(remainingQuantity);
-                participantOrders.add(orderId);
-                StructuredLinkedList.List storage orderQueue = _priceOrderIds(_price, isBuy);
-                orderQueue.pushBack(uint256(orderId));
-
-                _addPriceLevel(_price, isBuy);
-            }
-        } else {
-            // IOC (or FOK after a full fill): never rest; close the taker order id at 0.
-            if (partiallyOrFullyFilled || _tif == TimeInForce.IOC) {
-                emit OrderUpdated(orderId, sender, 0);
-            }
-        }
-
-        // Opposite side and combined reducing size (resting + this intent) ≤ position.
-        isReduceOnly = positionBefore != 0 && (positionBefore > 0 ? _quantity < 0 : _quantity > 0)
-            && M.abs(_quantity) + reducingBefore <= M.abs(positionBefore);
+    /// @dev Mint the next order id. Keeps `nonce` private to this layer.
+    function _nextOrderId() internal returns (bytes32) {
+        return bytes32(++nonce);
     }
 
     /// @dev Absolute qty of resting orders that reduce `_net`.
@@ -591,49 +522,6 @@ abstract contract HashPowerPerpsDEXBase is
 
     // ── Internal helpers: cancel / reduce / book upkeep ───────────────────────
 
-    /// @dev Shared cancel body for `cancelOrder` / `updateOrders`. Caller must
-    ///      have already updated global funding for this tx when needed.
-    function _cancelOrderInternal(address _participant, bytes32 _orderId) internal {
-        Order memory order = orders[_orderId];
-        if (order.participant != _participant) {
-            revert OrderNotBelongToSender();
-        }
-
-        bool isBid = order.quantity > 0;
-        _getOrderValue(isBid)[order.participant] -= _calculateValue(order.price, M.abs(order.quantity));
-        _getOrderQty(isBid)[order.participant] -= M.abs(order.quantity);
-
-        _removeOrder(_orderId, order.participant, order.price, isBid);
-        _removePriceLevelIfEmpty(_priceOrderIds(order.price, isBid), order.price, isBid);
-        emit OrderCancelled(_orderId, order.participant);
-    }
-
-    /// @dev In-place size shrink. Keeps the order id in its price queue slot.
-    function _reduceOrderSizeInternal(address _participant, bytes32 _orderId, int256 _newQuantity) internal {
-        Order storage order = orders[_orderId];
-        if (order.participant == address(0) || order.quantity == 0) revert OrderNotExists();
-        if (order.participant != _participant) revert OrderNotBelongToSender();
-
-        int256 oldQty = order.quantity;
-        if (_newQuantity == 0 || (_newQuantity > 0) != (oldQty > 0)) revert InvalidReduceQuantity();
-        uint256 oldAbs = M.abs(oldQty);
-        uint256 newAbs = M.abs(_newQuantity);
-        if (newAbs >= oldAbs) revert InvalidReduceQuantity();
-
-        if (minimumMarginPerOrder > 0) {
-            uint256 restingValue = _calculateValue(order.price, newAbs);
-            uint256 restingMargin = portfolioMargin.linearOrderMargin(restingValue);
-            if (restingMargin < minimumMarginPerOrder) revert OrderMarginTooLow();
-        }
-
-        bool isBid = oldQty > 0;
-        uint256 reducedAbs = oldAbs - newAbs;
-        _getOrderValue(isBid)[order.participant] -= _calculateValue(order.price, reducedAbs);
-        _getOrderQty(isBid)[order.participant] -= reducedAbs;
-        order.quantity = _newQuantity;
-        emit OrderUpdated(_orderId, order.participant, _newQuantity);
-    }
-
     function _getOrderValue(bool _isBuy) internal view returns (mapping(address => uint256) storage) {
         if (_isBuy) {
             return userBuyOrderValue;
@@ -786,13 +674,6 @@ abstract contract HashPowerPerpsDEXBase is
 
     // ── Internal helpers: margin / liquidation ────────────────────────────────
 
-    /// @dev True iff the user is below the portfolio MM predicate. Used for permissionless
-    ///      `liquidateOrder*` / `liquidatePosition` entry points (those don't need a position
-    ///      to be present — orders alone can break MM).
-    function _underwater(address _user) internal view returns (bool) {
-        return vault.balanceOf(_user) < portfolioMargin.computePortfolioMM(_user);
-    }
-
     /// @dev Closes `_closeAbs` (< |netQuantity|) of a verified-underwater user's position at the
     ///      mark, realizes PnL on the closed slice via {_settleReducedPosition}, and reduces
     ///      `netQuantity` toward zero (entry price unchanged). Does NOT pay the fee and does NOT
@@ -815,25 +696,6 @@ abstract contract HashPowerPerpsDEXBase is
         // Reduce magnitude toward zero; aggregatedEntryPrice is unchanged by a reducing close.
         // signedClose has the position's sign, so subtracting it moves netQuantity toward zero.
         positions[_user].netQuantity = _position.netQuantity - signedClose;
-    }
-
-    /// @dev Cancels a single order on behalf of a (verified-underwater) user. Caller must have
-    ///      already verified `_underwater(_user)` and that `_order.participant == _user`.
-    ///      Charges a liquidation fee on the order's notional value.
-    function _doLiquidateOrder(address _user, bytes32 _orderId, Order memory _order) internal {
-        bool isBid = _order.quantity > 0;
-        uint256 orderAbsQty = M.abs(_order.quantity);
-        uint256 orderNotional = _calculateValue(_order.price, orderAbsQty);
-        _getOrderValue(isBid)[_user] -= orderNotional;
-        _getOrderQty(isBid)[_user] -= orderAbsQty;
-        _removeOrder(_orderId, _user, _order.price, isBid);
-        _removePriceLevelIfEmpty(_priceOrderIds(_order.price, isBid), _order.price, isBid);
-
-        uint256 liqFee = _chargeLiquidationFee(_user, orderNotional);
-
-        emit OrderCancelled(_orderId, _user);
-        emit OrderLiquidated(_orderId, _user, _msgSender(), liqFee);
-        _notifyLiquidation(_msgSender(), liqFee);
     }
 
     /// @dev Closes the user's position and settles PnL against the insurance fund. Caller must
@@ -957,20 +819,17 @@ abstract contract HashPowerPerpsDEXBase is
 
     // ── Internal helpers: validation / book lookups ───────────────────────────
 
-    /// @notice Validate price
-    function _validatePrice(uint256 _price) internal view {
-        if (_price == 0) {
-            revert InvalidPrice();
-        }
-        if (_price % minimumPriceIncrement != 0) {
-            revert InvalidPrice();
-        }
+    function _validateTIF(TimeInForce _tif) internal pure {
+        if (uint8(_tif) > uint8(TimeInForce.FOK)) revert InvalidTimeInForce();
     }
 
-    function _validateQuantity(int256 _quantity) internal pure {
-        if (_quantity == 0) {
-            revert InvalidSize();
-        }
+    function _validateQty(int256 _quantity) internal pure {
+        if (_quantity == 0) revert InvalidSize();
+    }
+
+    function _validatePrice(uint256 _price) internal pure {
+        if (_price == 0) revert InvalidPrice();
+        if (_price % minimumPriceIncrement != 0) revert InvalidPrice();
     }
 
     /// @notice Get order queue by price and direction
