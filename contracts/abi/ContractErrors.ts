@@ -154,6 +154,11 @@ export const contractErrors = [
     "type": "error"
   },
   {
+    "inputs": [],
+    "name": "InvalidFee",
+    "type": "error"
+  },
+  {
     "inputs": [
       {
         "internalType": "uint256",
@@ -292,7 +297,17 @@ export const contractErrors = [
   },
   {
     "inputs": [],
+    "name": "VaultMismatch",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "InsuranceFundNotConfigured",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidDependency",
     "type": "error"
   },
   {

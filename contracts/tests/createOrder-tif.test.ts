@@ -9,7 +9,7 @@ const { viem, networkHelpers } = await network.connect();
 /** Mirrors `HashPowerPerpsDEX.TimeInForce`. */
 const TimeInForce = { GTC: 0, IOC: 1, FOK: 2 } as const;
 
-describe("HashPowerPerpsDEX - createOrderV2 time-in-force", () => {
+describe("HashPowerPerpsDEX - createOrder time-in-force", () => {
   it("IOC fills available size and does not rest the remainder", async () => {
     const { contracts, accounts, config } = await networkHelpers.loadFixture(
       deployPerpsWithCollateralFixture,
@@ -22,9 +22,9 @@ describe("HashPowerPerpsDEX - createOrderV2 time-in-force", () => {
     const q1 = parseUnits("1", config.quantityDecimals);
     const q3 = parseUnits("3", config.quantityDecimals);
 
-    await perps.write.createOrder([price, -q1], { account: seller.account });
+    await perps.write.createOrder([price, -q1, TimeInForce.GTC], { account: seller.account });
 
-    const tx = await perps.write.createOrderV2([price, q3, TimeInForce.IOC], {
+    const tx = await perps.write.createOrder([price, q3, TimeInForce.IOC], {
       account: buyer.account,
     });
     const receipt = await pc.waitForTransactionReceipt({ hash: tx });
@@ -53,7 +53,7 @@ describe("HashPowerPerpsDEX - createOrderV2 time-in-force", () => {
     const q1 = parseUnits("1", config.quantityDecimals);
 
     await viem.assertions.revertWithCustomError(
-      perps.write.createOrderV2([price, q1, TimeInForce.IOC], { account: buyer.account }),
+      perps.write.createOrder([price, q1, TimeInForce.IOC], { account: buyer.account }),
       perps,
       "TimeInForceNotFilled",
     );
@@ -69,10 +69,10 @@ describe("HashPowerPerpsDEX - createOrderV2 time-in-force", () => {
     const q1 = parseUnits("1", config.quantityDecimals);
     const q2 = parseUnits("2", config.quantityDecimals);
 
-    await perps.write.createOrder([price, -q1], { account: seller.account });
+    await perps.write.createOrder([price, -q1, TimeInForce.GTC], { account: seller.account });
 
     await viem.assertions.revertWithCustomError(
-      perps.write.createOrderV2([price, q2, TimeInForce.FOK], { account: buyer.account }),
+      perps.write.createOrder([price, q2, TimeInForce.FOK], { account: buyer.account }),
       perps,
       "TimeInForceNotFilled",
     );
@@ -90,9 +90,9 @@ describe("HashPowerPerpsDEX - createOrderV2 time-in-force", () => {
     const price = await perps.read.getMarketPrice();
     const q2 = parseUnits("2", config.quantityDecimals);
 
-    await perps.write.createOrder([price, -q2], { account: seller.account });
+    await perps.write.createOrder([price, -q2, TimeInForce.GTC], { account: seller.account });
 
-    const tx = await perps.write.createOrderV2([price, q2, TimeInForce.FOK], {
+    const tx = await perps.write.createOrder([price, q2, TimeInForce.FOK], {
       account: buyer.account,
     });
     const receipt = await pc.waitForTransactionReceipt({ hash: tx });

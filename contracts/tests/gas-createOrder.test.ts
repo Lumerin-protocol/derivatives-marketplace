@@ -6,20 +6,27 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
-import { parseUnits } from "viem";
+import { parseUnits, type Account, type Client, type PublicClient } from "viem";
 import { deployPerpsWithCollateralFixture, deployPerpsWithOrdersFixture } from "./fixtures.ts";
+import { TimeInForce } from "../fixtures/timeInForce.ts";
 
-const { viem, networkHelpers } = await network.connect();
+const { viem, networkHelpers } = await network.getOrCreate();
+
+function getPerps(addr: `0x${string}`) {
+  return viem.getContractAt("HashPowerPerpsDEX", addr);
+}
+
+type Perps = Awaited<ReturnType<typeof getPerps>>
 
 async function createOrderAndLogGas(
-  perps: any,
-  publicClient: any,
+  perps: Perps,
+  publicClient: PublicClient,
   scenarioName: string,
   args: [bigint, bigint],
-  account: { address: string },
+  account: Account,
   matchCount = 0,
 ) {
-  const hash = await perps.write.createOrder(args, { account });
+  const hash = await perps.write.createOrder([...args, TimeInForce.GTC], { account: account });
   const receipt = await publicClient.waitForTransactionReceipt({ hash });
   const gas = Number(receipt.gasUsed);
   const totalLine = `  ${scenarioName}: ${gas.toLocaleString()} gas`;
@@ -31,15 +38,15 @@ async function createOrderAndLogGas(
   }
 }
 
-async function placeAsksAtPrice(perps: any, seller: any, price: bigint, qty: bigint, count: number) {
+async function placeAsksAtPrice(perps: Perps, seller: Client, price: bigint, qty: bigint, count: number) {
   for (let i = 0; i < count; i++) {
-    await perps.write.createOrder([price, -qty], { account: seller.account });
+    await perps.write.createOrder([price, -qty, TimeInForce.GTC], { account: seller.account });
   }
 }
 
 async function placeAsksMultiLevel(
-  perps: any,
-  seller: any,
+  perps: Perps,
+  seller: Client,
   marketPrice: bigint,
   tick: bigint,
   qty: bigint,
@@ -49,7 +56,7 @@ async function placeAsksMultiLevel(
   for (let l = 0; l < levels; l++) {
     const price = marketPrice + BigInt(l + 1) * tick;
     for (let o = 0; o < ordersPerLevel; o++) {
-      await perps.write.createOrder([price, -qty], { account: seller.account });
+      await perps.write.createOrder([price, -qty, TimeInForce.GTC], { account: seller.account });
     }
   }
 }
@@ -91,9 +98,9 @@ describe("Gas: createOrder", function () {
     const tick = config.minimumPriceIncrement;
     const qty = parseUnits("1", config.quantityDecimals);
 
-    await perps.write.createOrder([marketPrice + tick, -qty], { account: seller.account });
-    await perps.write.createOrder([marketPrice + tick, -qty], { account: seller.account });
-    await perps.write.createOrder([marketPrice + tick, -qty], { account: seller.account });
+    await perps.write.createOrder([marketPrice + tick, -qty, TimeInForce.GTC], { account: seller.account });
+    await perps.write.createOrder([marketPrice + tick, -qty, TimeInForce.GTC], { account: seller.account });
+    await perps.write.createOrder([marketPrice + tick, -qty, TimeInForce.GTC], { account: seller.account });
 
     await createOrderAndLogGas(perps, pc, "createOrder_3Matches (one price level)", [marketPrice + tick, qty * 3n], buyer2.account, 3);
 

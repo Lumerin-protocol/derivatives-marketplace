@@ -5,9 +5,6 @@ import {
   deploySettlementFixture,
   defaultSeries,
   SETTLEMENT_WINDOW,
-  MIN_OBSERVATIONS,
-  INITIAL_PRICE_E8,
-  LIQUIDATION_FEE_BPS,
   INSURANCE_DEPOSIT,
 } from "./optionsFixtures.ts";
 
@@ -17,7 +14,7 @@ const LOT = BigInt(defaultSeries.lotSize);
 const TICK_SIZE_E8 = defaultSeries.tickSizeE8;
 const LIMIT = 0;
 
-function premiumWad(ticks: bigint, size: bigint): bigint {
+function _premiumWad(ticks: bigint, size: bigint): bigint {
   return (ticks * BigInt(TICK_SIZE_E8) * 10n ** 10n * size) / LOT;
 }
 
@@ -108,7 +105,7 @@ describe("OptionSettlement", () => {
 
   describe("finalizeSettlement", () => {
     it("computes TWAP and settles series", async () => {
-      const { settlement, registry, oracle, seriesId, shortExpiry, accounts } =
+      const { settlement, registry, oracle, seriesId, shortExpiry } =
         await networkHelpers.loadFixture(deploySettlementFixture);
 
       await networkHelpers.time.increaseTo(shortExpiry);
@@ -178,7 +175,7 @@ describe("OptionSettlement", () => {
     });
 
     it("reverts if already finalized", async () => {
-      const { settlement, oracle, seriesId, shortExpiry } =
+      const { settlement, seriesId, shortExpiry } =
         await networkHelpers.loadFixture(deploySettlementFixture);
 
       await networkHelpers.time.increaseTo(shortExpiry);
@@ -376,7 +373,7 @@ describe("OptionSettlement", () => {
   describe("cancelSettledOrders", () => {
     it("cancels resting orders after settlement", async () => {
       const fx = await networkHelpers.loadFixture(deploySettlementFixture);
-      const { router, book, engine, settlement, oracle, traders, seriesId, shortExpiry } = fx;
+      const { router, book, engine, settlement, traders, seriesId, shortExpiry } = fx;
 
       // Place a resting sell order
       const sim = await router.simulate.submitOrder(
@@ -433,7 +430,7 @@ describe("OptionSettlement", () => {
   describe("post-settlement", () => {
     it("rejects new orders on settled series", async () => {
       const fx = await networkHelpers.loadFixture(deploySettlementFixture);
-      const { router, settlement, oracle, traders, seriesId, shortExpiry } = fx;
+      const { router, settlement, traders, seriesId, shortExpiry } = fx;
 
       // Settle the series
       await networkHelpers.time.increaseTo(shortExpiry);
@@ -495,7 +492,6 @@ describe("Liquidation", () => {
 
   it("reverts on long position", async () => {
     const fx = await networkHelpers.loadFixture(deploySettlementFixture);
-    const { engine, traders, seriesId } = fx;
 
     await createShortPosition(fx, 1n, 100n);
 
@@ -520,19 +516,16 @@ describe("Liquidation", () => {
     lots: bigint,
     tick: bigint,
   ) {
-    const { engine, oracle, perpsMock, traders } = fx;
+    const { engine, oracle, traders } = fx;
 
     await createShortPosition(fx, lots, tick);
 
-    // Spike oracle to make MM > collateral.
+    // Spike oracle to make MM > collateral. The PME reads the same oracle,
+    // so the spiked spot flows into its stress math automatically.
     // MM ≈ |delta| * F * mmSpotShock (5%) per lot → need lots * F * 0.05 > ~$50k
     // For 1 lot: F > $1M → use $1.2M. For 2+ lots: $600k is sufficient.
     const spikePrice = lots === 1n ? 1200000_00000000n : 600000_00000000n;
     await oracle.write.setPrice([spikePrice, 8]);
-
-    // Sync perpsMock market price so PME reads the spiked spot
-    const mockPrice = lots === 1n ? 1_200_000_000_000n : 600_000_000_000n;
-    await perpsMock.write.setMarketPrice([mockPrice]);
 
     const healthy = await engine.read.isHealthy([traders.trader1.account.address]);
     assert.ok(!healthy, "account should be underwater after price spike");

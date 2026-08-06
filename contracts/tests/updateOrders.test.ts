@@ -3,12 +3,14 @@ import assert from "node:assert/strict";
 import { network } from "hardhat";
 import { encodeFunctionData, getAddress, parseEventLogs, parseUnits } from "viem";
 import { deployPerpsWithCollateralFixture } from "./fixtures.ts";
+import { TimeInForce } from "../fixtures/timeInForce.ts";
 
 const { networkHelpers } = await network.connect();
 
 type OrderIntent = {
   price: bigint;
   quantity: bigint;
+  timeInForce: number;
 };
 
 type ReduceIntent = {
@@ -29,16 +31,16 @@ describe("HashPowerPerpsDEX.updateOrders (cancel + reduce + create batch)", func
     const qty = parseUnits("1", config.quantityDecimals);
 
     const resting: OrderIntent[] = [
-      { price: marketPrice - step, quantity: qty },
-      { price: marketPrice - 2n * step, quantity: qty },
+      { price: marketPrice - step, quantity: qty, timeInForce: TimeInForce.GTC },
+      { price: marketPrice - 2n * step, quantity: qty, timeInForce: TimeInForce.GTC },
     ];
     await perps.write.createOrders([resting], { account: buyer.account });
     const before = await perps.read.getUserOrders([buyer.account.address]);
     assert.equal(before.length, 2);
 
     const next: OrderIntent[] = [
-      { price: marketPrice - 3n * step, quantity: qty },
-      { price: marketPrice - 4n * step, quantity: qty },
+      { price: marketPrice - 3n * step, quantity: qty, timeInForce: TimeInForce.GTC },
+      { price: marketPrice - 4n * step, quantity: qty, timeInForce: TimeInForce.GTC },
     ];
     const tx = await perps.write.updateOrders([before, [], next], { account: buyer.account });
     const receipt = await pc.waitForTransactionReceipt({ hash: tx });
@@ -77,7 +79,7 @@ describe("HashPowerPerpsDEX.updateOrders (cancel + reduce + create batch)", func
     const qty = parseUnits("1", config.quantityDecimals);
 
     await perps.write.updateOrders(
-      [[], [], [{ price: marketPrice - step, quantity: qty }]],
+      [[], [], [{ price: marketPrice - step, quantity: qty, timeInForce: TimeInForce.GTC }]],
       { account: buyer.account },
     );
     const placed = await perps.read.getUserOrders([buyer.account.address]);
@@ -104,8 +106,8 @@ describe("HashPowerPerpsDEX.updateOrders (cancel + reduce + create batch)", func
     await perps.write.createOrders(
       [
         [
-          { price, quantity: qty },
-          { price, quantity: parseUnits("1", config.quantityDecimals) },
+          { price, quantity: qty, timeInForce: TimeInForce.GTC },
+          { price, quantity: parseUnits("1", config.quantityDecimals), timeInForce: TimeInForce.GTC },
         ],
       ],
       { account: buyer.account },
@@ -159,7 +161,7 @@ describe("HashPowerPerpsDEX.updateOrders (cancel + reduce + create batch)", func
     const marketPrice = await perps.read.getMarketPrice();
     const step = config.minimumPriceIncrement;
     const qty = parseUnits("2", config.quantityDecimals);
-    await perps.write.createOrder([marketPrice - step, qty], { account: buyer.account });
+    await perps.write.createOrder([marketPrice - step, qty, TimeInForce.GTC], { account: buyer.account });
     const [id] = await perps.read.getUserOrders([buyer.account.address]);
 
     await assert.rejects(
@@ -188,17 +190,17 @@ describe("HashPowerPerpsDEX.updateOrders (cancel + reduce + create batch)", func
     const qty = parseUnits("1", config.quantityDecimals);
 
     const sellerResting: OrderIntent[] = [
-      { price: marketPrice + step, quantity: -qty },
-      { price: marketPrice + 2n * step, quantity: -qty },
-      { price: marketPrice + 3n * step, quantity: -qty },
+      { price: marketPrice + step, quantity: -qty, timeInForce: TimeInForce.GTC },
+      { price: marketPrice + 2n * step, quantity: -qty, timeInForce: TimeInForce.GTC },
+      { price: marketPrice + 3n * step, quantity: -qty, timeInForce: TimeInForce.GTC },
     ];
     await perps.write.createOrders([sellerResting], { account: seller.account });
     const sellerIds = await perps.read.getUserOrders([seller.account.address]);
 
     const buyerResting: OrderIntent[] = [
-      { price: marketPrice - step, quantity: qty },
-      { price: marketPrice - 2n * step, quantity: qty },
-      { price: marketPrice - 3n * step, quantity: qty },
+      { price: marketPrice - step, quantity: qty, timeInForce: TimeInForce.GTC },
+      { price: marketPrice - 2n * step, quantity: qty, timeInForce: TimeInForce.GTC },
+      { price: marketPrice - 3n * step, quantity: qty, timeInForce: TimeInForce.GTC },
     ];
     await perps.write.createOrders([buyerResting], { account: buyer.account });
     const buyerIds = await perps.read.getUserOrders([buyer.account.address]);
@@ -214,9 +216,9 @@ describe("HashPowerPerpsDEX.updateOrders (cancel + reduce + create batch)", func
       );
     }
     const sellerNext: OrderIntent[] = [
-      { price: marketPrice + 4n * step, quantity: -qty },
-      { price: marketPrice + 5n * step, quantity: -qty },
-      { price: marketPrice + 6n * step, quantity: -qty },
+      { price: marketPrice + 4n * step, quantity: -qty, timeInForce: TimeInForce.GTC },
+      { price: marketPrice + 5n * step, quantity: -qty, timeInForce: TimeInForce.GTC },
+      { price: marketPrice + 6n * step, quantity: -qty, timeInForce: TimeInForce.GTC },
     ];
     baselineCalls.push(
       encodeFunctionData({
@@ -229,9 +231,9 @@ describe("HashPowerPerpsDEX.updateOrders (cancel + reduce + create batch)", func
     const baselineGas = (await pc.waitForTransactionReceipt({ hash: baselineTx })).gasUsed;
 
     const buyerNext: OrderIntent[] = [
-      { price: marketPrice - 4n * step, quantity: qty },
-      { price: marketPrice - 5n * step, quantity: qty },
-      { price: marketPrice - 6n * step, quantity: qty },
+      { price: marketPrice - 4n * step, quantity: qty, timeInForce: TimeInForce.GTC },
+      { price: marketPrice - 5n * step, quantity: qty, timeInForce: TimeInForce.GTC },
+      { price: marketPrice - 6n * step, quantity: qty, timeInForce: TimeInForce.GTC },
     ];
     const batchTx = await perps.write.updateOrders([buyerIds, [], buyerNext], {
       account: buyer.account,

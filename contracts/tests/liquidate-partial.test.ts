@@ -4,6 +4,7 @@ import { network } from "hardhat";
 import { maxUint256, parseEventLogs, parseUnits } from "viem";
 import type { NetworkConnection } from "hardhat/types/network";
 import { deployPerpsFixture } from "./fixtures.ts";
+import { TimeInForce } from "../fixtures/timeInForce.ts";
 
 const { viem, networkHelpers } = await network.connect();
 
@@ -28,7 +29,7 @@ async function partialPerpsFixture(_conn: NetworkConnection) {
   const { seller, buyer, owner } = accounts;
 
   // Zero the liquidation fee so the deposit/band math is purely margin-driven.
-  await perps.write.setLiquidationFee([0n], { account: owner.account });
+  await perps.write.setLiquidationFeeBps([0], { account: owner.account });
 
   const entry = await perps.read.getMarketPrice();
   const qty = parseUnits("40", config.quantityDecimals);
@@ -43,8 +44,8 @@ async function partialPerpsFixture(_conn: NetworkConnection) {
   await vault.write.deposit([buyerDeposit], { account: buyer.account });
 
   // seller shorts, buyer takes the long.
-  await perps.write.createOrder([entry, -qty], { account: seller.account });
-  await perps.write.createOrder([entry, qty], { account: buyer.account });
+  await perps.write.createOrder([entry, -qty, TimeInForce.GTC], { account: seller.account });
+  await perps.write.createOrder([entry, qty, TimeInForce.GTC], { account: buyer.account });
 
   return {
     ...data,
@@ -84,7 +85,7 @@ describe("HashPowerPerpsDEX - liquidatePosition(user, closeQty) partial close", 
     const { seller, buyer2 } = accounts;
 
     // A far-out-of-market resting sell that never matches, held by seller.
-    await perps.write.createOrder([config.entry * 3n, -parseUnits("1", config.quantityDecimals)], {
+    await perps.write.createOrder([config.entry * 3n, -parseUnits("1", config.quantityDecimals), TimeInForce.GTC], {
       account: seller.account,
     });
 
@@ -212,21 +213,22 @@ describe("HashPowerPerpsDEX - liquidatePosition(user, closeQty) partial close", 
     assert.ok(event.args.pnl < 0n, "expected a realized loss on the closed portion");
   });
 
-  // ── Keeper-incentive payout is DISABLED for now: no `liquidationFee` is ever
-  //    transferred on liquidation. The state var / setter are retained, but the
-  //    fee is modelled as 0 everywhere — `PositionLiquidated.liquidatorFee` is
-  //    always 0 and the liquidator's balance is unchanged.
+  // ── Liquidation fee: `_chargeLiquidationFee` takes `liquidationFeeBps` of the closed
+  //    notional (capped at the user's balance) and emits it as
+  //    `PositionLiquidated.liquidatorFee`. The liquidator's cut is
+  //    `liquidatorShareBps * fee` — default 0, so at default config the whole fee
+  //    goes to the insurance fund and the keeper's balance is unchanged.
 
-  it("payout disabled: a restoring partial close pays no fee even when liquidationFee is set", async function () {
+  it("charges the bps fee on a restoring partial close; liquidator share defaults to 0", async function () {
     const data = await networkHelpers.loadFixture(partialPerpsFixture);
     const { contracts, accounts, config } = data;
     const { perps, vault } = contracts;
     const { seller, buyer2, owner } = accounts;
 
-    const fee = parseUnits("1", config.tokenDecimals);
-    await perps.write.setLiquidationFee([fee], { account: owner.account });
+    const feeBps = 50n; // 0.5%
+    await perps.write.setLiquidationFeeBps([Number(feeBps)], { account: owner.account });
 
-    await data.pump(13n, 10n); // +30% — closing 30 lands in [MM, IM]
+    const newMark = await data.pump(13n, 10n); // +30% — closing 30 lands in [MM, IM]
     const before = await vault.read.balanceOf([buyer2.account.address]);
 
     const closeQty = parseUnits("30", config.quantityDecimals);
@@ -236,22 +238,24 @@ describe("HashPowerPerpsDEX - liquidatePosition(user, closeQty) partial close", 
     const receipt = await accounts.pc.waitForTransactionReceipt({ hash });
 
     const [event] = parseEventLogs({ logs: receipt.logs, abi: perps.abi, eventName: "PositionLiquidated" });
-    assert.equal(event.args.liquidatorFee, 0n, "payout disabled → no fee even when restored");
+    const closedNotional = (newMark * closeQty) / 10n ** BigInt(config.quantityDecimals);
+    const expectedFee = (closedNotional * feeBps) / 10_000n;
+    assert.equal(event.args.liquidatorFee, expectedFee, "total fee = closed notional × bps");
 
     const after = await vault.read.balanceOf([buyer2.account.address]);
-    assert.equal(after, before, "liquidator balance unchanged (no payout)");
+    assert.equal(after, before, "liquidator balance unchanged (share defaults to 0)");
   });
 
-  it("payout disabled: a full close pays no fee even when liquidationFee is set", async function () {
+  it("charges the bps fee on a full close; liquidator share defaults to 0", async function () {
     const data = await networkHelpers.loadFixture(partialPerpsFixture);
     const { contracts, accounts, config } = data;
     const { perps, vault } = contracts;
     const { seller, buyer2, owner } = accounts;
 
-    const fee = parseUnits("1", config.tokenDecimals);
-    await perps.write.setLiquidationFee([fee], { account: owner.account });
+    const feeBps = 50n; // 0.5%
+    await perps.write.setLiquidationFeeBps([Number(feeBps)], { account: owner.account });
 
-    await data.pump(13n, 10n);
+    const newMark = await data.pump(13n, 10n);
     const before = await vault.read.balanceOf([buyer2.account.address]);
 
     const hash = await perps.write.liquidatePosition([seller.account.address, maxUint256], {
@@ -263,10 +267,12 @@ describe("HashPowerPerpsDEX - liquidatePosition(user, closeQty) partial close", 
     assert.equal(pos.netQuantity, 0n, "fully closed");
 
     const [event] = parseEventLogs({ logs: receipt.logs, abi: perps.abi, eventName: "PositionLiquidated" });
-    assert.equal(event.args.liquidatorFee, 0n, "payout disabled → no fee on full close");
+    const closedNotional = (newMark * config.qty) / 10n ** BigInt(config.quantityDecimals);
+    const expectedFee = (closedNotional * feeBps) / 10_000n;
+    assert.equal(event.args.liquidatorFee, expectedFee, "total fee = closed notional × bps");
 
     const after = await vault.read.balanceOf([buyer2.account.address]);
-    assert.equal(after, before, "liquidator balance unchanged (no payout)");
+    assert.equal(after, before, "liquidator balance unchanged (share defaults to 0)");
   });
 
   it("degenerate IM <= MM: no over-liquidation ceiling even when over-closing", async function () {

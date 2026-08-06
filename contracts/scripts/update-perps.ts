@@ -27,7 +27,7 @@ async function readInitializedVersion(pc: PublicClient, proxy: Hex): Promise<big
 async function main() {
   logTitle("HashPowerPerpsDEX Upgrade");
 
-  const env = requireEnvsSet("PERPS_ADDRESS", "MINIMUM_PRICE_INCREMENT");
+  const env = requireEnvsSet("PERPS_ADDRESS", "VAULT_ADDRESS");
 
   const proxyAddress = env.PERPS_ADDRESS as Hex;
 
@@ -52,17 +52,16 @@ async function main() {
     throw new Error(`Deployer ${deployer.account.address} is not the proxy owner ${currentOwner}`);
   }
 
+  const vaultAddress = env.VAULT_ADDRESS as Hex;
+
   // Decide whether the upgrade needs to run `initializeV2` atomically.
   const needsV2Init = currentInitVersion < TARGET_INIT_VERSION;
   let initData: Hex = "0x";
   if (needsV2Init) {
-    const v2Env = requireEnvsSet("VAULT_ADDRESS");
-    const vaultAddress = v2Env.VAULT_ADDRESS as Hex;
     const portfolioMarginAddress = (process.env.PME_ADDRESS ?? zeroAddress) as Hex;
     logInfo("initializeV2 required", {
       from: currentInitVersion.toString(),
       to: TARGET_INIT_VERSION.toString(),
-      vault: addrUrl(pc, vaultAddress),
       portfolioMargin:
         portfolioMarginAddress === zeroAddress
           ? "(unset — set later via setPortfolioMargin)"
@@ -86,19 +85,19 @@ async function main() {
   // Deploy new HashPowerPerpsDEX implementation
   logInfo("Deploy new HashPowerPerpsDEX implementation", {
     contract: "HashPowerPerpsDEX",
-    args: `minimumPriceIncrement=${env.MINIMUM_PRICE_INCREMENT}`,
+    args: `vault=${vaultAddress}`,
   });
   await logPrompt("Proceed?");
   console.log("Deploying new implementation...");
   const newImpl = await viem.deployContract(
     "HashPowerPerpsDEX",
-    [BigInt(env.MINIMUM_PRICE_INCREMENT)],
+    [vaultAddress],
     { confirmations: 5 },
   );
   logStep("Deployed", addrUrl(pc, newImpl.address));
 
   console.log("Verifying new implementation...");
-  await verifyContract(newImpl.address, [env.MINIMUM_PRICE_INCREMENT]);
+  await verifyContract(newImpl.address, [vaultAddress]);
   logStep("Verified", addrUrl(pc, newImpl.address));
 
   // Upgrade proxy to new implementation

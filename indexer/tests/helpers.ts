@@ -61,15 +61,13 @@ export function priceLevel(price: BigInt, isBid: boolean): string {
 export function setupPerps(): void {
   const perps = new Perps(0);
   perps.contractAddress = Bytes.empty();
-  perps.collateralToken = Bytes.empty();
   perps.priceOracle = Bytes.empty();
   perps.collateralVault = Bytes.empty();
   perps.portfolioMarginEngine = Bytes.empty();
   perps.quantityDecimals = 6;
   perps.minimumPriceIncrement = BigInt.zero();
-  perps.marginPercent = 0;
-  perps.maintenanceMarginPercent = 0;
-  perps.liquidationFee = BigInt.zero();
+  perps.liquidationFeeBps = 0;
+  perps.liquidatorShareBps = 0;
   perps.takerFeeBps = 0;
   perps.makerFeeBps = 0;
   perps.fundingRateMaxBps = BigInt.zero();

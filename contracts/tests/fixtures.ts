@@ -25,6 +25,7 @@ import {
   SETTLEMENT_WINDOW,
 } from "./optionsFixtures.ts";
 import { computeExpectedFunding as _computeExpectedFunding } from "./utils.ts";
+import { TimeInForce } from "../fixtures/timeInForce.ts";
 
 type Conn = NetworkConnection;
 
@@ -166,7 +167,7 @@ export async function deployPerpsFixture(conn: Conn) {
     owner,
     pc,
     "../artifacts/contracts/HashPowerPerpsDEX.sol/HashPowerPerpsDEX.json",
-    [minimumPriceIncrement],
+    [vault.address],
   );
   const perpsProxy = await deployContract<"ERC1967Proxy">(
     owner,
@@ -211,7 +212,7 @@ export async function deployPerpsFixture(conn: Conn) {
       encodeFunctionData({
         abi: pmeImpl.abi,
         functionName: "initialize",
-        args: [vault.address],
+        args: [],
       }),
     ],
   );
@@ -220,25 +221,27 @@ export async function deployPerpsFixture(conn: Conn) {
     address: pmeProxy.address,
     client: { public: pc, wallet: owner },
   });
-  await pme.write.setPerps([perps.address], { account: owner.account });
-  await pme.write.setOptions([optionsMock.address], { account: owner.account });
+  // The PME pins each product to its own vault at registration.
+  await pme.write.setVault([vault.address]);
+  await optionsMock.write.setVault([vault.address]);
+  await pme.write.addLinearMarket([perps.address]);
+  await pme.write.setOptions([optionsMock.address]);
+  await pme.write.setOracle([priceOracle.address]);
 
   // Wire vault ↔ perps ↔ PME
   await vault.write.setMarginEngine([pme.address]);
   await vault.write.setAuthorizedCaller([perps.address, true]);
-  await perps.write.setPortfolioMargin([pme.address], { account: owner.account });
+  await perps.write.setPortfolioMargin([pme.address]);
 
-  await perps.write.setMatchFee([Number(takerFeeBps), Number(makerFeeBps)], {
-    account: owner.account,
-  });
-  await perps.write.setLiquidationFee([liquidationFee], { account: owner.account });
+  await perps.write.setMakerFeeBps([Number(makerFeeBps)]);
+  await perps.write.setTakerFeeBps([Number(takerFeeBps)]);
 
   // Users approve the vault (not the perps contract)
   for (const w of [seller, buyer, buyer2, seller2, owner]) {
     await usdcMock.write.approve([vault.address, maxUint256], { account: w.account });
   }
 
-  await vault.write.depositInsuranceFund([collateralAmount], { account: owner.account });
+  await vault.write.depositInsuranceFund([collateralAmount]);
 
   return {
     config: {
@@ -292,12 +295,12 @@ export async function deployPerpsWithOrdersFixture(conn: Conn) {
   const tick = config.minimumPriceIncrement;
   const qty = parseUnits("1", config.quantityDecimals);
 
-  await perps.write.createOrder([marketPrice + tick, -qty], { account: seller.account });
-  await perps.write.createOrder([marketPrice + 2n * tick, -qty], { account: seller.account });
-  await perps.write.createOrder([marketPrice + 3n * tick, -qty], { account: seller.account });
-  await perps.write.createOrder([marketPrice - tick, qty], { account: buyer.account });
-  await perps.write.createOrder([marketPrice - 2n * tick, qty], { account: buyer.account });
-  await perps.write.createOrder([marketPrice - 3n * tick, qty], { account: buyer.account });
+  await perps.write.createOrder([marketPrice + tick, -qty, TimeInForce.GTC], { account: seller.account });
+  await perps.write.createOrder([marketPrice + 2n * tick, -qty, TimeInForce.GTC], { account: seller.account });
+  await perps.write.createOrder([marketPrice + 3n * tick, -qty, TimeInForce.GTC], { account: seller.account });
+  await perps.write.createOrder([marketPrice - tick, qty, TimeInForce.GTC], { account: buyer.account });
+  await perps.write.createOrder([marketPrice - 2n * tick, qty, TimeInForce.GTC], { account: buyer.account });
+  await perps.write.createOrder([marketPrice - 3n * tick, qty, TimeInForce.GTC], { account: buyer.account });
 
   return { ...data, config: { ...config, marketPrice, qty } };
 }
@@ -311,8 +314,8 @@ export async function deployPerpsWithPositionsFixture(conn: Conn) {
   const marketPrice = await perps.read.getMarketPrice();
   const qty = parseUnits("1", config.quantityDecimals);
 
-  await perps.write.createOrder([marketPrice, -qty], { account: seller.account });
-  await perps.write.createOrder([marketPrice, qty], { account: buyer.account });
+  await perps.write.createOrder([marketPrice, -qty, TimeInForce.GTC], { account: seller.account });
+  await perps.write.createOrder([marketPrice, qty, TimeInForce.GTC], { account: buyer.account });
 
   return { ...data, config: { ...config, marketPrice, qty } };
 }
@@ -329,8 +332,8 @@ export async function deployPerpsWithLiquidatablePositionFixture(conn: Conn) {
 
   await vault.write.deposit([minCollateral], { account: seller.account });
   await vault.write.deposit([minCollateral * 2n], { account: buyer.account });
-  await perps.write.createOrder([initialPrice, -qty], { account: seller.account });
-  await perps.write.createOrder([initialPrice, qty], { account: buyer.account });
+  await perps.write.createOrder([initialPrice, -qty, TimeInForce.GTC], { account: seller.account });
+  await perps.write.createOrder([initialPrice, qty, TimeInForce.GTC], { account: buyer.account });
 
   return {
     ...data,
@@ -358,9 +361,9 @@ export async function deployPerpsWithBatchLiquidatableFixture(conn: Conn) {
   await vault.write.deposit([minCollateral], { account: seller2.account });
   await vault.write.deposit([minCollateral * 3n], { account: buyer.account });
 
-  await perps.write.createOrder([initialPrice, -qty], { account: seller.account });
-  await perps.write.createOrder([initialPrice, -qty], { account: seller2.account });
-  await perps.write.createOrder([initialPrice, qty * 2n], { account: buyer.account });
+  await perps.write.createOrder([initialPrice, -qty, TimeInForce.GTC], { account: seller.account });
+  await perps.write.createOrder([initialPrice, -qty, TimeInForce.GTC], { account: seller2.account });
+  await perps.write.createOrder([initialPrice, qty * 2n, TimeInForce.GTC], { account: buyer.account });
 
   return {
     ...data,
@@ -422,8 +425,8 @@ export async function deployPerpsWithFundingAndPositionsFixture(conn: Conn) {
   const marketPrice = await perps.read.getMarketPrice();
   const qty = parseUnits("10", config.quantityDecimals);
 
-  await perps.write.createOrder([marketPrice, -qty], { account: seller.account });
-  await perps.write.createOrder([marketPrice, qty], { account: buyer.account });
+  await perps.write.createOrder([marketPrice, -qty, TimeInForce.GTC], { account: seller.account });
+  await perps.write.createOrder([marketPrice, qty, TimeInForce.GTC], { account: buyer.account });
 
   return { ...data, config: { ...config, marketPrice, qty } };
 }
@@ -491,7 +494,7 @@ export async function deployLocalFullStackFixture(conn: Conn) {
   ]);
   const vault = await viem.getContractAt("CollateralVault", vaultProxy.address);
 
-  const perpsImpl = await viem.deployContract("HashPowerPerpsDEX", [minimumPriceIncrement]);
+  const perpsImpl = await viem.deployContract("HashPowerPerpsDEX", [vault.address]);
   const perpsProxy = await viem.deployContract("ERC1967Proxy", [
     perpsImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -521,24 +524,24 @@ export async function deployLocalFullStackFixture(conn: Conn) {
     encodeFunctionData({
       abi: pmeImpl.abi,
       functionName: "initialize",
-      args: [vault.address],
+      args: [],
     }),
   ]);
   const pme = await viem.getContractAt("PortfolioMarginEngine", pmeProxy.address);
-  await pme.write.setPerps([perps.address], { account: owner.account });
-  await pme.write.setOptions([optionMarginEngine.address], { account: owner.account });
+  await pme.write.setVault([vault.address])
+  await pme.write.addLinearMarket([perps.address]);
+  await pme.write.setOptions([optionMarginEngine.address]);
+  await pme.write.setOracle([priceOracle.address]);
 
   await vault.write.setMarginEngine([pme.address]);
   await vault.write.setAuthorizedCaller([perps.address, true]);
   await vault.write.setAuthorizedCaller([optionMarginEngine.address, true]);
-  await perps.write.setPortfolioMargin([pme.address], { account: owner.account });
-  await optionMarginEngine.write.setPortfolioMargin([pme.address], { account: owner.account });
-  await optionMarginEngine.write.setPerpsDex([perps.address], { account: owner.account });
+  await perps.write.setPortfolioMargin([pme.address]);
+  await optionMarginEngine.write.setPortfolioMargin([pme.address]);
+  await optionMarginEngine.write.setPerpsDex([perps.address]);
 
-  await perps.write.setMatchFee([Number(takerFeeBps), Number(makerFeeBps)], {
-    account: owner.account,
-  });
-  await perps.write.setLiquidationFee([liquidationFee], { account: owner.account });
+  await perps.write.setMakerFeeBps([Number(makerFeeBps)]);
+  await perps.write.setTakerFeeBps([Number(takerFeeBps)]);
 
   const bookImpl = await viem.deployContract("OptionOrderBook", []);
   const bookProxy = await viem.deployContract("ERC1967Proxy", [
@@ -582,7 +585,7 @@ export async function deployLocalFullStackFixture(conn: Conn) {
   ]);
   const optionSettlement = await viem.getContractAt("OptionSettlement", settlementProxy.address);
 
-  await optionOrderBook.write.setRouter([optionMatchingRouter.address], { account: owner.account });
+  await optionOrderBook.write.setRouter([optionMatchingRouter.address]);
   await optionMarginEngine.write.setRouter([optionMatchingRouter.address], {
     account: owner.account,
   });
@@ -639,8 +642,8 @@ export async function deployLocalFullStackFixture(conn: Conn) {
     await usdcMock.write.approve([vault.address, maxUint256], { account: w.account });
   }
 
-  await vault.write.depositInsuranceFund([collateralAmount], { account: owner.account });
-  await vault.write.depositInsuranceFund([INSURANCE_DEPOSIT], { account: owner.account });
+  await vault.write.depositInsuranceFund([collateralAmount]);
+  await vault.write.depositInsuranceFund([INSURANCE_DEPOSIT]);
 
   return {
     config: {

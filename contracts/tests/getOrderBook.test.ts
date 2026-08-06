@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { network } from "hardhat";
 import { parseUnits } from "viem";
 import { deployPerpsWithCollateralFixture, deployPerpsWithOrdersFixture } from "./fixtures.ts";
+import { TimeInForce } from "../fixtures/timeInForce.ts";
 
-const { viem, networkHelpers } = await network.connect();
+const { networkHelpers } = await network.getOrCreate();
 
 describe("HashPowerPerpsDEX - Order Book View Functions", function () {
   describe("getOrderBookPrices", function () {
@@ -158,8 +159,8 @@ describe("HashPowerPerpsDEX - Order Book View Functions", function () {
       const price = marketPrice - config.minimumPriceIncrement;
       const qty = parseUnits("1", 6);
 
-      await perps.write.createOrder([price, BigInt(qty)], { account: buyer.account });
-      await perps.write.createOrder([price, BigInt(qty)], { account: buyer2.account });
+      await perps.write.createOrder([price, BigInt(qty), TimeInForce.GTC], { account: buyer.account });
+      await perps.write.createOrder([price, BigInt(qty), TimeInForce.GTC], { account: buyer2.account });
 
       const totalQty = await perps.read.getQuantityAtPrice([price, true]);
       assert.equal(totalQty, BigInt(qty) * 2n);

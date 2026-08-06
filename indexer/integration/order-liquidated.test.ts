@@ -23,6 +23,7 @@ import { network } from "hardhat";
 import { parseEventLogs, parseUnits } from "viem";
 import type { EntityFields } from "matchstick-ts";
 import { deployPerpsFixture } from "../../contracts/tests/fixtures.ts";
+import { TimeInForce } from "../../contracts/fixtures/timeInForce.ts";
 
 const conn = await network.getOrCreate();
 const { matchstick } = conn;
@@ -40,9 +41,9 @@ async function deployPerpsUnderwaterWithRestingOrderFixture(
   const { perps, priceOracle, vault } = contracts;
   const { seller, buyer, owner } = accounts;
 
-  // Flat fee small enough that the seller's vault fully covers it on cancel.
-  const liquidationFee = parseUnits("0.5", config.tokenDecimals);
-  await perps.write.setLiquidationFee([liquidationFee], { account: owner.account });
+  // Fee small enough that the seller's vault fully covers it on cancel.
+  const liquidationFeeBps = 50;
+  await perps.write.setLiquidationFeeBps([liquidationFeeBps], { account: owner.account });
 
   const initialPrice = await perps.read.getMarketPrice();
   const tick = config.minimumPriceIncrement;
@@ -53,18 +54,18 @@ async function deployPerpsUnderwaterWithRestingOrderFixture(
   await vault.write.deposit([minCollateral * 2n], { account: buyer.account });
 
   // Matched position: seller short / buyer long at initialPrice.
-  await perps.write.createOrder([initialPrice, -qty], { account: seller.account });
-  await perps.write.createOrder([initialPrice, qty], { account: buyer.account });
+  await perps.write.createOrder([initialPrice, -qty, TimeInForce.GTC], { account: seller.account });
+  await perps.write.createOrder([initialPrice, qty, TimeInForce.GTC], { account: buyer.account });
 
   // One resting short for the seller, above the matched price so it doesn't cross.
   const restingQty = parseUnits("0.1", config.quantityDecimals);
-  await perps.write.createOrder([initialPrice + 5n * tick, -restingQty], {
+  await perps.write.createOrder([initialPrice + 5n * tick, -restingQty, TimeInForce.GTC], {
     account: seller.account,
   });
 
   return {
     ...data,
-    config: { ...config, initialPrice, qty, restingQty, minCollateral, liquidationFee },
+    config: { ...config, initialPrice, qty, restingQty, minCollateral, liquidationFeeBps },
     async makeUnderwater() {
       const newPrice = initialPrice * 2n;
       await priceOracle.write.setPrice([newPrice, config.oracle.decimals]);

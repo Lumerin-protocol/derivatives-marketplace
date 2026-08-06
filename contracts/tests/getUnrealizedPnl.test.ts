@@ -5,10 +5,9 @@ import { parseUnits } from "viem";
 import {
   deployPerpsWithCollateralFixture,
   deployPerpsWithPositionsFixture,
-  deployPerpsWithLiquidatablePositionFixture,
 } from "./fixtures.ts";
 
-const { viem, networkHelpers } = await network.connect();
+const { networkHelpers } = await network.getOrCreate();
 
 describe("HashPowerPerpsDEX - getUnrealizedPnl", function () {
   it("should return 0 when user has no position", async function () {

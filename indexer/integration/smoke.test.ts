@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import { network } from "hardhat";
 import { parseUnits } from "viem";
 import { deployPerpsWithCollateralFixture } from "../../contracts/tests/fixtures.ts";
+import { TimeInForce } from "../../contracts/fixtures/timeInForce.ts";
 
 const conn = await network.getOrCreate();
 const { matchstick } = conn;
@@ -36,12 +37,12 @@ describe("perps harness smoke: OrderMatched opens PositionSessions", () => {
     await matchstick.captureViewMocks();
     await matchstick.anchor();
 
-    const sellTx = await perps.write.createOrder([marketPrice, -qty], {
+    const sellTx = await perps.write.createOrder([marketPrice, -qty, TimeInForce.GTC], {
       account: seller.account,
     });
     await pc.waitForTransactionReceipt({ hash: sellTx });
 
-    const buyTx = await perps.write.createOrder([marketPrice, qty], {
+    const buyTx = await perps.write.createOrder([marketPrice, qty, TimeInForce.GTC], {
       account: buyer.account,
     });
     await pc.waitForTransactionReceipt({ hash: buyTx });

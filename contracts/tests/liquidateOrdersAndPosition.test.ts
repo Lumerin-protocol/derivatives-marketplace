@@ -2,12 +2,13 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
 import { encodeFunctionData, maxUint256, parseEventLogs, parseUnits, zeroHash } from "viem";
-import type { Hex } from "viem";
+import type { Hex, } from "viem";
 import {
   deployPerpsFixture,
   deployPerpsWithCollateralFixture,
   deployPerpsWithLiquidatablePositionFixture,
 } from "./fixtures.ts";
+import { TimeInForce } from "../fixtures/timeInForce.ts";
 
 const { viem, networkHelpers } = await network.connect();
 
@@ -52,7 +53,7 @@ function encodeLiquidateOrder(abi: readonly unknown[], user: `0x${string}`, orde
  *   - liquidateOrders(user, ids[])          — keeper-chosen ids, stop-on-failure
  *   - liquidatePosition(user, closeQty)     — reverts OrdersStillOpen if any orders remain
  *   - nested multicallStopOnFailure         — per-user skip-and-continue batches
- *   - setLiquidationFee(uint256)            — retained; payout currently disabled
+ *   - setLiquidationFeeBps(uint16)          — bps fee on notional; liquidator share defaults to 0
  *
  * Fixture pattern: build an underwater account that ALSO has resting orders so we can
  * exercise both legs of the strict two-step.
@@ -63,11 +64,12 @@ async function deployUnderwaterWithOrdersFixture(conn: Parameters<typeof deployP
   const { perps, priceOracle, vault } = contracts;
   const { seller, buyer, owner } = accounts;
 
-  // Tighten the flat liquidation fee so the underwater seller's vault can cover the full
-  // per-order fee on every cancel in the batch — keeps the `pays per-order fee` math exact.
-  // Tests that need to exercise the position-side path don't depend on this override.
-  const liquidationFee = parseUnits("0.5", config.tokenDecimals);
-  await perps.write.setLiquidationFee([liquidationFee], { account: owner.account });
+  // Configure a small liquidation fee so the per-order bps fee math is exercised: the fee
+  // is charged on cancelled-order notional, but the liquidator share defaults to 0 (the
+  // whole fee goes to the insurance fund). Tests that need to exercise the position-side
+  // path don't depend on this override.
+  const liquidationFeeBps = 50; // 0.5%
+  await perps.write.setLiquidationFeeBps([liquidationFeeBps], { account: owner.account });
 
   const initialPrice = await perps.read.getMarketPrice();
   const tick = config.minimumPriceIncrement;
@@ -78,27 +80,27 @@ async function deployUnderwaterWithOrdersFixture(conn: Parameters<typeof deployP
   await vault.write.deposit([minCollateral * 2n], { account: buyer.account });
 
   // Position: seller short, buyer long (matched).
-  await perps.write.createOrder([initialPrice, -qty], { account: seller.account });
-  await perps.write.createOrder([initialPrice, qty], { account: buyer.account });
+  await perps.write.createOrder([initialPrice, -qty, TimeInForce.GTC], { account: seller.account });
+  await perps.write.createOrder([initialPrice, qty, TimeInForce.GTC], { account: buyer.account });
 
   // Two extra resting orders for seller (bracket the matched price so they don't accidentally cross).
   const restingQty = parseUnits("0.1", config.quantityDecimals);
-  await perps.write.createOrder([initialPrice + 5n * tick, -restingQty], {
+  await perps.write.createOrder([initialPrice + 5n * tick, -restingQty, TimeInForce.GTC], {
     account: seller.account,
   });
-  await perps.write.createOrder([initialPrice + 10n * tick, -restingQty], {
+  await perps.write.createOrder([initialPrice + 10n * tick, -restingQty, TimeInForce.GTC], {
     account: seller.account,
   });
 
   // One unrelated buyer-owned resting order (well out of the matched zone) — used by the
   // OrderNotBelongToUser test to assert ownership is checked AFTER the underwater predicate.
-  await perps.write.createOrder([initialPrice - 50n * tick, restingQty], {
+  await perps.write.createOrder([initialPrice - 50n * tick, restingQty, TimeInForce.GTC], {
     account: buyer.account,
   });
 
   return {
     ...data,
-    config: { ...config, initialPrice, qty, minCollateral, liquidationFee },
+    config: { ...config, initialPrice, qty, minCollateral, liquidationFeeBps },
     async makeUnderwater() {
       const newPrice = initialPrice * 2n;
       await priceOracle.write.setPrice([newPrice, config.oracle.decimals]);
@@ -166,7 +168,7 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
       );
     });
 
-    it("cancels the order without paying a fee (payout disabled)", async function () {
+    it("cancels the order and charges the bps fee (liquidator share defaults to 0)", async function () {
       const data = await networkHelpers.loadFixture(deployUnderwaterWithOrdersFixture);
       const { contracts, accounts } = data;
       const { perps } = contracts;
@@ -189,17 +191,17 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
       const liqBalanceAfter = await perps.read.balanceOf([buyer2.account.address]);
       const sellerBalanceAfter = await perps.read.balanceOf([seller.account.address]);
 
-      // Keeper-incentive payout is disabled: no transfer between seller and liquidator.
+      // Liquidator gets nothing (liquidatorShareBps defaults to 0); the user pays the fee.
       assert.equal(liqBalanceAfter - liqBalanceBefore, 0n);
-      assert.equal(sellerBalanceBefore - sellerBalanceAfter, 0n);
+      assert.ok(sellerBalanceBefore > sellerBalanceAfter, "user should pay liquidation fee");
 
       const ordersAfter = await perps.read.getUserOrders([seller.account.address]);
       assert.equal(ordersAfter.length, ordersBefore.length - 1);
       assert.ok(!ordersAfter.includes(targetId));
 
       const events = parseEventLogs({ abi: perps.abi, logs: receipt.logs });
-      const cancelled = events.find((e: any) => e.eventName === "OrderCancelled") as any;
-      const liquidated = events.find((e: any) => e.eventName === "OrderLiquidated") as any;
+      const cancelled = events.find((e) => e.eventName === "OrderCancelled");
+      const liquidated = events.find((e) => e.eventName === "OrderLiquidated");
       assert.ok(cancelled, "OrderCancelled should be emitted for indexer compatibility");
       assert.equal(cancelled.args.orderId, targetId);
       assert.ok(liquidated);
@@ -208,20 +210,20 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
         liquidated.args.liquidator.toLowerCase(),
         buyer2.account.address.toLowerCase(),
       );
-      assert.equal(liquidated.args.fee, 0n);
+      assert.ok(liquidated.args.fee > 0n, "fee should be non-zero");
+      assert.equal(sellerBalanceBefore - sellerBalanceAfter, liquidated.args.fee);
     });
 
-    it("does not transfer any fee even when liquidationFee is set high (payout disabled)", async function () {
+    it("does not pay the liquidator even when liquidationFeeBps is set high (share defaults to 0)", async function () {
       const data = await networkHelpers.loadFixture(deployUnderwaterWithOrdersFixture);
-      const { contracts, accounts, config } = data;
+      const { contracts, accounts } = data;
       const { perps } = contracts;
       const { seller, buyer2, owner } = accounts;
 
       await data.makeUnderwater();
 
-      // Set fee far above seller's vault balance — irrelevant, payout is disabled.
-      const huge = parseUnits("100000", config.tokenDecimals);
-      await perps.write.setLiquidationFee([huge], { account: owner.account });
+      // 100% fee — capped at the seller's balance; still nothing for the liquidator.
+      await perps.write.setLiquidationFeeBps([10000], { account: owner.account });
 
       const sellerBalanceBefore = await perps.read.balanceOf([seller.account.address]);
       const liqBalanceBefore = await perps.read.balanceOf([buyer2.account.address]);
@@ -234,8 +236,9 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
       const sellerBalanceAfter = await perps.read.balanceOf([seller.account.address]);
       const liqBalanceAfter = await perps.read.balanceOf([buyer2.account.address]);
 
-      assert.equal(sellerBalanceAfter, sellerBalanceBefore, "seller balance untouched");
-      assert.equal(liqBalanceAfter, liqBalanceBefore, "liquidator balance untouched");
+      // Liquidator still gets 0 at default share. User pays what they can.
+      assert.equal(liqBalanceAfter, liqBalanceBefore, "liquidator balance unchanged");
+      assert.ok(sellerBalanceAfter <= sellerBalanceBefore, "user paid the fee");
     });
   });
 
@@ -360,7 +363,7 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
 
     it("succeeds after orders are cleared via multicallStopOnFailure(liquidateOrder × N)", async function () {
       const data = await networkHelpers.loadFixture(deployUnderwaterWithOrdersFixture);
-      const { contracts, accounts, config } = data;
+      const { contracts, accounts } = data;
       const { perps } = contracts;
       const { seller, buyer2 } = accounts;
 
@@ -380,8 +383,8 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
       assert.equal(positionAfter.netQuantity, 0n);
 
       const liqBalanceAfter = await perps.read.balanceOf([buyer2.account.address]);
-      // Liquidator gets at most liquidationFee on top of any prior fees.
-      assert.ok(liqBalanceAfter - liqBalanceBefore <= config.liquidationFee);
+      // Liquidator gets nothing (liquidatorShareBps defaults to 0).
+      assert.equal(liqBalanceAfter, liqBalanceBefore);
     });
 
     it("emits PositionLiquidated", async function () {
@@ -398,8 +401,8 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
       const receipt = await pc.waitForTransactionReceipt({ hash });
       const events = parseEventLogs({ abi: perps.abi, logs: receipt.logs });
       const positionLiquidated = events.find(
-        (e: any) => e.eventName === "PositionLiquidated",
-      ) as any;
+        (e) => e.eventName === "PositionLiquidated",
+      );
       assert.ok(positionLiquidated);
       assert.equal(
         positionLiquidated.args.user.toLowerCase(),

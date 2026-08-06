@@ -6,6 +6,7 @@ import {
   deployPerpsWithCollateralFixture,
   deployPerpsWithOrdersFixture,
 } from "./fixtures.ts";
+import { TimeInForce } from "../fixtures/timeInForce.ts";
 
 const { networkHelpers } = await network.connect();
 
@@ -19,9 +20,9 @@ describe("HashPowerPerpsDEX - OrderMatched event", function () {
     const marketPrice = await perps.read.getMarketPrice();
     const qty = parseUnits("1", config.quantityDecimals);
 
-    await perps.write.createOrder([marketPrice, -qty], { account: seller.account });
+    await perps.write.createOrder([marketPrice, -qty, TimeInForce.GTC], { account: seller.account });
 
-    const hash = await perps.write.createOrder([marketPrice, qty], { account: buyer.account });
+    const hash = await perps.write.createOrder([marketPrice, qty, TimeInForce.GTC], { account: buyer.account });
     const receipt = await pc.waitForTransactionReceipt({ hash });
 
     const matched = parseEventLogs({ logs: receipt.logs, abi: perps.abi, eventName: "OrderMatched" });
@@ -43,9 +44,9 @@ describe("HashPowerPerpsDEX - OrderMatched event", function () {
     const marketPrice = await perps.read.getMarketPrice();
     const qty = parseUnits("1", config.quantityDecimals);
 
-    await perps.write.createOrder([marketPrice, -qty], { account: seller.account });
+    await perps.write.createOrder([marketPrice, -qty, TimeInForce.GTC], { account: seller.account });
 
-    const hash = await perps.write.createOrder([marketPrice, qty], { account: buyer.account });
+    const hash = await perps.write.createOrder([marketPrice, qty, TimeInForce.GTC], { account: buyer.account });
     const receipt = await pc.waitForTransactionReceipt({ hash });
 
     const [{ args }] = parseEventLogs({
@@ -58,9 +59,7 @@ describe("HashPowerPerpsDEX - OrderMatched event", function () {
     const expectedTakerFee = (notional * config.takerFeeBps) / 10000n;
     const expectedMakerFee = (notional * config.makerFeeBps) / 10000n;
 
-    const actualTakerFee = args.takerFee > config.liquidationFee ? args.takerFee : config.liquidationFee;
-    assert.ok(args.takerFee >= expectedTakerFee, "takerFee should be at least bps fee");
-    assert.equal(actualTakerFee, args.takerFee, "takerFee should respect liquidationFee floor");
+    assert.equal(args.takerFee, expectedTakerFee, "takerFee should match bps calculation");
     assert.equal(args.makerFee, expectedMakerFee, "makerFee should match bps calculation");
   });
 
@@ -73,9 +72,9 @@ describe("HashPowerPerpsDEX - OrderMatched event", function () {
     const marketPrice = await perps.read.getMarketPrice();
     const qty = parseUnits("1", config.quantityDecimals);
 
-    await perps.write.createOrder([marketPrice, -qty], { account: seller.account });
+    await perps.write.createOrder([marketPrice, -qty, TimeInForce.GTC], { account: seller.account });
 
-    const hash = await perps.write.createOrder([marketPrice, qty], { account: buyer.account });
+    const hash = await perps.write.createOrder([marketPrice, qty, TimeInForce.GTC], { account: buyer.account });
     const receipt = await pc.waitForTransactionReceipt({ hash });
 
     const [{ args }] = parseEventLogs({
@@ -100,7 +99,7 @@ describe("HashPowerPerpsDEX - OrderMatched event", function () {
     const sweepPrice = marketPrice + 4n * tick;
     const sweepQty = qty * 3n;
 
-    const hash = await perps.write.createOrder([sweepPrice, sweepQty], {
+    const hash = await perps.write.createOrder([sweepPrice, sweepQty, TimeInForce.GTC], {
       account: buyer2.account,
     });
     const receipt = await pc.waitForTransactionReceipt({ hash });
@@ -136,14 +135,14 @@ describe("HashPowerPerpsDEX - OrderMatched event", function () {
     const tick = config.minimumPriceIncrement;
 
     // buyer2 opens long: buy 1 unit at marketPrice + tick (first sell level)
-    await perps.write.createOrder([marketPrice + tick, qty], { account: buyer2.account });
+    await perps.write.createOrder([marketPrice + tick, qty, TimeInForce.GTC], { account: buyer2.account });
     const positionOpen = await perps.read.getUserPosition([buyer2.account.address]);
     assert.equal(positionOpen.netQuantity, qty);
     const entryPrice = positionOpen.aggregatedEntryPrice;
 
     // buyer2 fully closes: sell 1 unit (match against a resting buy)
-    await perps.write.createOrder([marketPrice - tick, qty], { account: seller.account });
-    const closeHash = await perps.write.createOrder([marketPrice - tick, -qty], {
+    await perps.write.createOrder([marketPrice - tick, qty, TimeInForce.GTC], { account: seller.account });
+    const closeHash = await perps.write.createOrder([marketPrice - tick, -qty, TimeInForce.GTC], {
       account: buyer2.account,
     });
     const closeReceipt = await pc.waitForTransactionReceipt({ hash: closeHash });
@@ -170,7 +169,7 @@ describe("HashPowerPerpsDEX - OrderMatched event", function () {
     const marketPrice = await perps.read.getMarketPrice();
     const qty = parseUnits("1", config.quantityDecimals);
 
-    const sellHash = await perps.write.createOrder([marketPrice, -qty], {
+    const sellHash = await perps.write.createOrder([marketPrice, -qty, TimeInForce.GTC], {
       account: seller.account,
     });
     const sellReceipt = await pc.waitForTransactionReceipt({ hash: sellHash });
@@ -181,7 +180,7 @@ describe("HashPowerPerpsDEX - OrderMatched event", function () {
     });
     const makerOrderId = sellCreated.args.orderId;
 
-    const buyHash = await perps.write.createOrder([marketPrice, qty], {
+    const buyHash = await perps.write.createOrder([marketPrice, qty, TimeInForce.GTC], {
       account: buyer.account,
     });
     const buyReceipt = await pc.waitForTransactionReceipt({ hash: buyHash });

@@ -2,9 +2,9 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
 import { parseUnits, zeroAddress } from "viem";
-import { deployPerpsFixture, deployPerpsWithCollateralFixture } from "./fixtures.ts";
+import { deployPerpsFixture } from "./fixtures.ts";
 
-const { viem, networkHelpers } = await network.connect();
+const { viem, networkHelpers } = await network.getOrCreate();
 
 describe("HashPowerPerpsDEX - Admin Functions", function () {
   describe("setOracle", function () {
@@ -78,17 +78,17 @@ describe("HashPowerPerpsDEX - Admin Functions", function () {
     });
   });
 
-  describe("setLiquidationFee", function () {
-    it("should allow owner to set liquidation fee", async function () {
+  describe("setLiquidationFeeBps", function () {
+    it("should allow owner to set liquidation fee bps", async function () {
       const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { perps } = contracts;
       const { owner } = accounts;
 
-      const newFee = parseUnits("20", 6);
-      await perps.write.setLiquidationFee([newFee], { account: owner.account });
+      const newFeeBps = 200; // 2%
+      await perps.write.setLiquidationFeeBps([newFeeBps], { account: owner.account });
 
-      const liquidationFee = await perps.read.liquidationFee();
-      assert.equal(liquidationFee, newFee);
+      const liquidationFeeBps = await perps.read.liquidationFeeBps();
+      assert.equal(liquidationFeeBps, newFeeBps);
     });
 
     it("should revert when non-owner tries to set", async function () {
@@ -97,7 +97,7 @@ describe("HashPowerPerpsDEX - Admin Functions", function () {
       const { buyer } = accounts;
 
       await viem.assertions.revertWithCustomError(
-        perps.write.setLiquidationFee([parseUnits("20", 6)], { account: buyer.account }),
+        perps.write.setLiquidationFeeBps([200], { account: buyer.account }),
         perps,
         "OwnableUnauthorizedAccount",
       );
@@ -108,20 +108,21 @@ describe("HashPowerPerpsDEX - Admin Functions", function () {
       const { perps } = contracts;
       const { owner } = accounts;
 
-      await perps.write.setLiquidationFee([0n], { account: owner.account });
+      await perps.write.setLiquidationFeeBps([0], { account: owner.account });
 
-      const liquidationFee = await perps.read.liquidationFee();
-      assert.equal(liquidationFee, 0n);
+      const liquidationFeeBps = await perps.read.liquidationFeeBps();
+      assert.equal(liquidationFeeBps, 0);
     });
   });
 
-  describe("setMatchFee", function () {
+  describe("match fee setters (setTakerFeeBps / setMakerFeeBps)", function () {
     it("should allow owner to set maker and taker fees", async function () {
       const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { perps } = contracts;
       const { owner } = accounts;
 
-      await perps.write.setMatchFee([10, 2], { account: owner.account });
+      await perps.write.setTakerFeeBps([10], { account: owner.account });
+      await perps.write.setMakerFeeBps([2], { account: owner.account });
 
       const takerFeeBps = await perps.read.takerFeeBps();
       const makerFeeBps = await perps.read.makerFeeBps();
@@ -135,9 +136,63 @@ describe("HashPowerPerpsDEX - Admin Functions", function () {
       const { buyer } = accounts;
 
       await viem.assertions.revertWithCustomError(
-        perps.write.setMatchFee([10, 0], { account: buyer.account }),
+        perps.write.setTakerFeeBps([10], { account: buyer.account }),
         perps,
         "OwnableUnauthorizedAccount",
+      );
+      await viem.assertions.revertWithCustomError(
+        perps.write.setMakerFeeBps([2], { account: buyer.account }),
+        perps,
+        "OwnableUnauthorizedAccount",
+      );
+    });
+
+    it("accepts a fee at MAX_FEE_BPS and rejects one bp beyond it", async function () {
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
+      const { perps } = contracts;
+      const { owner } = accounts;
+
+      await perps.write.setTakerFeeBps([100], { account: owner.account });
+      assert.equal(await perps.read.takerFeeBps(), 100);
+
+      await viem.assertions.revertWithCustomError(
+        perps.write.setTakerFeeBps([101], { account: owner.account }),
+        perps,
+        "InvalidFee",
+      );
+      // 5% would exactly match the MM spot shock, collapsing the coverage argument the
+      // cap exists to protect.
+      await viem.assertions.revertWithCustomError(
+        perps.write.setMakerFeeBps([500], { account: owner.account }),
+        perps,
+        "InvalidFee",
+      );
+      await viem.assertions.revertWithCustomError(
+        perps.write.setMakerFeeBps([-101], { account: owner.account }),
+        perps,
+        "InvalidFee",
+      );
+    });
+
+    it("rejects a maker rebate that makes the pair a net outflow", async function () {
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
+      const { perps } = contracts;
+      const { owner } = accounts;
+
+      await perps.write.setTakerFeeBps([30], { account: owner.account });
+      // −30 nets to zero and is fine; −31 would pay out more than the match collects.
+      await perps.write.setMakerFeeBps([-30], { account: owner.account });
+      await viem.assertions.revertWithCustomError(
+        perps.write.setMakerFeeBps([-31], { account: owner.account }),
+        perps,
+        "InvalidFee",
+      );
+      // Same bound seen from the taker side: lowering the taker fee under the standing
+      // rebate is equally an outflow.
+      await viem.assertions.revertWithCustomError(
+        perps.write.setTakerFeeBps([29], { account: owner.account }),
+        perps,
+        "InvalidFee",
       );
     });
   });

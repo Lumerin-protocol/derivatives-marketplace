@@ -1,19 +1,25 @@
 import { describe, test, beforeEach, clearStore } from "matchstick-as/assembly/index";
-import { BigInt, ethereum } from "@graphprotocol/graph-ts";
+import { Address, BigInt, ethereum } from "@graphprotocol/graph-ts";
 import { newTypedMockEventWithParams } from "matchstick-as/assembly/defaults";
 import {
   handleMatchFeeUpdated,
-  handleMarginPercentUpdated,
-  handleMaintenanceMarginPercentUpdated,
-  handleLiquidationFeeUpdated,
+  handleMakerFeeBpsUpdated,
+  handleTakerFeeBpsUpdated,
+  handleLiquidationFeeBpsUpdated,
+  handleLiquidatorShareBpsUpdated,
+  handleOracleUpdated,
+  handlePortfolioMarginUpdated,
   handleFundingParametersUpdated,
   handleMinimumMarginPerOrderUpdated,
 } from "../src/perps";
 import {
   MatchFeeUpdated,
-  MarginPercentUpdated,
-  MaintenanceMarginPercentUpdated,
-  LiquidationFeeUpdated,
+  MakerFeeBpsUpdated,
+  TakerFeeBpsUpdated,
+  LiquidationFeeBpsUpdated,
+  LiquidatorShareBpsUpdated,
+  OracleUpdated,
+  PortfolioMarginUpdated,
   FundingParametersUpdated,
   MinimumMarginPerOrderUpdated,
 } from "../generated/HashPowerPerpsDEX/HashPowerPerpsDEX";
@@ -43,34 +49,72 @@ describe("config update handlers", () => {
     assert.fieldEquals("Perps", "0", "lastUpdatedAt", event.block.timestamp.toString());
   });
 
-  test("handleMarginPercentUpdated sets marginPercent", () => {
-    const event = newTypedMockEventWithParams<MarginPercentUpdated>([
-      paramI32("newMarginPercent", 10),
+  test("handleMakerFeeBpsUpdated sets makerFeeBps", () => {
+    const event = newTypedMockEventWithParams<MakerFeeBpsUpdated>([
+      paramI32("newMakerFeeBps", -5),
     ]);
-    handleMarginPercentUpdated(event);
+    handleMakerFeeBpsUpdated(event);
 
-    assert.fieldEquals("Perps", "0", "marginPercent", "10");
+    assert.fieldEquals("Perps", "0", "makerFeeBps", "-5");
     assert.fieldEquals("Perps", "0", "lastUpdatedAt", event.block.timestamp.toString());
   });
 
-  test("handleMaintenanceMarginPercentUpdated sets maintenanceMarginPercent", () => {
-    const event = newTypedMockEventWithParams<MaintenanceMarginPercentUpdated>([
-      paramI32("newMaintenanceMarginPercent", 5),
+  test("handleTakerFeeBpsUpdated sets takerFeeBps", () => {
+    const event = newTypedMockEventWithParams<TakerFeeBpsUpdated>([
+      paramI32("newTakerFeeBps", 20),
     ]);
-    handleMaintenanceMarginPercentUpdated(event);
+    handleTakerFeeBpsUpdated(event);
 
-    assert.fieldEquals("Perps", "0", "maintenanceMarginPercent", "5");
+    assert.fieldEquals("Perps", "0", "takerFeeBps", "20");
     assert.fieldEquals("Perps", "0", "lastUpdatedAt", event.block.timestamp.toString());
   });
 
-  test("handleLiquidationFeeUpdated sets liquidationFee", () => {
-    const liqFee = BigInt.fromI32(25000);
-    const event = newTypedMockEventWithParams<LiquidationFeeUpdated>([
-      paramUint("newLiquidationFee", liqFee),
+  test("handleLiquidationFeeBpsUpdated sets liquidationFeeBps", () => {
+    const event = newTypedMockEventWithParams<LiquidationFeeBpsUpdated>([
+      paramI32("newLiquidationFeeBps", 50),
     ]);
-    handleLiquidationFeeUpdated(event);
+    handleLiquidationFeeBpsUpdated(event);
 
-    assert.fieldEquals("Perps", "0", "liquidationFee", liqFee.toString());
+    assert.fieldEquals("Perps", "0", "liquidationFeeBps", "50");
+    assert.fieldEquals("Perps", "0", "lastUpdatedAt", event.block.timestamp.toString());
+  });
+
+  test("handleLiquidatorShareBpsUpdated sets liquidatorShareBps", () => {
+    const event = newTypedMockEventWithParams<LiquidatorShareBpsUpdated>([
+      paramI32("newLiquidatorShareBps", 2500),
+    ]);
+    handleLiquidatorShareBpsUpdated(event);
+
+    assert.fieldEquals("Perps", "0", "liquidatorShareBps", "2500");
+    assert.fieldEquals("Perps", "0", "lastUpdatedAt", event.block.timestamp.toString());
+  });
+
+  test("handleOracleUpdated sets priceOracle", () => {
+    const oracle = Address.fromString(
+      "0x1111111111111111111111111111111111111111",
+    );
+    const event = newTypedMockEventWithParams<OracleUpdated>([
+      new ethereum.EventParam("newOracle", ethereum.Value.fromAddress(oracle)),
+    ]);
+    handleOracleUpdated(event);
+
+    assert.fieldEquals("Perps", "0", "priceOracle", oracle.toHexString());
+    assert.fieldEquals("Perps", "0", "lastUpdatedAt", event.block.timestamp.toString());
+  });
+
+  test("handlePortfolioMarginUpdated sets portfolioMarginEngine", () => {
+    const engine = Address.fromString(
+      "0x2222222222222222222222222222222222222222",
+    );
+    const event = newTypedMockEventWithParams<PortfolioMarginUpdated>([
+      new ethereum.EventParam(
+        "newPortfolioMargin",
+        ethereum.Value.fromAddress(engine),
+      ),
+    ]);
+    handlePortfolioMarginUpdated(event);
+
+    assert.fieldEquals("Perps", "0", "portfolioMarginEngine", engine.toHexString());
     assert.fieldEquals("Perps", "0", "lastUpdatedAt", event.block.timestamp.toString());
   });
 

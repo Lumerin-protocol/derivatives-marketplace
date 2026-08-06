@@ -27,14 +27,14 @@ async function main() {
     "PRICE_ORACLE_ADDRESS",
     "TAKER_FEE_BPS",
     "MAKER_FEE_BPS",
-    "LIQUIDATION_FEE",
+    "LIQUIDATION_FEE_BPS",
     "MINIMUM_PRICE_INCREMENT",
   );
   const SAFE_OWNER_ADDRESS = readOptionalAddress("SAFE_OWNER_ADDRESS");
   // Contract size is a compile-time constant (CONTRACT_SIZE_HPS_DAY = 1e15 = 1 PH/s over a day → one
   // contract = 1 PH/s/day); it is not deploy-configurable.
   // Optional: wire the perps DEX into the cross-product PortfolioMarginEngine
-  // (perps.setPortfolioMargin + PME.setPerps + Vault.setAuthorizedCaller). When
+  // (perps.setPortfolioMargin + PME.addLinearMarket + Vault.setAuthorizedCaller). When
   // the deployer doesn't own the PME or the vault the script logs the calldata
   // for the current owner Safe instead of executing the call.
   const MARGIN_ENGINE_ADDRESS = readOptionalAddress("MARGIN_ENGINE_ADDRESS");
@@ -83,11 +83,11 @@ async function main() {
   // Deploy HashPowerPerpsDEX implementation
   logInfo("Deploy HashPowerPerpsDEX implementation", {
     contract: "HashPowerPerpsDEX",
-    args: `minimumPriceIncrement=${env.MINIMUM_PRICE_INCREMENT}`,
+    args: `vault=${env.VAULT_ADDRESS}`,
   });
   await logPrompt("Proceed?");
   console.log("Deploying HashPowerPerpsDEX implementation...");
-  const args = [BigInt(env.MINIMUM_PRICE_INCREMENT)] as const;
+  const args = [getAddress(env.VAULT_ADDRESS)] as const;
   const perpsImpl = await viem.deployContract("HashPowerPerpsDEX", args);
   logStep("Deployed", addrUrl(pc, perpsImpl.address));
 
@@ -124,18 +124,20 @@ async function main() {
   });
   await logPrompt("Proceed?");
   console.log("Setting fee bps...");
-  const feeRes = await perps.simulate.setMatchFee([
-    Number(env.TAKER_FEE_BPS),
-    Number(env.MAKER_FEE_BPS),
-  ]);
-  const feeReceipt = await writeAndWait(deployer, feeRes);
-  logStep("Done", txUrl(pc, feeReceipt.transactionHash));
+  const takerFeeRes = await perps.simulate.setTakerFeeBps([Number(env.TAKER_FEE_BPS)]);
+  const takerFeeReceipt = await writeAndWait(deployer, takerFeeRes);
+  logStep("Done", txUrl(pc, takerFeeReceipt.transactionHash));
+  const makerFeeRes = await perps.simulate.setMakerFeeBps([Number(env.MAKER_FEE_BPS)]);
+  const makerFeeReceipt = await writeAndWait(deployer, makerFeeRes);
+  logStep("Done", txUrl(pc, makerFeeReceipt.transactionHash));
 
   // Set liquidation fee
-  logInfo("Set liquidation fee", { liquidationFee: env.LIQUIDATION_FEE });
+  logInfo("Set liquidation fee bps", { liquidationFeeBps: env.LIQUIDATION_FEE_BPS });
   await logPrompt("Proceed?");
-  console.log("Setting liquidation fee...");
-  const liquidationFeeRes = await perps.simulate.setLiquidationFee([BigInt(env.LIQUIDATION_FEE)]);
+  console.log("Setting liquidation fee bps...");
+  const liquidationFeeRes = await perps.simulate.setLiquidationFeeBps([
+    Number(env.LIQUIDATION_FEE_BPS),
+  ]);
   const liquidationFeeReceipt = await writeAndWait(deployer, liquidationFeeRes);
   logStep("Done", txUrl(pc, liquidationFeeReceipt.transactionHash));
 
@@ -154,19 +156,31 @@ async function main() {
     }
 
     if (deployerIsPmeOwner) {
-      logInfo("PME.setPerps", { perps: perps.address });
+      logInfo("PME.addLinearMarket (perps)", { market: perps.address });
       await logPrompt("Proceed?");
-      const sim = await pme.simulate.setPerps([perps.address]);
+      const sim = await pme.simulate.addLinearMarket([perps.address]);
       const receipt = await writeAndWait(deployer, sim);
       logStep("Done", txUrl(pc, receipt.transactionHash));
+
+      logInfo("PME.setOracle", { oracle: env.PRICE_ORACLE_ADDRESS });
+      await logPrompt("Proceed?");
+      const oracleSim = await pme.simulate.setOracle([env.PRICE_ORACLE_ADDRESS as Address]);
+      const oracleReceipt = await writeAndWait(deployer, oracleSim);
+      logStep("Done", txUrl(pc, oracleReceipt.transactionHash));
     } else {
       const data = encodeFunctionData({
         abi: pme.abi,
-        functionName: "setPerps",
+        functionName: "addLinearMarket",
         args: [perps.address],
       });
+      const oracleData = encodeFunctionData({
+        abi: pme.abi,
+        functionName: "setOracle",
+        args: [env.PRICE_ORACLE_ADDRESS as Address],
+      });
       logInfo("PME wiring (run as PME owner)", { "PME address": pme.address, "PME owner": pmeOwner });
-      logStep(`PME.setPerps(${perps.address})`, data);
+      logStep(`PME.addLinearMarket(${perps.address})`, data);
+      logStep(`PME.setOracle(${env.PRICE_ORACLE_ADDRESS})`, oracleData);
     }
 
     if (deployerIsVaultOwner) {
@@ -201,7 +215,7 @@ async function main() {
 
   console.log();
   logInfo("config", {
-    liqFee: env.LIQUIDATION_FEE,
+    liqFeeBps: env.LIQUIDATION_FEE_BPS,
     tick: env.MINIMUM_PRICE_INCREMENT,
     takerFeeBps: env.TAKER_FEE_BPS,
     makerFeeBps: env.MAKER_FEE_BPS,

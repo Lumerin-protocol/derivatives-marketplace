@@ -7,6 +7,7 @@ import {
   deployPerpsWithCollateralFixture,
   deployPerpsWithLiquidatablePositionFixture,
 } from "./fixtures.ts";
+import { TimeInForce } from "../fixtures/timeInForce.ts";
 
 const { viem, networkHelpers } = await network.connect();
 
@@ -47,14 +48,16 @@ describe("HashPowerPerpsDEX - points hook wiring", function () {
         deployPerpsWithCollateralFixture,
       );
       const { perps } = contracts;
-      const { owner, buyer, pc } = accounts;
+      const { owner, pc } = accounts;
 
-      const txHash = await perps.write.setHook([buyer.account.address], { account: owner.account });
+      const { hook } = await deployPointsStack(perps.address, owner);
+
+      const txHash = await perps.write.setHook([hook.address], { account: owner.account });
       const receipt = await pc.waitForTransactionReceipt({ hash: txHash });
       const [{ args }] = parseEventLogs({ logs: receipt.logs, abi: perps.abi, eventName: "HookUpdated" });
 
-      assert.equal(args.hook, getAddress(buyer.account.address));
-      assert.equal(await perps.read.hook(), getAddress(buyer.account.address));
+      assert.equal(args.hook, getAddress(hook.address));
+      assert.equal(await perps.read.hook(), getAddress(hook.address));
     });
 
     it("allows the owner to clear the hook with the zero address", async function () {
@@ -62,11 +65,27 @@ describe("HashPowerPerpsDEX - points hook wiring", function () {
         deployPerpsWithCollateralFixture,
       );
       const { perps } = contracts;
-      const { owner, buyer } = accounts;
+      const { owner } = accounts;
 
-      await perps.write.setHook([buyer.account.address], { account: owner.account });
+      const { hook } = await deployPointsStack(perps.address, owner);
+
+      await perps.write.setHook([hook.address], { account: owner.account });
       await perps.write.setHook([zeroAddress], { account: owner.account });
       assert.equal(await perps.read.hook(), zeroAddress);
+    });
+
+    it("rejects an address holding no code", async function () {
+      const { contracts, accounts } = await networkHelpers.loadFixture(
+        deployPerpsWithCollateralFixture,
+      );
+      const { perps } = contracts;
+      const { owner, buyer } = accounts;
+
+      await viem.assertions.revertWithCustomError(
+        perps.write.setHook([buyer.account.address], { account: owner.account }),
+        perps,
+        "InvalidDependency",
+      );
     });
 
     it("reverts when a non-owner sets the hook", async function () {
@@ -98,8 +117,8 @@ describe("HashPowerPerpsDEX - points hook wiring", function () {
       const marketPrice = await perps.read.getMarketPrice();
       const qty = parseUnits("1", config.quantityDecimals);
 
-      await perps.write.createOrder([marketPrice, -qty], { account: seller.account });
-      await perps.write.createOrder([marketPrice, qty], { account: buyer.account });
+      await perps.write.createOrder([marketPrice, -qty, TimeInForce.GTC], { account: seller.account });
+      await perps.write.createOrder([marketPrice, qty, TimeInForce.GTC], { account: buyer.account });
 
       const notional = (marketPrice * qty) / 10n ** BigInt(config.quantityDecimals);
 
@@ -118,8 +137,8 @@ describe("HashPowerPerpsDEX - points hook wiring", function () {
       const marketPrice = await perps.read.getMarketPrice();
       const qty = parseUnits("1", config.quantityDecimals);
 
-      await perps.write.createOrder([marketPrice, -qty], { account: seller.account });
-      await perps.write.createOrder([marketPrice, qty], { account: buyer.account });
+      await perps.write.createOrder([marketPrice, -qty, TimeInForce.GTC], { account: seller.account });
+      await perps.write.createOrder([marketPrice, qty, TimeInForce.GTC], { account: buyer.account });
       assert.equal(await perps.read.hook(), zeroAddress);
     });
 
@@ -137,9 +156,9 @@ describe("HashPowerPerpsDEX - points hook wiring", function () {
       const marketPrice = await perps.read.getMarketPrice();
       const qty = parseUnits("1", config.quantityDecimals);
 
-      await perps.write.createOrder([marketPrice, -qty], { account: seller.account });
+      await perps.write.createOrder([marketPrice, -qty, TimeInForce.GTC], { account: seller.account });
       await assert.rejects(
-        perps.write.createOrder([marketPrice, qty], { account: buyer.account }),
+        perps.write.createOrder([marketPrice, qty, TimeInForce.GTC], { account: buyer.account }),
       );
     });
   });
@@ -156,15 +175,16 @@ describe("HashPowerPerpsDEX - points hook wiring", function () {
       await perps.write.setHook([hook.address], { account: owner.account });
 
       // Maker must pay a positive fee to earn; enable a 3x bonus tapering over a 1% spread.
-      await perps.write.setMatchFee([10, 5], { account: owner.account });
+      await perps.write.setTakerFeeBps([10], { account: owner.account });
+      await perps.write.setMakerFeeBps([5], { account: owner.account });
       await hook.write.setPriceImprovement([3n * WAD, WAD / 100n], { account: owner.account });
 
       const marketPrice = await perps.read.getMarketPrice();
       const qty = parseUnits("1", config.quantityDecimals);
 
       // Seller rests at the oracle price (spread 0 → full 3x), buyer takes.
-      await perps.write.createOrder([marketPrice, -qty], { account: seller.account });
-      await perps.write.createOrder([marketPrice, qty], { account: buyer.account });
+      await perps.write.createOrder([marketPrice, -qty, TimeInForce.GTC], { account: seller.account });
+      await perps.write.createOrder([marketPrice, qty, TimeInForce.GTC], { account: buyer.account });
 
       const notional = (marketPrice * qty) / 10n ** BigInt(config.quantityDecimals);
 

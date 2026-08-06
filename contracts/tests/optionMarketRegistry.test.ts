@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { network } from "hardhat";
 import { deployRegistryFixture, defaultSeries } from "./optionsFixtures.ts";
 
-const { viem, networkHelpers } = await network.connect();
+const { networkHelpers } = await network.getOrCreate();
 
 describe("OptionMarketRegistry", () => {
   describe("initialization", () => {

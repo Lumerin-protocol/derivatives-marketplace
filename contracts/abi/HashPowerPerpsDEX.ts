@@ -2,9 +2,9 @@ export const HashPowerPerpsDEXAbi = [
   {
     "inputs": [
       {
-        "internalType": "uint256",
-        "name": "_minimumPriceIncrement",
-        "type": "uint256"
+        "internalType": "contract ICollateralVault",
+        "name": "_vault",
+        "type": "address"
       }
     ],
     "stateMutability": "nonpayable",
@@ -64,6 +64,16 @@ export const HashPowerPerpsDEXAbi = [
   },
   {
     "inputs": [],
+    "name": "InvalidDependency",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidFee",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "InvalidFundingParameters",
     "type": "error"
   },
@@ -105,6 +115,11 @@ export const HashPowerPerpsDEXAbi = [
   {
     "inputs": [],
     "name": "MaxOrdersPerParticipantReached",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "MaxPriceLevelsReached",
     "type": "error"
   },
   {
@@ -209,6 +224,16 @@ export const HashPowerPerpsDEXAbi = [
       }
     ],
     "name": "UUPSUnsupportedProxiableUUID",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "VaultMismatch",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ZeroAddress",
     "type": "error"
   },
   {
@@ -324,12 +349,12 @@ export const HashPowerPerpsDEXAbi = [
     "inputs": [
       {
         "indexed": false,
-        "internalType": "uint256",
-        "name": "newLiquidationFee",
-        "type": "uint256"
+        "internalType": "uint16",
+        "name": "newLiquidationFeeBps",
+        "type": "uint16"
       }
     ],
-    "name": "LiquidationFeeUpdated",
+    "name": "LiquidationFeeBpsUpdated",
     "type": "event"
   },
   {
@@ -337,12 +362,12 @@ export const HashPowerPerpsDEXAbi = [
     "inputs": [
       {
         "indexed": false,
-        "internalType": "uint8",
-        "name": "newMaintenanceMarginPercent",
-        "type": "uint8"
+        "internalType": "uint16",
+        "name": "newLiquidatorShareBps",
+        "type": "uint16"
       }
     ],
-    "name": "MaintenanceMarginPercentUpdated",
+    "name": "LiquidatorShareBpsUpdated",
     "type": "event"
   },
   {
@@ -350,12 +375,12 @@ export const HashPowerPerpsDEXAbi = [
     "inputs": [
       {
         "indexed": false,
-        "internalType": "uint8",
-        "name": "newMarginPercent",
-        "type": "uint8"
+        "internalType": "int16",
+        "name": "newMakerFeeBps",
+        "type": "int16"
       }
     ],
-    "name": "MarginPercentUpdated",
+    "name": "MakerFeeBpsUpdated",
     "type": "event"
   },
   {
@@ -388,6 +413,19 @@ export const HashPowerPerpsDEXAbi = [
       }
     ],
     "name": "MinimumMarginPerOrderUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "newOracle",
+        "type": "address"
+      }
+    ],
+    "name": "OracleUpdated",
     "type": "event"
   },
   {
@@ -592,6 +630,19 @@ export const HashPowerPerpsDEXAbi = [
     "anonymous": false,
     "inputs": [
       {
+        "indexed": false,
+        "internalType": "address",
+        "name": "newPortfolioMargin",
+        "type": "address"
+      }
+    ],
+    "name": "PortfolioMarginUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
         "indexed": true,
         "internalType": "address",
         "name": "user",
@@ -623,6 +674,19 @@ export const HashPowerPerpsDEXAbi = [
       }
     ],
     "name": "PositionLiquidated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "int16",
+        "name": "newTakerFeeBps",
+        "type": "int16"
+      }
+    ],
+    "name": "TakerFeeBpsUpdated",
     "type": "event"
   },
   {
@@ -762,19 +826,6 @@ export const HashPowerPerpsDEXAbi = [
     "type": "function"
   },
   {
-    "inputs": [],
-    "name": "collateralToken",
-    "outputs": [
-      {
-        "internalType": "contract IERC20",
-        "name": "",
-        "type": "address"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
     "inputs": [
       {
         "internalType": "uint256",
@@ -785,6 +836,11 @@ export const HashPowerPerpsDEXAbi = [
         "internalType": "int256",
         "name": "_quantity",
         "type": "int256"
+      },
+      {
+        "internalType": "enum HashPowerPerpsDEXBase.TimeInForce",
+        "name": "_tif",
+        "type": "uint8"
       }
     ],
     "name": "createOrder",
@@ -795,29 +851,6 @@ export const HashPowerPerpsDEXAbi = [
   {
     "inputs": [
       {
-        "internalType": "uint256",
-        "name": "_price",
-        "type": "uint256"
-      },
-      {
-        "internalType": "int256",
-        "name": "_quantity",
-        "type": "int256"
-      },
-      {
-        "internalType": "enum HashPowerPerpsDEX.TimeInForce",
-        "name": "_tif",
-        "type": "uint8"
-      }
-    ],
-    "name": "createOrderV2",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
         "components": [
           {
             "internalType": "uint256",
@@ -828,44 +861,19 @@ export const HashPowerPerpsDEXAbi = [
             "internalType": "int256",
             "name": "quantity",
             "type": "int256"
+          },
+          {
+            "internalType": "enum HashPowerPerpsDEXBase.TimeInForce",
+            "name": "timeInForce",
+            "type": "uint8"
           }
         ],
-        "internalType": "struct HashPowerPerpsDEX.OrderIntent[]",
+        "internalType": "struct HashPowerPerpsDEXBase.OrderIntent[]",
         "name": "_intents",
         "type": "tuple[]"
       }
     ],
     "name": "createOrders",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "components": [
-          {
-            "internalType": "uint256",
-            "name": "price",
-            "type": "uint256"
-          },
-          {
-            "internalType": "int256",
-            "name": "quantity",
-            "type": "int256"
-          },
-          {
-            "internalType": "enum HashPowerPerpsDEX.TimeInForce",
-            "name": "timeInForce",
-            "type": "uint8"
-          }
-        ],
-        "internalType": "struct HashPowerPerpsDEX.OrderIntentV2[]",
-        "name": "_intents",
-        "type": "tuple[]"
-      }
-    ],
-    "name": "createOrdersV2",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -878,19 +886,6 @@ export const HashPowerPerpsDEXAbi = [
         "internalType": "int256",
         "name": "",
         "type": "int256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "decimals",
-    "outputs": [
-      {
-        "internalType": "uint8",
-        "name": "",
-        "type": "uint8"
       }
     ],
     "stateMutability": "view",
@@ -949,44 +944,6 @@ export const HashPowerPerpsDEXAbi = [
     "type": "function"
   },
   {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "_user",
-        "type": "address"
-      }
-    ],
-    "name": "getInitialMargin",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "_user",
-        "type": "address"
-      }
-    ],
-    "name": "getMaintenanceMargin",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
     "inputs": [],
     "name": "getMarketPrice",
     "outputs": [
@@ -994,6 +951,25 @@ export const HashPowerPerpsDEXAbi = [
         "internalType": "uint256",
         "name": "",
         "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      }
+    ],
+    "name": "getNetPositionDelta",
+    "outputs": [
+      {
+        "internalType": "int256",
+        "name": "",
+        "type": "int256"
       }
     ],
     "stateMutability": "view",
@@ -1027,7 +1003,7 @@ export const HashPowerPerpsDEXAbi = [
             "type": "int256"
           }
         ],
-        "internalType": "struct HashPowerPerpsDEX.Order",
+        "internalType": "struct HashPowerPerpsDEXBase.Order",
         "name": "",
         "type": "tuple"
       }
@@ -1067,11 +1043,16 @@ export const HashPowerPerpsDEXAbi = [
         "type": "address"
       }
     ],
-    "name": "getOrderMargin",
+    "name": "getOrderValues",
     "outputs": [
       {
         "internalType": "uint256",
-        "name": "",
+        "name": "buyValue",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "sellValue",
         "type": "uint256"
       }
     ],
@@ -1129,12 +1110,49 @@ export const HashPowerPerpsDEXAbi = [
         "type": "address"
       }
     ],
-    "name": "getRequiredMargin",
+    "name": "getRiskView",
     "outputs": [
       {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
+        "components": [
+          {
+            "internalType": "int256",
+            "name": "netPositionDelta",
+            "type": "int256"
+          },
+          {
+            "internalType": "int256",
+            "name": "unrealizedPnl",
+            "type": "int256"
+          },
+          {
+            "internalType": "int256",
+            "name": "pendingFunding",
+            "type": "int256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "buyOrderDelta",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "sellOrderDelta",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "buyOrderFillLoss",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "sellOrderFillLoss",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct ILinearMarket.RiskView",
+        "name": "view_",
+        "type": "tuple"
       }
     ],
     "stateMutability": "view",
@@ -1201,7 +1219,7 @@ export const HashPowerPerpsDEXAbi = [
             "type": "uint256"
           }
         ],
-        "internalType": "struct HashPowerPerpsDEX.Position",
+        "internalType": "struct HashPowerPerpsDEXBase.Position",
         "name": "",
         "type": "tuple"
       }
@@ -1359,12 +1377,12 @@ export const HashPowerPerpsDEXAbi = [
   },
   {
     "inputs": [],
-    "name": "liquidationFee",
+    "name": "liquidationFeeBps",
     "outputs": [
       {
-        "internalType": "uint256",
+        "internalType": "uint16",
         "name": "",
-        "type": "uint256"
+        "type": "uint16"
       }
     ],
     "stateMutability": "view",
@@ -1372,12 +1390,12 @@ export const HashPowerPerpsDEXAbi = [
   },
   {
     "inputs": [],
-    "name": "maintenanceMarginPercent",
+    "name": "liquidatorShareBps",
     "outputs": [
       {
-        "internalType": "uint8",
+        "internalType": "uint16",
         "name": "",
-        "type": "uint8"
+        "type": "uint16"
       }
     ],
     "stateMutability": "view",
@@ -1391,19 +1409,6 @@ export const HashPowerPerpsDEXAbi = [
         "internalType": "int16",
         "name": "",
         "type": "int16"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "marginPercent",
-    "outputs": [
-      {
-        "internalType": "uint8",
-        "name": "",
-        "type": "uint8"
       }
     ],
     "stateMutability": "view",
@@ -1596,12 +1601,25 @@ export const HashPowerPerpsDEXAbi = [
   {
     "inputs": [
       {
-        "internalType": "uint256",
-        "name": "_liquidationFee",
-        "type": "uint256"
+        "internalType": "uint16",
+        "name": "_bps",
+        "type": "uint16"
       }
     ],
-    "name": "setLiquidationFee",
+    "name": "setLiquidationFeeBps",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint16",
+        "name": "_bps",
+        "type": "uint16"
+      }
+    ],
+    "name": "setLiquidatorShareBps",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -1610,16 +1628,11 @@ export const HashPowerPerpsDEXAbi = [
     "inputs": [
       {
         "internalType": "int16",
-        "name": "_takerFeeBps",
-        "type": "int16"
-      },
-      {
-        "internalType": "int16",
         "name": "_makerFeeBps",
         "type": "int16"
       }
     ],
-    "name": "setMatchFee",
+    "name": "setMakerFeeBps",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -1659,6 +1672,19 @@ export const HashPowerPerpsDEXAbi = [
       }
     ],
     "name": "setPortfolioMargin",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "int16",
+        "name": "_takerFeeBps",
+        "type": "int16"
+      }
+    ],
+    "name": "setTakerFeeBps",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -1750,7 +1776,7 @@ export const HashPowerPerpsDEXAbi = [
             "type": "int256"
           }
         ],
-        "internalType": "struct HashPowerPerpsDEX.ReduceIntent[]",
+        "internalType": "struct HashPowerPerpsDEXBase.ReduceIntent[]",
         "name": "_reduces",
         "type": "tuple[]"
       },
@@ -1765,9 +1791,14 @@ export const HashPowerPerpsDEXAbi = [
             "internalType": "int256",
             "name": "quantity",
             "type": "int256"
+          },
+          {
+            "internalType": "enum HashPowerPerpsDEXBase.TimeInForce",
+            "name": "timeInForce",
+            "type": "uint8"
           }
         ],
-        "internalType": "struct HashPowerPerpsDEX.OrderIntent[]",
+        "internalType": "struct HashPowerPerpsDEXBase.OrderIntent[]",
         "name": "_intents",
         "type": "tuple[]"
       }

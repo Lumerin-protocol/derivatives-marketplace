@@ -1,10 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
-import { parseUnits, getAddress, encodeFunctionData, zeroAddress } from "viem";
+import { parseUnits, getAddress, encodeFunctionData, } from "viem";
 import { deployPerpsWithCollateralFixture, deployPerpsWithOrdersFixture } from "./fixtures.ts";
+import { TimeInForce } from "../fixtures/timeInForce.ts";
 
-const { viem, networkHelpers } = await network.connect();
+const { networkHelpers } = await network.getOrCreate();
 
 describe("HashPowerPerpsDEX - multicall", function () {
   describe("Batch Create Orders", function () {
@@ -20,9 +21,9 @@ describe("HashPowerPerpsDEX - multicall", function () {
       const qty = parseUnits("1", config.quantityDecimals);
 
       const calls = [
-        encodeFunctionData({ abi: perps.abi, functionName: "createOrder", args: [marketPrice - tick, qty] }),
-        encodeFunctionData({ abi: perps.abi, functionName: "createOrder", args: [marketPrice - 2n * tick, qty] }),
-        encodeFunctionData({ abi: perps.abi, functionName: "createOrder", args: [marketPrice - 3n * tick, qty] }),
+        encodeFunctionData({ abi: perps.abi, functionName: "createOrder", args: [marketPrice - tick, qty, TimeInForce.GTC] }),
+        encodeFunctionData({ abi: perps.abi, functionName: "createOrder", args: [marketPrice - 2n * tick, qty, TimeInForce.GTC] }),
+        encodeFunctionData({ abi: perps.abi, functionName: "createOrder", args: [marketPrice - 3n * tick, qty, TimeInForce.GTC] }),
       ];
 
       await perps.write.multicall([calls], { account: buyer.account });
@@ -43,8 +44,8 @@ describe("HashPowerPerpsDEX - multicall", function () {
       const qty = parseUnits("1", config.quantityDecimals);
 
       const calls = [
-        encodeFunctionData({ abi: perps.abi, functionName: "createOrder", args: [marketPrice - tick, qty] }),
-        encodeFunctionData({ abi: perps.abi, functionName: "createOrder", args: [marketPrice + tick, -qty] }),
+        encodeFunctionData({ abi: perps.abi, functionName: "createOrder", args: [marketPrice - tick, qty, TimeInForce.GTC] }),
+        encodeFunctionData({ abi: perps.abi, functionName: "createOrder", args: [marketPrice + tick, -qty, TimeInForce.GTC] }),
       ];
 
       await perps.write.multicall([calls], { account: buyer.account });
@@ -88,8 +89,8 @@ describe("HashPowerPerpsDEX - multicall", function () {
       const { perps } = contracts;
       const { buyer } = accounts;
 
-      const marginBefore = await perps.read.getMaintenanceMargin([buyer.account.address]);
-      assert.ok(marginBefore > 0n);
+      const riskBefore = await perps.read.getRiskView([buyer.account.address]);
+      assert.ok(riskBefore.buyOrderDelta + riskBefore.sellOrderDelta > 0n);
 
       const orderIds = await perps.read.getUserOrders([buyer.account.address]);
       const calls = orderIds.map((orderId) =>
@@ -98,8 +99,12 @@ describe("HashPowerPerpsDEX - multicall", function () {
 
       await perps.write.multicall([calls], { account: buyer.account });
 
-      const marginAfter = await perps.read.getMaintenanceMargin([buyer.account.address]);
-      assert.equal(marginAfter, 0n);
+      const riskAfter = await perps.read.getRiskView([buyer.account.address]);
+      assert.equal(riskAfter.buyOrderDelta, 0n);
+      assert.equal(riskAfter.sellOrderDelta, 0n);
+      const [buyValue, sellValue] = await perps.read.getOrderValues([buyer.account.address]);
+      assert.equal(buyValue, 0n);
+      assert.equal(sellValue, 0n);
     });
   });
 
@@ -121,8 +126,8 @@ describe("HashPowerPerpsDEX - multicall", function () {
         encodeFunctionData({ abi: perps.abi, functionName: "cancelOrder", args: [orderId] }),
       );
       const createCalls = [
-        encodeFunctionData({ abi: perps.abi, functionName: "createOrder", args: [marketPrice - 4n * tick, qty] }),
-        encodeFunctionData({ abi: perps.abi, functionName: "createOrder", args: [marketPrice - 5n * tick, qty] }),
+        encodeFunctionData({ abi: perps.abi, functionName: "createOrder", args: [marketPrice - 4n * tick, qty, TimeInForce.GTC] }),
+        encodeFunctionData({ abi: perps.abi, functionName: "createOrder", args: [marketPrice - 5n * tick, qty, TimeInForce.GTC] }),
       ];
 
       await perps.write.multicall([[...cancelCalls, ...createCalls]], { account: buyer.account });
@@ -151,8 +156,8 @@ describe("HashPowerPerpsDEX - multicall", function () {
       const qty = parseUnits("1", config.quantityDecimals);
 
       const calls = [
-        encodeFunctionData({ abi: perps.abi, functionName: "createOrder", args: [marketPrice - tick, qty] }),
-        encodeFunctionData({ abi: perps.abi, functionName: "createOrder", args: [0n, qty] }), // invalid price → reverts
+        encodeFunctionData({ abi: perps.abi, functionName: "createOrder", args: [marketPrice - tick, qty, TimeInForce.GTC] }),
+        encodeFunctionData({ abi: perps.abi, functionName: "createOrder", args: [0n, qty, TimeInForce.GTC] }), // invalid price → reverts
       ];
 
       await assert.rejects(
@@ -200,8 +205,8 @@ describe("HashPowerPerpsDEX - multicall", function () {
       const qty = parseUnits("1", config.quantityDecimals);
 
       const calls = [
-        encodeFunctionData({ abi: perps.abi, functionName: "createOrder", args: [marketPrice + tick, -qty] }),
-        encodeFunctionData({ abi: perps.abi, functionName: "createOrder", args: [marketPrice + 2n * tick, -qty] }),
+        encodeFunctionData({ abi: perps.abi, functionName: "createOrder", args: [marketPrice + tick, -qty, TimeInForce.GTC] }),
+        encodeFunctionData({ abi: perps.abi, functionName: "createOrder", args: [marketPrice + 2n * tick, -qty, TimeInForce.GTC] }),
       ];
 
       await perps.write.multicall([calls], { account: seller.account });
@@ -232,7 +237,7 @@ describe("HashPowerPerpsDEX - multicall", function () {
       let individualGas = 0n;
       for (let i = 1; i <= 3; i++) {
         const hash = await perps.write.createOrder(
-          [marketPrice - BigInt(i) * tick, qty],
+          [marketPrice - BigInt(i) * tick, qty, TimeInForce.GTC],
           { account: buyer.account },
         );
         const receipt = await pc.waitForTransactionReceipt({ hash });
@@ -244,7 +249,7 @@ describe("HashPowerPerpsDEX - multicall", function () {
         encodeFunctionData({
           abi: perps.abi,
           functionName: "createOrder",
-          args: [marketPrice + BigInt(i) * tick, -qty],
+          args: [marketPrice + BigInt(i) * tick, -qty, TimeInForce.GTC],
         }),
       );
 

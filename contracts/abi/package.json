@@ -1,0 +1,7 @@
+{
+  "name": "derivatives-marketplace-abi",
+  "type": "module",
+  "exports": {
+    "./*": "./*"
+  }
+}

@@ -1,4 +1,4 @@
-import type { Account, Chain, PublicClient, Transport, WalletClient } from "viem";
+import type { Account, Chain, Transport, WalletClient } from "viem";
 import { getAddress } from "viem/utils";
 import { sepolia, mainnet, arbitrum } from "viem/chains";
 import SafeApiKitImport from "@safe-global/api-kit";

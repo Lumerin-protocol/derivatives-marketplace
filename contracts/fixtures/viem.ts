@@ -19,6 +19,7 @@ import {
   createTestClientInstance,
   hardhat,
 } from "./helpers.ts";
+import { TimeInForce } from "./timeInForce.ts";
 
 const ARTIFACTS_DIR = resolve(import.meta.dirname, "../artifacts");
 
@@ -131,7 +132,7 @@ export async function deployPerpsFixture() {
 
   const marginPercent = 10;
   const maintenanceMarginPercent = 5;
-  const liquidationFee = parseUnits("1", tokenDecimals);
+  const liquidationFeeBps = 50; // 0.5% of notional
   const minimumPriceIncrement = parseUnits("0.01", tokenDecimals);
   const takerFeeBps = 5;
   const makerFeeBps = 0;
@@ -206,16 +207,25 @@ export async function deployPerpsFixture() {
     abi: pmeArtifact.abi,
     client: { public: publicClient, wallet: ownerWallet },
   });
-  await pme.write.setPerps([perpsProxyAddress]);
+  // The PME pins each product to its own vault at registration.
+  const optionsMock = getContract({
+    address: optionsMockAddress,
+    abi: optionsMockArtifact.abi,
+    client: { public: publicClient, wallet: ownerWallet },
+  });
+  await optionsMock.write.setVault([vaultAddress]);
+  await pme.write.addLinearMarket([perpsProxyAddress]);
   await pme.write.setOptions([optionsMockAddress]);
+  await pme.write.setOracle([oracleAddress]);
 
   // Wire vault ↔ perps ↔ PME
   await vault.write.setMarginEngine([pmeAddress]);
   await vault.write.setAuthorizedCaller([perpsProxyAddress, true]);
   await perps.write.setPortfolioMargin([pmeAddress]);
 
-  await perps.write.setMatchFee([takerFeeBps, makerFeeBps]);
-  await perps.write.setLiquidationFee([liquidationFee]);
+  await perps.write.setTakerFeeBps([takerFeeBps]);
+  await perps.write.setMakerFeeBps([makerFeeBps]);
+  await perps.write.setLiquidationFeeBps([liquidationFeeBps]);
 
   // Users approve the VAULT (not the perps DEX) — collateral lives in the vault.
   for (const wallet of [
@@ -239,8 +249,7 @@ export async function deployPerpsFixture() {
   const getMinimumCollateral = (price: bigint, absQuantity: bigint) => {
     const orderValue = (price * absQuantity) / 10n ** BigInt(quantityDecimals);
     const requiredMargin = (orderValue * BigInt(marginPercent)) / 100n;
-    const bpsFee = (orderValue * BigInt(takerFeeBps)) / 10000n;
-    const fee = bpsFee > liquidationFee ? bpsFee : liquidationFee;
+    const fee = (orderValue * BigInt(takerFeeBps)) / 10000n;
     return requiredMargin + fee;
   };
 
@@ -269,7 +278,7 @@ export async function deployPerpsFixture() {
       oracle: { price: initialPrice, decimals: oracleDecimals },
       marginPercent,
       maintenanceMarginPercent,
-      liquidationFee,
+      liquidationFeeBps,
       minimumPriceIncrement,
       takerFeeBps,
       makerFeeBps,
@@ -342,9 +351,9 @@ export async function deployWithLiquidatablePositionFixture() {
   await makeVault(clients.seller2Wallet).write.deposit([minCollateral]);
   await makeVault(clients.buyerWallet).write.deposit([minCollateral * 3n]);
 
-  await perpsSeller.write.createOrder([initialPrice, -qty]);
-  await perpsSeller2.write.createOrder([initialPrice, -qty]);
-  await perpsBuyer.write.createOrder([initialPrice, qty * 2n]);
+  await perpsSeller.write.createOrder([initialPrice, -qty, TimeInForce.GTC]);
+  await perpsSeller2.write.createOrder([initialPrice, -qty, TimeInForce.GTC]);
+  await perpsBuyer.write.createOrder([initialPrice, qty * 2n, TimeInForce.GTC]);
 
   const makeLiquidatable = async (): Promise<bigint> => {
     const newPrice = initialPrice * 2n;

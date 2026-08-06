@@ -14,11 +14,11 @@ An order fee is charged per submission, and margin is checked after every order.
 
 ### Order Matching
 
-Every order goes through `createOrder(price, quantity)` where `price` is a limit price and `quantity` is signed (positive = buy/long, negative = sell/short). The function processes the order in three sequential stages, each consuming as much of the remaining quantity as possible before passing the rest to the next stage.
+Every order goes through `createOrder(price, quantity, timeInForce)` where `price` is a limit price and `quantity` is signed (positive = buy/long, negative = sell/short). The function processes the order in three sequential stages, each consuming as much of the remaining quantity as possible before passing the rest to the next stage.
 
 ```mermaid
 flowchart TD
-    A["createOrder(price, qty)"] --> B[1. Self-Offset]
+    A["createOrder(price, qty, tif)"] --> B[1. Self-Offset]
     B --> C{remaining qty?}
     C -->|Yes| D[2. Match]
     C -->|No| G[Done]
@@ -72,45 +72,44 @@ After all three stages, `_ensureSufficientMargin` verifies the caller still meet
 
 Users deposit an ERC-20 collateral token (e.g. USDC) into the contract, which mints an internal ERC-20 receipt token 1:1. This balance serves as the user's available margin.
 
-Two margin tiers are enforced:
+Margin is **not** computed by this contract. Both tiers come from the `PortfolioMarginEngine`, which nets exposure across every product settling into the same `CollateralVault` (perps, futures, options):
 
-- **Initial margin** (`marginPercent`) — required to place orders and hold positions. Calculated as a percentage of (open order notional + position notional at mark price + any unrealized loss).
-- **Maintenance margin** (`maintenanceMarginPercent`) — a lower threshold below which a position becomes liquidatable. Uses the same formula but with a smaller percentage.
+- **Initial margin** — `portfolioMargin.computePortfolioIM(user)`. Required to place orders (non-reduce-only) and to withdraw.
+- **Maintenance margin** — `portfolioMargin.computePortfolioMM(user)`. Below this the account is liquidatable; `isLiquidatable` and every `liquidate*` entry point compare the vault balance against it.
 
-#### Margin Calculation
+#### What the DEX contributes
 
-Two margin tiers use the same structure but differ in which percentage is applied to the position component:
-
-**Initial margin** (`_getInitialMargin`) — uses `marginPercent` for positions. Checked by `createOrder` (non-reduce-only) and `removeCollateral`:
+The engine reads one batched view per market, `getRiskView(user)`:
 
 ```
-initialMargin = orderMargin + positionMargin
-
-orderMargin    = userTotalOrderValue * marginPercent / 100
-positionMargin = positionValue * marginPercent / 100
-               + abs(unrealizedLoss)
-               + pendingFundingOwed
+netPositionDelta  = netQuantity * 10^collateralDecimals / 10^QUANTITY_DECIMALS
+unrealizedPnl     = mark PnL only
+pendingFunding    = getPendingFunding(user)
+buyOrderDelta     = Σ|q| over resting bids, scaled like netPositionDelta
+sellOrderDelta    = Σ|q| over resting asks
+buyOrderFillLoss  = max(0, Σ q·limit − mark·Σq) over bids
+sellOrderFillLoss = max(0, mark·Σq − Σ q·limit) over asks
 ```
 
-**`getMaintenanceMargin(user)`** — uses `maintenanceMarginPercent` for positions. Used by `isLiquidatable`:
+`unrealizedPnl` here is **not** `getUnrealizedPnl(user)`. The engine adds an unrealized loss and funding owed as independent terms, so netting funding into the PnL would charge the same debt twice; `getUnrealizedPnl` keeps netting it because that is the number a trader wants to read.
+
+The DEX reports **no margin figure at all** any more. It reports raw risk — per-side order delta and per-side instant fill loss — and the engine turns that into a requirement by stressing the resting book as post-fill delta:
 
 ```
-maintenanceMargin = orderMargin + positionMargin
-
-orderMargin       = userTotalOrderValue * marginPercent / 100
-positionMargin    = positionValue * maintenanceMarginPercent / 100
-                  + abs(unrealizedLoss)
-                  + pendingFundingOwed
+portfolioIM ≥ max( stress(netDelta + Σ buyOrderDelta),
+                   stress(netDelta − Σ sellOrderDelta) )
+              + Σ buyOrderFillLoss + Σ sellOrderFillLoss
 ```
 
-Where:
+The two legs bound the requirement after *any* subset of the account's orders fills: a subset leaves net delta somewhere in `[netDelta − sellOrderDelta, netDelta + buyOrderDelta]`, stress is convex in delta, so the maximum over that interval is at an endpoint, and the no-fill case is interior. That guarantee is the reason the venue cannot compute this itself — there is no margin check on a maker at fill time, so the reservation held against a resting order is the only thing standing between a fill and an under-collateralized account, and only the engine can see the whole portfolio's net delta to know whether an order is risk-increasing.
 
-- `userTotalOrderValue` — cached sum of `price * abs(qty) / 10^QUANTITY_DECIMALS` across all resting orders (updated incrementally, never re-scanned)
-- `positionValue` — `oraclePrice * abs(netQuantity) / 10^QUANTITY_DECIMALS`
-- `unrealizedLoss` — `(oraclePrice - entryPrice) * netQuantity / 10^QUANTITY_DECIMALS`, only added when negative (loss). Gains are ignored to be conservative.
-- `pendingFundingOwed` — only added when positive (user owes funding). Funding the user would receive is ignored.
+Two consequences worth naming. Order margin is no longer a per-venue scalar — ask the engine, via `orderMarginOf(user)`, and never sum per-venue figures. And it is no longer constant in price: both the stress term and the fill-loss term move with the mark, so anything modelling it off-chain has to re-evaluate rather than snapshot.
 
-This creates a buffer zone between initial and maintenance margin. Users below initial margin cannot increase exposure or withdraw, but are not liquidated until they fall below maintenance margin. Reduce-only orders (opposite side of position, not exceeding position size) bypass the margin check entirely, ensuring users can always exit a losing position.
+`getOrderValues(user)` remains for off-chain consumers that need the per-side limit-price totals: the fill loss the view reports is clamped at the *current* mark, which makes it non-invertible once it reads zero, so a predictor evaluating at other prices needs the raw values.
+
+The engine then applies its own spot/vol stress scenarios to the netted delta and adds the order margin, unrealized loss and funding owed. Because delta is netted across products, a perps position hedged with futures or options requires less collateral than either leg would in isolation — the portfolio requirement is not the sum of the parts.
+
+Users below initial margin cannot increase exposure or withdraw, but are not liquidated until they fall below maintenance margin. Reduce-only orders (opposite side of position, not exceeding position size) bypass the IM check entirely, ensuring users can always exit a losing position.
 
 ### Positions and PnL
 
@@ -196,7 +195,7 @@ mapping(address => int256) private userFundingSnapshot; // Per-user snapshot of 
 - **`createOrder()`** — Calls `_updateGlobalFunding()` at the top. Per-user settlement happens inside `_updateUserPosition` during matching.
 - **`_updateUserPosition()`** — Calls `_settleFunding(user)` at the very start, before any position logic, ensuring funding is settled at the old position size.
 - **`liquidate()`** — Calls `_updateGlobalFunding()` + `_settleFunding(user)` before liquidation logic. Pending funding debt affects liquidatability.
-- **`getMaintenanceMargin()`** — Includes pending funding owed (if positive) in the margin requirement.
+- **`getRiskView()`** — Reports pending funding to the `PortfolioMarginEngine`, which adds it to the margin requirement when positive (user owes).
 - **`getUnrealizedPnl()`** — Subtracts pending funding from unrealized PnL so users see the full picture.
 
 #### Position Lifecycle and Funding Snapshots
