@@ -24,6 +24,12 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     using EnumerableSet for EnumerableSet.AddressSet;
     using StructuredLinkedList for StructuredLinkedList.List;
 
+    /// @notice Implementation version, bumped on every deployed change.
+    /// @dev Lives here rather than in {HashPowerPerpsDEXBase} so that a diff to
+    ///      this file and the version it ships under stay in the same place,
+    ///      mirroring {Futures}.
+    string public constant VERSION = "2.12.0";
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ICollateralVault _vault) HashPowerPerpsDEXBase(_vault) { }
 

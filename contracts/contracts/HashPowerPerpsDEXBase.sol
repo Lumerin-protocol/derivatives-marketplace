@@ -53,7 +53,6 @@ abstract contract HashPowerPerpsDEXBase is
     ///         oracle quote basis (1 PH/s per day) — no unit rebase is applied in `getMarketPrice()`.
     ///         Intentionally a constant: resizing live contracts is a migration, not a live parameter change.
     uint256 public constant CONTRACT_SIZE_HPS_DAY = 1e15;
-    string public constant VERSION = "2.12.0";
 
     // Immutables (set in constructor, derived from vault)
     ICollateralVault public immutable vault;
