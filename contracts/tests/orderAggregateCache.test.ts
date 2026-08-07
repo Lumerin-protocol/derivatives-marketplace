@@ -138,7 +138,7 @@ describe("HashPowerPerpsDEX order aggregate cache migration", function () {
       buyValue: 0n,
       sellValue: 0n,
     });
-    assert.equal(await upgraded.read.VERSION(), "2.13.0");
+    assert.equal(await upgraded.read.VERSION(), "2.14.0");
   });
 
   it("keeps mixed aggregates exact across create, reduce, cancel, fill, and self-cross", async function () {

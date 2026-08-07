@@ -28,7 +28,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @dev Lives here rather than in {HashPowerPerpsDEXBase} so that a diff to
     ///      this file and the version it ships under stay in the same place,
     ///      mirroring {Futures}.
-    string public constant VERSION = "2.13.0";
+    string public constant VERSION = "2.14.0";
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ICollateralVault _vault) HashPowerPerpsDEXBase(_vault) { }
@@ -40,7 +40,6 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     function initialize(AggregatorV3Interface _priceOracle, ICollateralVault _vault) external initializer {
         __Ownable_init(_msgSender());
         __UUPSUpgradeable_init();
-        __Multicall_init();
 
         setOracle(_priceOracle);
     }
@@ -259,21 +258,9 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @notice Force-close a single underwater user's position. Permissionless.
     /// @dev Strict orders-first invariant: reverts with `OrdersStillOpen` if the user has any
     ///      open orders anywhere in the portfolio, not merely on this book. The keeper must
-    ///      clear them first by composing
-    ///      `multicallStopOnFailure([liquidateOrder × N, liquidatePosition])` so the position
-    ///      close runs atomically once the orders are gone — and must drain the *other*
-    ///      venues' books in the same sweep, since orders there gate this call too.
-    ///
-    ///      Multi-user batches: there is no `liquidateBatch` entry point. Instead, compose
-    ///      nested {MulticallStopOnFailureUpgradeable.multicallStopOnFailure} calls — wrap
-    ///      each per-user clear-and-close as its OWN inner multicall, then bundle them in an
-    ///      outer multicall. The inner converts a per-user revert (e.g. `NotLiquidatable`,
-    ///      `OrdersStillOpen`) into a successful return, so the outer skips that user and
-    ///      keeps going. See {MulticallStopOnFailureUpgradeable} for the OOG semantics this
-    ///      composition still preserves at the leaf level (a clean OOG inside the inner
-    ///      reverts the inner with a non-empty selector, which the outer treats as a normal
-    ///      stop — keepers should size the outer-tx gas as the sum of per-user estimates +
-    ///      a buffer rather than relying on `eth_estimateGas` over the whole bundle).
+    ///      clear them first through each venue's typed `liquidateOrders` method, then
+    ///      re-snapshot portfolio health before closing the position. Orders on *other*
+    ///      venues also gate this call, so keepers must drain every venue before retrying.
     /// @param _closeQty Absolute quantity (QUANTITY_DECIMALS) the keeper wants to close. Clamped to
     ///        `|netQuantity|`; pass `type(uint256).max` for a full close. Sizing the partial amount
     ///        so the account lands at/under IM is the keeper's off-chain responsibility — an

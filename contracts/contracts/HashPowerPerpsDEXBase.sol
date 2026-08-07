@@ -9,7 +9,6 @@ import { StructuredLinkedList } from "solidity-linked-list/contracts/StructuredL
 import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import { MulticallStopOnFailureUpgradeable } from "./MulticallStopOnFailureUpgradeable.sol";
 import { AggregatorV3Interface } from "./interfaces/AggregatorV3Interface.sol";
 import { ICollateralVault } from "collateral-margin/contracts/contracts/interfaces/ICollateralVault.sol";
 import { IPortfolioMarginEngine } from "collateral-margin/contracts/contracts/interfaces/IPortfolioMarginEngine.sol";
@@ -25,7 +24,6 @@ abstract contract HashPowerPerpsDEXBase is
     Initializable,
     UUPSUpgradeable,
     OwnableUpgradeable,
-    MulticallStopOnFailureUpgradeable,
     Versionable
 {
     using SafeERC20 for IERC20;

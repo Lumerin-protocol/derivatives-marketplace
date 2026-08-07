@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
-import { encodeFunctionData, getAddress, parseEventLogs, parseUnits } from "viem";
+import { getAddress, parseEventLogs, parseUnits } from "viem";
 import { deployPerpsWithCollateralFixture } from "./fixtures.ts";
 import { TimeInForce } from "../fixtures/timeInForce.ts";
 
@@ -69,7 +69,7 @@ describe("HashPowerPerpsDEX.createOrders (batch placement)", function () {
     assert.equal(orders.length, 3);
   });
 
-  it("is cheaper than the equivalent multicall(createOrder × N)", async function () {
+  it("is cheaper than equivalent individual createOrder transactions", async function () {
     const { contracts, accounts, config } = await networkHelpers.loadFixture(
       deployPerpsWithCollateralFixture,
     );
@@ -81,20 +81,14 @@ describe("HashPowerPerpsDEX.createOrders (batch placement)", function () {
     const qty = parseUnits("1", config.quantityDecimals);
     const N = 4;
 
-    const baselineCalldata: `0x${string}`[] = [];
+    let baselineGas = 0n;
     for (let i = 0; i < N; i++) {
-      baselineCalldata.push(
-        encodeFunctionData({
-          abi: perps.abi,
-          functionName: "createOrder",
-          args: [marketPrice + BigInt(i + 1) * step, -qty, TimeInForce.GTC],
-        }),
+      const tx = await perps.write.createOrder(
+        [marketPrice + BigInt(i + 1) * step, -qty, TimeInForce.GTC],
+        { account: seller.account },
       );
+      baselineGas += (await pc.waitForTransactionReceipt({ hash: tx })).gasUsed;
     }
-    const baselineTx = await perps.write.multicall([baselineCalldata], {
-      account: seller.account,
-    });
-    const baselineGas = (await pc.waitForTransactionReceipt({ hash: baselineTx })).gasUsed;
 
     const intents: OrderIntent[] = [];
     for (let i = 0; i < N; i++) {
@@ -109,7 +103,7 @@ describe("HashPowerPerpsDEX.createOrders (batch placement)", function () {
 
     assert.ok(
       batchGas < baselineGas,
-      `createOrders (${batchGas}) should be cheaper than multicall(createOrder × ${N}) (${baselineGas})`,
+      `createOrders (${batchGas}) should be cheaper than ${N} createOrder transactions (${baselineGas})`,
     );
   });
 });

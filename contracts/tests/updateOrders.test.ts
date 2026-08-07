@@ -225,7 +225,7 @@ describe("HashPowerPerpsDEX.updateOrders (cancel + reduce + create batch)", func
     );
   });
 
-  it("is cheaper than multicall(cancelOrder × N + createOrders)", async function () {
+  it("is cheaper than separate cancelOrder and createOrders transactions", async function () {
     const { contracts, accounts, config } = await networkHelpers.loadFixture(
       deployPerpsWithCollateralFixture,
     );
@@ -252,30 +252,18 @@ describe("HashPowerPerpsDEX.updateOrders (cancel + reduce + create batch)", func
     await perps.write.createOrders([buyerResting], { account: buyer.account });
     const buyerIds = await perps.read.getUserOrders([buyer.account.address]);
 
-    const baselineCalls: `0x${string}`[] = [];
+    let baselineGas = 0n;
     for (const id of sellerIds) {
-      baselineCalls.push(
-        encodeFunctionData({
-          abi: perps.abi,
-          functionName: "cancelOrder",
-          args: [id],
-        }),
-      );
+      const tx = await perps.write.cancelOrder([id], { account: seller.account });
+      baselineGas += (await pc.waitForTransactionReceipt({ hash: tx })).gasUsed;
     }
     const sellerNext: OrderIntent[] = [
       { price: marketPrice + 4n * step, quantity: -qty, timeInForce: TimeInForce.GTC },
       { price: marketPrice + 5n * step, quantity: -qty, timeInForce: TimeInForce.GTC },
       { price: marketPrice + 6n * step, quantity: -qty, timeInForce: TimeInForce.GTC },
     ];
-    baselineCalls.push(
-      encodeFunctionData({
-        abi: perps.abi,
-        functionName: "createOrders",
-        args: [sellerNext],
-      }),
-    );
-    const baselineTx = await perps.write.multicall([baselineCalls], { account: seller.account });
-    const baselineGas = (await pc.waitForTransactionReceipt({ hash: baselineTx })).gasUsed;
+    const sellerCreateTx = await perps.write.createOrders([sellerNext], { account: seller.account });
+    baselineGas += (await pc.waitForTransactionReceipt({ hash: sellerCreateTx })).gasUsed;
 
     const buyerNext: OrderIntent[] = [
       { price: marketPrice - 4n * step, quantity: qty, timeInForce: TimeInForce.GTC },
@@ -289,7 +277,7 @@ describe("HashPowerPerpsDEX.updateOrders (cancel + reduce + create batch)", func
 
     assert.ok(
       batchGas < baselineGas,
-      `updateOrders (${batchGas}) should be cheaper than multicall cancel+createOrders (${baselineGas})`,
+      `updateOrders (${batchGas}) should be cheaper than separate cancel+create transactions (${baselineGas})`,
     );
   });
 });
