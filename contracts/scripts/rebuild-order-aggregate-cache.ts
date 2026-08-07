@@ -1,39 +1,26 @@
 import hre from "hardhat";
 import {
   getAddress,
-  parseAbiItem,
+  getAbiItem,
   type Address,
   type PublicClient,
 } from "viem";
+import { HashPowerPerpsDEXAbi } from "../abi/HashPowerPerpsDEX.ts";
 import { requireEnvsSet } from "../lib/env.ts";
 import { txUrl, addrUrl } from "../lib/explorer.ts";
 import { logInfo, logPrompt, logStep, logSuccess, logTitle } from "../lib/log.ts";
 import { writeAndWait } from "../lib/writeContract.ts";
 
-const PAGE_SIZE = 1_000;
 const READ_BATCH_SIZE = 25;
 const DEFAULT_WRITE_BATCH_SIZE = 25;
-const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
-const ORDER_CREATED_EVENT = parseAbiItem(
-  "event OrderCreated(bytes32 indexed orderId, address indexed participant, uint256 price, int256 quantity)",
-);
-
-type DiscoverySource = "auto" | "indexer" | "events";
-
-type IndexerResponse = {
-  data?: {
-    _meta: {
-      block: { number: number };
-      hasIndexingErrors: boolean;
-    };
-    users: Array<{
-      id: string;
-      address: string;
-      activeOrderCount: number;
-    }>;
-  };
-  errors?: Array<{ message: string }>;
-};
+const REBUILD_CONFIRMATIONS = 5;
+const DAY = 24n * 60n * 60n;
+const DEFAULT_EVENT_LOOKBACK_SECONDS = 180n * DAY;
+const DEFAULT_EVENT_CHUNK_SIZE = 50_000n;
+const ORDER_CREATED_EVENT = getAbiItem({
+  abi: HashPowerPerpsDEXAbi,
+  name: "OrderCreated",
+});
 
 function readPositiveBigInt(name: string, fallback?: bigint): bigint {
   const raw = process.env[name];
@@ -47,92 +34,41 @@ function readPositiveBigInt(name: string, fallback?: bigint): bigint {
   return value;
 }
 
-function readSource(): DiscoverySource {
-  const source = process.env.ORDER_CACHE_DISCOVERY_SOURCE ?? "auto";
-  if (source !== "auto" && source !== "indexer" && source !== "events") {
-    throw new Error("ORDER_CACHE_DISCOVERY_SOURCE must be auto, indexer, or events");
-  }
-  return source;
-}
-
-async function discoverFromIndexer(
-  url: string,
+async function resolveLookbackStartBlock(
+  pc: PublicClient,
   latestBlock: bigint,
-): Promise<{ addresses: Set<Address>; indexedBlock: bigint }> {
-  const addresses = new Set<Address>();
-  let lastId = ZERO_ADDRESS;
-  let indexedBlock = 0n;
-
-  for (;;) {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        query: `
-          query ActiveUsers($lastId: Bytes!, $first: Int!) {
-            _meta {
-              block { number }
-              hasIndexingErrors
-            }
-            users(
-              first: $first
-              orderBy: id
-              orderDirection: asc
-              where: { activeOrderCount_gt: 0, id_gt: $lastId }
-            ) {
-              id
-              address
-              activeOrderCount
-            }
-          }
-        `,
-        variables: { lastId, first: PAGE_SIZE },
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Indexer returned HTTP ${response.status}: ${await response.text()}`);
-    }
-
-    const payload = (await response.json()) as IndexerResponse;
-    if (payload.errors?.length) {
-      throw new Error(payload.errors.map((error) => error.message).join("; "));
-    }
-    if (!payload.data) throw new Error("Indexer response did not contain data");
-    if (payload.data._meta.hasIndexingErrors) throw new Error("Indexer reports indexing errors");
-
-    indexedBlock = BigInt(payload.data._meta.block.number);
-    for (const user of payload.data.users) {
-      addresses.add(getAddress(user.address));
-    }
-
-    if (payload.data.users.length < PAGE_SIZE) break;
-    lastId = payload.data.users[payload.data.users.length - 1].id;
+  lookbackSeconds: bigint,
+): Promise<bigint> {
+  const latest = await pc.getBlock({ blockNumber: latestBlock });
+  const targetTimestamp =
+    latest.timestamp > lookbackSeconds
+      ? latest.timestamp - lookbackSeconds
+      : 0n;
+  let low = 0n;
+  let high = latestBlock;
+  while (low < high) {
+    const mid = (low + high) / 2n;
+    const block = await pc.getBlock({ blockNumber: mid });
+    if (block.timestamp < targetTimestamp) low = mid + 1n;
+    else high = mid;
   }
-
-  const maxLag = readPositiveBigInt("MAX_INDEXER_LAG_BLOCKS", 50n);
-  const lag = latestBlock > indexedBlock ? latestBlock - indexedBlock : 0n;
-  if (lag > maxLag) {
-    throw new Error(`Indexer is ${lag} blocks behind; maximum allowed lag is ${maxLag}`);
-  }
-
-  return { addresses, indexedBlock };
+  return low;
 }
 
 async function discoverFromEvents(
   pc: PublicClient,
   perpsAddress: Address,
   latestBlock: bigint,
-  startBlock?: bigint,
+  startBlock: bigint,
 ): Promise<Set<Address>> {
   const addresses = new Set<Address>();
-  let fromBlock = startBlock ?? readPositiveBigInt("PERPS_START_BLOCK");
-  let chunkSize = readPositiveBigInt("EVENT_SCAN_CHUNK_SIZE", 5_000n);
+  let toBlock = latestBlock;
+  let chunkSize = readPositiveBigInt("EVENT_SCAN_CHUNK_SIZE", DEFAULT_EVENT_CHUNK_SIZE);
   if (chunkSize === 0n) throw new Error("EVENT_SCAN_CHUNK_SIZE must be greater than zero");
 
-  while (fromBlock <= latestBlock) {
-    const toBlock =
-      fromBlock + chunkSize - 1n < latestBlock ? fromBlock + chunkSize - 1n : latestBlock;
+  while (toBlock >= startBlock) {
+    const desiredFrom = toBlock >= chunkSize - 1n ? toBlock - chunkSize + 1n : 0n;
+    const fromBlock = desiredFrom > startBlock ? desiredFrom : startBlock;
 
     try {
       const logs = await pc.getLogs({
@@ -145,7 +81,8 @@ async function discoverFromEvents(
         if (log.args.participant) addresses.add(getAddress(log.args.participant));
       }
       logStep(`scan ${fromBlock}-${toBlock}`, `${addresses.size} participant(s)`);
-      fromBlock = toBlock + 1n;
+      if (fromBlock === startBlock) break;
+      toBlock = fromBlock - 1n;
     } catch (error) {
       if (chunkSize <= 100n) throw error;
       chunkSize /= 2n;
@@ -161,8 +98,6 @@ async function main() {
 
   const env = requireEnvsSet("PERPS_ADDRESS");
   const perpsAddress = getAddress(env.PERPS_ADDRESS);
-  const source = readSource();
-  const indexerUrl = process.env.PERPS_INDEXER_URL ?? process.env.SUBGRAPH_URL;
 
   const { viem } = await hre.network.connect();
   const [deployer] = await viem.getWalletClients();
@@ -175,42 +110,22 @@ async function main() {
     throw new Error(`Deployer ${deployer.account.address} is not the perps owner ${owner}`);
   }
 
-  let discovered: Set<Address>;
-  let usedSource: "indexer" | "events";
-
-  if (source !== "events" && indexerUrl) {
-    try {
-      const result = await discoverFromIndexer(indexerUrl, latestBlock);
-      discovered = result.addresses;
-      usedSource = "indexer";
-      logStep("indexer block", result.indexedBlock.toString());
-      if (result.indexedBlock < latestBlock) {
-        const tail = await discoverFromEvents(
-          pc,
-          perpsAddress,
-          latestBlock,
-          result.indexedBlock + 1n,
-        );
-        for (const address of tail) discovered.add(address);
-        logStep("indexer tail scan", `${tail.size} participant(s)`);
-      }
-    } catch (error) {
-      if (source === "indexer") throw error;
-      console.warn(`Indexer discovery failed: ${(error as Error).message}`);
-      console.warn("Falling back to OrderCreated event scan");
-      discovered = await discoverFromEvents(pc, perpsAddress, latestBlock);
-      usedSource = "events";
-    }
-  } else {
-    if (source === "indexer") {
-      throw new Error("PERPS_INDEXER_URL or SUBGRAPH_URL is required for indexer discovery");
-    }
-    discovered = await discoverFromEvents(pc, perpsAddress, latestBlock);
-    usedSource = "events";
+  const lookbackSeconds = process.env.EVENT_LOOKBACK_DAYS
+    ? readPositiveBigInt("EVENT_LOOKBACK_DAYS") * DAY
+    : DEFAULT_EVENT_LOOKBACK_SECONDS;
+  if (lookbackSeconds === 0n) {
+    throw new Error("EVENT_LOOKBACK_DAYS must be greater than zero");
   }
+  const startBlock = await resolveLookbackStartBlock(pc, latestBlock, lookbackSeconds);
+  const discovered = await discoverFromEvents(
+    pc,
+    perpsAddress,
+    latestBlock,
+    startBlock,
+  );
 
-  // Event history includes users whose orders are already closed, and an indexer
-  // may be a few blocks behind. Confirm every candidate against proxy storage.
+  // Event history includes users whose orders are already closed. Confirm every
+  // candidate against proxy storage before rebuilding.
   const candidates = [...discovered].sort();
   const activeUsers: Address[] = [];
   for (let offset = 0; offset < candidates.length; offset += READ_BATCH_SIZE) {
@@ -226,7 +141,7 @@ async function main() {
   logInfo("migration", {
     Perps: addrUrl(pc, perpsAddress),
     Owner: addrUrl(pc, owner),
-    Source: usedSource,
+    Source: `OrderCreated events blocks ${startBlock}-${latestBlock}`,
     "Latest block": latestBlock,
     "Discovered participants": candidates.length,
     "Participants with open orders": activeUsers.length,
@@ -251,7 +166,7 @@ async function main() {
   for (let offset = 0; offset < activeUsers.length; offset += writeBatchSize) {
     const batch = activeUsers.slice(offset, offset + writeBatchSize);
     const simulation = await perps.simulate.rebuildOrderAggregateCache([batch]);
-    const receipt = await writeAndWait(deployer, simulation);
+    const receipt = await writeAndWait(deployer, simulation, REBUILD_CONFIRMATIONS);
     logStep(
       `rebuildOrderAggregateCache ${offset + 1}-${offset + batch.length}`,
       txUrl(pc, receipt.transactionHash),

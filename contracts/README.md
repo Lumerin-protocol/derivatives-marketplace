@@ -149,18 +149,16 @@ v2.13 replaces four independent order-cache mappings with one appended
 `OrderAggregate` per user. The old mapping slots remain in storage but are dead:
 all reads and writes use the aggregate's buy/sell quantities and values.
 
-Upgrades from versions before 2.13 must set `PERPS_ORDER_CACHE_USERS` to the
-complete comma-separated list of addresses with open orders. `upgrade:perps`
-fails closed when that list is absent, encodes
-`rebuildOrderAggregateCache(users)` into the same `upgradeToAndCall`, simulates
-and estimates the atomic transaction, then verifies each aggregate against a
-canonical order scan. This prevents the new implementation from being live
-with zero caches.
+`upgrade:perps` only upgrades the implementation. After upgrading from a version
+before 2.13, immediately run `pnpm rebuild:order-aggregate-cache`. This is a
+deliberately non-atomic migration: existing orders have zero aggregate cache
+until the rebuild transactions complete.
 
-For a standalone repair or audit, run `pnpm rebuild:order-aggregate-cache`. It
-discovers active users from a sufficiently current indexer or a complete
-`OrderCreated` event scan, writes in `ORDER_CACHE_WRITE_BATCH_SIZE` batches
-(default 25), and verifies all four fields after writing.
+The rebuild script discovers order owners from `OrderCreated` RPC logs over the
+preceding 180 days and confirms candidates against `getUserOrders`. Set
+`EVENT_LOOKBACK_DAYS` to change the search period. It writes in
+`ORDER_CACHE_WRITE_BATCH_SIZE` batches (default 25) and verifies all four fields
+against a canonical order scan.
 
 ### Funding Fees
 
