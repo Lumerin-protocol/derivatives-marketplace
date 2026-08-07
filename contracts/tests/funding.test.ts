@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
-import { encodeFunctionData, maxUint256, parseUnits, parseEventLogs } from "viem";
+import { maxUint256, parseUnits, parseEventLogs } from "viem";
 import {
   deployPerpsFixture,
   deployPerpsWithFundingFixture,
@@ -457,14 +457,9 @@ describe("HashPowerPerpsDEX - Funding Fees", function () {
       // Strict orders-first invariant: must cancel resting orders before the position can be liquidated.
       const sellerOrders = await perps.read.getUserOrders([seller.account.address]);
       if (sellerOrders.length > 0) {
-        const calls = sellerOrders.map((id) =>
-          encodeFunctionData({
-            abi: perps.abi,
-            functionName: "liquidateOrder",
-            args: [seller.account.address, id],
-          }),
-        );
-        await perps.write.multicallStopOnFailure([calls], { account: buyer2.account });
+        await perps.write.liquidateOrders([seller.account.address, sellerOrders], {
+          account: buyer2.account,
+        });
       }
 
       await perps.write.liquidatePosition([seller.account.address, maxUint256], { account: buyer2.account });

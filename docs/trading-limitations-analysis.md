@@ -142,11 +142,13 @@ All three subsystems delegate margin computation to a shared **PortfolioMarginEn
 | Partial liquidation | Supported. `closeQty < \|netQuantity\|`. Guards against over-liquidation (`OverLiquidation`) | `:934-940` |
 | Keeper fee | **DISABLED** (0 fee emitted). Variable + event field reserved for future incentive. | `:942-945`, `:1006-1016` |
 | Bad debt | User loss > collateral → insurance fund covers up to its balance. Shortfall emits `BadDebt`. | `:1028-1037` |
-| Batch (multi-user) | Via nested `multicallStopOnFailure([multicallStopOnFailure([liquidatePosition])])` | `:900-909` |
+| Batch (multi-user) | No on-chain entry point; keeper processes and re-snapshots each user independently | Keeper venue adapter |
 
-**Critical invariant**: Orders MUST be liquidated before the position. Keepers compose:
+**Critical invariant**: Orders MUST be liquidated before the position. Keepers sequence:
 ```
-multicallStopOnFailure([liquidateOrder × N, liquidatePosition])
+liquidateOrders(user, orderIds)
+re-snapshot portfolio health
+liquidatePosition(user, closeQty)
 ```
 
 ### 7.3 Futures Liquidation

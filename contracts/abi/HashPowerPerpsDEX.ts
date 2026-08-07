@@ -128,17 +128,6 @@ export const HashPowerPerpsDEXAbi = [
     "type": "error"
   },
   {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "index",
-        "type": "uint256"
-      }
-    ],
-    "name": "MulticallSubCallOutOfGas",
-    "type": "error"
-  },
-  {
     "inputs": [],
     "name": "NotInitializing",
     "type": "error"
@@ -1455,49 +1444,6 @@ export const HashPowerPerpsDEXAbi = [
       }
     ],
     "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "bytes[]",
-        "name": "data",
-        "type": "bytes[]"
-      }
-    ],
-    "name": "multicall",
-    "outputs": [
-      {
-        "internalType": "bytes[]",
-        "name": "results",
-        "type": "bytes[]"
-      }
-    ],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "bytes[]",
-        "name": "data",
-        "type": "bytes[]"
-      }
-    ],
-    "name": "multicallStopOnFailure",
-    "outputs": [
-      {
-        "internalType": "bool[]",
-        "name": "successes",
-        "type": "bool[]"
-      },
-      {
-        "internalType": "bytes[]",
-        "name": "results",
-        "type": "bytes[]"
-      }
-    ],
-    "stateMutability": "nonpayable",
     "type": "function"
   },
   {

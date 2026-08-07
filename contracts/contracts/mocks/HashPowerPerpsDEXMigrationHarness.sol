@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import { MulticallUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/MulticallUpgradeable.sol";
 import { ICollateralVault } from "collateral-margin/contracts/contracts/interfaces/ICollateralVault.sol";
 import { HashPowerPerpsDEX } from "../HashPowerPerpsDEX.sol";
 
-/// @dev Test-only harness for reproducing pre-v2.13 order-cache proxy state.
-contract HashPowerPerpsDEXMigrationHarness is HashPowerPerpsDEX {
+/// @dev Test-only harness for reproducing pre-v2.13 order-cache proxy state and
+///      the legacy embedded-multicall inheritance removed in v2.14.
+contract HashPowerPerpsDEXMigrationHarness is HashPowerPerpsDEX, MulticallUpgradeable {
     constructor(ICollateralVault _vault) HashPowerPerpsDEX(_vault) { }
 
     /// @dev Clears only the new aggregate while preserving canonical remaining orders.

@@ -14,6 +14,7 @@ import { logTitle, logInfo, logStep, logSuccess, logPrompt } from "../lib/log.ts
 
 // Target init version after running `initializeV2` on the proxy.
 const TARGET_INIT_VERSION = 2n;
+const TARGET_CODE_VERSION = "2.14.0";
 const UPGRADE_CONFIRMATIONS = 5;
 
 // ERC-7201 namespaced storage slot for OpenZeppelin's `Initializable`:
@@ -71,7 +72,7 @@ async function main() {
 
   // Decide which migrations must run atomically with the upgrade.
   const needsV2Init = currentInitVersion < TARGET_INIT_VERSION;
-  const migrationCalls: Hex[] = [];
+  let initData: Hex = "0x";
   if (needsV2Init) {
     const portfolioMarginAddress = (process.env.PME_ADDRESS ?? zeroAddress) as Hex;
     logInfo("initializeV2 required", {
@@ -82,24 +83,16 @@ async function main() {
           ? "(unset — set later via setPortfolioMargin)"
           : addrUrl(pc, portfolioMarginAddress),
     });
-    migrationCalls.push(encodeFunctionData({
+    initData = encodeFunctionData({
       abi: perps.abi,
       functionName: "initializeV2",
       args: [vaultAddress, portfolioMarginAddress],
-    }));
+    });
   } else {
     logInfo("initializeV2 skipped", {
       reason: `proxy already at init version ${currentInitVersion}`,
     });
   }
-
-  const initData = migrationCalls.length > 1
-    ? encodeFunctionData({
-        abi: perps.abi,
-        functionName: "multicall",
-        args: [migrationCalls],
-      })
-    : migrationCalls[0] ?? "0x";
 
   await logPrompt("Review the configuration above. Proceed with upgrade?");
 
@@ -127,7 +120,7 @@ async function main() {
   logInfo("Upgrade proxy", {
     Proxy: addrUrl(pc, proxyAddress),
     "New implementation": addrUrl(pc, newImpl.address),
-    Call: migrationCalls.length > 0 ? `${migrationCalls.length} migration call(s)` : "none",
+    Call: needsV2Init ? "initializeV2" : "none",
   });
   await logPrompt("Proceed with upgradeToAndCall?");
   console.log("Upgrading proxy...");
@@ -158,8 +151,8 @@ async function main() {
   }
 
   const postCodeVersion = await perps.read.VERSION(atUpgradeBlock);
-  if (postCodeVersion !== "2.13.0") {
-    throw new Error(`Post-upgrade code version is ${postCodeVersion}, expected 2.13.0`);
+  if (postCodeVersion !== TARGET_CODE_VERSION) {
+    throw new Error(`Post-upgrade code version is ${postCodeVersion}, expected ${TARGET_CODE_VERSION}`);
   }
   logStep("Code version", postCodeVersion);
 
