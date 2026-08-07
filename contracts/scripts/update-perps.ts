@@ -1,6 +1,6 @@
 import { requireEnvsSet } from "../lib/env.ts";
 import { network } from "hardhat";
-import { encodeFunctionData, type Hex, type PublicClient, zeroAddress } from "viem";
+import { encodeFunctionData, getAddress, type Hex, type PublicClient, zeroAddress } from "viem";
 import { writeAndWait } from "../lib/writeContract.ts";
 import { verifyContract } from "../lib/verify.ts";
 import { txUrl, addrUrl } from "../lib/explorer.ts";
@@ -54,9 +54,9 @@ async function main() {
 
   const vaultAddress = env.VAULT_ADDRESS as Hex;
 
-  // Decide whether the upgrade needs to run `initializeV2` atomically.
+  // Decide which migrations must run atomically with the upgrade.
   const needsV2Init = currentInitVersion < TARGET_INIT_VERSION;
-  let initData: Hex = "0x";
+  const migrationCalls: Hex[] = [];
   if (needsV2Init) {
     const portfolioMarginAddress = (process.env.PME_ADDRESS ?? zeroAddress) as Hex;
     logInfo("initializeV2 required", {
@@ -67,16 +67,40 @@ async function main() {
           ? "(unset — set later via setPortfolioMargin)"
           : addrUrl(pc, portfolioMarginAddress),
     });
-    initData = encodeFunctionData({
+    migrationCalls.push(encodeFunctionData({
       abi: perps.abi,
       functionName: "initializeV2",
       args: [vaultAddress, portfolioMarginAddress],
-    });
+    }));
   } else {
     logInfo("initializeV2 skipped", {
       reason: `proxy already at init version ${currentInitVersion}`,
     });
   }
+
+  const orderCacheUsers = (process.env.PERPS_ORDER_CACHE_USERS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .map((value) => getAddress(value));
+  if (orderCacheUsers.length > 0) {
+    logInfo("Order quantity cache migration", {
+      users: orderCacheUsers.join(", "),
+    });
+    migrationCalls.push(encodeFunctionData({
+      abi: perps.abi,
+      functionName: "rebuildOrderQuantityCache",
+      args: [orderCacheUsers],
+    }));
+  }
+
+  const initData = migrationCalls.length > 1
+    ? encodeFunctionData({
+        abi: perps.abi,
+        functionName: "multicall",
+        args: [migrationCalls],
+      })
+    : migrationCalls[0] ?? "0x";
 
   await logPrompt("Review the configuration above. Proceed with upgrade?");
 
@@ -104,7 +128,7 @@ async function main() {
   logInfo("Upgrade proxy", {
     Proxy: addrUrl(pc, proxyAddress),
     "New implementation": addrUrl(pc, newImpl.address),
-    Call: needsV2Init ? "initializeV2(vault, portfolioMargin)" : "none",
+    Call: migrationCalls.length > 0 ? `${migrationCalls.length} migration call(s)` : "none",
   });
   await logPrompt("Proceed with upgradeToAndCall?");
   console.log("Upgrading proxy...");

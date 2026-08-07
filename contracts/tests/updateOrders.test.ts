@@ -5,7 +5,7 @@ import { encodeFunctionData, getAddress, parseEventLogs, parseUnits } from "viem
 import { deployPerpsWithCollateralFixture } from "./fixtures.ts";
 import { TimeInForce } from "../fixtures/timeInForce.ts";
 
-const { networkHelpers } = await network.connect();
+const { viem, networkHelpers } = await network.connect();
 
 type OrderIntent = {
   price: bigint;
@@ -89,6 +89,54 @@ describe("HashPowerPerpsDEX.updateOrders (cancel + reduce + create batch)", func
     const receipt = await pc.waitForTransactionReceipt({ hash: tx });
     assert.equal(receipt.status, "success");
     assert.equal((await perps.read.getUserOrders([buyer.account.address])).length, 0);
+  });
+
+  it("cancels legacy orders whose quantity cache was not initialized during upgrade", async function () {
+    const { contracts, accounts, config } = await networkHelpers.loadFixture(
+      deployPerpsWithCollateralFixture,
+    );
+    const { perps, vault } = contracts;
+    const { owner, buyer } = accounts;
+
+    const marketPrice = await perps.read.getMarketPrice();
+    const qty = parseUnits("1", config.quantityDecimals);
+    const legacyOrders = Array.from({ length: 11 }, () => ({
+      price: marketPrice - config.minimumPriceIncrement,
+      quantity: qty,
+      timeInForce: TimeInForce.GTC,
+    }));
+    await perps.write.createOrders([legacyOrders], { account: buyer.account });
+    const legacyOrderIds = await perps.read.getUserOrders([buyer.account.address]);
+
+    const migrationHarnessImpl = await viem.deployContract("HashPowerPerpsDEXMigrationHarness", [vault.address]);
+    await perps.write.upgradeToAndCall([migrationHarnessImpl.address, "0x"], { account: owner.account });
+    const migrationHarness = await viem.getContractAt("HashPowerPerpsDEXMigrationHarness", perps.address);
+
+    // The quantity mappings were introduced by the upgrade. Existing orders and
+    // value caches survived, but these newly appended mappings started at zero.
+    await migrationHarness.write.clearOrderQuantityCache([buyer.account.address], { account: owner.account });
+
+    const fixedImpl = await viem.deployContract("HashPowerPerpsDEX", [vault.address]);
+    const rebuildData = encodeFunctionData({
+      abi: fixedImpl.abi,
+      functionName: "rebuildOrderQuantityCache",
+      args: [[buyer.account.address]],
+    });
+    await migrationHarness.write.upgradeToAndCall([fixedImpl.address, rebuildData], {
+      account: owner.account,
+    });
+    const upgraded = await viem.getContractAt("HashPowerPerpsDEX", perps.address);
+
+    const preCancelRisk = await upgraded.read.getRiskView([buyer.account.address]);
+    assert.equal(preCancelRisk.buyOrderDelta, 11n * qty);
+
+    const replacements = Array.from({ length: 4 }, () => ({
+      price: marketPrice - 2n * config.minimumPriceIncrement,
+      quantity: qty,
+      timeInForce: TimeInForce.GTC,
+    }));
+    await upgraded.write.updateOrders([legacyOrderIds, [], replacements], { account: buyer.account });
+    assert.equal((await upgraded.read.getUserOrders([buyer.account.address])).length, 4);
   });
 
   it("reduces size in place and keeps FIFO head", async function () {

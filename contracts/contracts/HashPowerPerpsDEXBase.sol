@@ -537,6 +537,23 @@ abstract contract HashPowerPerpsDEXBase is
         }
     }
 
+    function _rebuildOrderQuantityCache(address _user) internal {
+        uint256 buyQty;
+        uint256 sellQty;
+        EnumerableSet.Bytes32Set storage ids = participantOrderIdsIndex[_user];
+        uint256 len = ids.length();
+        for (uint256 i = 0; i < len; i++) {
+            int256 quantity = orders[ids.at(i)].quantity;
+            if (quantity > 0) {
+                buyQty += uint256(quantity);
+            } else if (quantity < 0) {
+                sellQty += M.abs(quantity);
+            }
+        }
+        userBuyOrderQty[_user] = buyQty;
+        userSellOrderQty[_user] = sellQty;
+    }
+
     /// @notice Remove an order from the book (internal)
     /// @dev Callers are responsible for updating order values via _getOrderValue before this call.
     function _removeOrder(bytes32 _orderId, address _participant, uint256 _price, bool _isBid) internal {

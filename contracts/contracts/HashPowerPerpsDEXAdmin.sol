@@ -172,6 +172,18 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
         emit FundingParametersUpdated(_fundingRateMaxBps, _fundingPeriod);
     }
 
+    // ── Upgrade migrations ────────────────────────────────────────────────────
+
+    /// @notice Rebuild quantity caches for accounts with orders predating the cache.
+    /// @dev Call through `upgradeToAndCall` so legacy orders are migrated atomically
+    ///      with the implementation upgrade.
+    function rebuildOrderQuantityCache(address[] calldata _users) external onlyOwner {
+        uint256 len = _users.length;
+        for (uint256 i = 0; i < len; i++) {
+            _rebuildOrderQuantityCache(_users[i]);
+        }
+    }
+
     // ── Testnet maintenance ───────────────────────────────────────────────────
 
     /// @notice Reset all trading state (orders, positions, funding, nonce)
