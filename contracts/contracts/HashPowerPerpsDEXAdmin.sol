@@ -172,6 +172,22 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
         emit FundingParametersUpdated(_fundingRateMaxBps, _fundingPeriod);
     }
 
+    // ── Upgrade migrations ────────────────────────────────────────────────────
+
+    /// @notice Rebuild all order aggregate fields for accounts with orders predating v2.13.
+    /// @dev Call through `upgradeToAndCall` so legacy orders are migrated atomically
+    ///      with the implementation upgrade.
+    function rebuildOrderAggregateCache(address[] calldata _users) external onlyOwner {
+        _rebuildOrderAggregateCaches(_users);
+    }
+
+    function _rebuildOrderAggregateCaches(address[] calldata _users) internal {
+        uint256 len = _users.length;
+        for (uint256 i = 0; i < len; i++) {
+            _rebuildOrderAggregateCache(_users[i]);
+        }
+    }
+
     // ── Testnet maintenance ───────────────────────────────────────────────────
 
     /// @notice Reset all trading state (orders, positions, funding, nonce)

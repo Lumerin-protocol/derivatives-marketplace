@@ -1,6 +1,12 @@
 import { requireEnvsSet } from "../lib/env.ts";
 import { network } from "hardhat";
-import { encodeFunctionData, type Hex, type PublicClient, zeroAddress } from "viem";
+import {
+  encodeFunctionData,
+  getAddress,
+  type Hex,
+  type PublicClient,
+  zeroAddress,
+} from "viem";
 import { writeAndWait } from "../lib/writeContract.ts";
 import { verifyContract } from "../lib/verify.ts";
 import { txUrl, addrUrl } from "../lib/explorer.ts";
@@ -8,6 +14,7 @@ import { logTitle, logInfo, logStep, logSuccess, logPrompt } from "../lib/log.ts
 
 // Target init version after running `initializeV2` on the proxy.
 const TARGET_INIT_VERSION = 2n;
+const UPGRADE_CONFIRMATIONS = 5;
 
 // ERC-7201 namespaced storage slot for OpenZeppelin's `Initializable`:
 //   keccak256(abi.encode(uint256(keccak256("openzeppelin.storage.Initializable")) - 1)) & ~bytes32(uint256(0xff))
@@ -15,8 +22,16 @@ const TARGET_INIT_VERSION = 2n;
 const INITIALIZABLE_STORAGE_SLOT: Hex =
   "0xf0c57e16840df040f15088dc2f81fe391c3923bec73e23a9662efc9c229c6a00";
 
-async function readInitializedVersion(pc: PublicClient, proxy: Hex): Promise<bigint> {
-  const raw = await pc.getStorageAt({ address: proxy, slot: INITIALIZABLE_STORAGE_SLOT });
+async function readInitializedVersion(
+  pc: PublicClient,
+  proxy: Hex,
+  blockNumber?: bigint,
+): Promise<bigint> {
+  const raw = await pc.getStorageAt({
+    address: proxy,
+    slot: INITIALIZABLE_STORAGE_SLOT,
+    blockNumber,
+  });
   if (!raw || raw === "0x" || raw === "0x0") return 0n;
   // `_initialized` is a uint64 occupying the lowest 8 bytes of the 32-byte slot
   // (EVM packs structs right-aligned per field in the same slot, starting from the low-order end).
@@ -29,7 +44,7 @@ async function main() {
 
   const env = requireEnvsSet("PERPS_ADDRESS", "VAULT_ADDRESS");
 
-  const proxyAddress = env.PERPS_ADDRESS as Hex;
+  const proxyAddress = getAddress(env.PERPS_ADDRESS);
 
   const { viem } = await network.connect();
   const [deployer] = await viem.getWalletClients();
@@ -54,9 +69,9 @@ async function main() {
 
   const vaultAddress = env.VAULT_ADDRESS as Hex;
 
-  // Decide whether the upgrade needs to run `initializeV2` atomically.
+  // Decide which migrations must run atomically with the upgrade.
   const needsV2Init = currentInitVersion < TARGET_INIT_VERSION;
-  let initData: Hex = "0x";
+  const migrationCalls: Hex[] = [];
   if (needsV2Init) {
     const portfolioMarginAddress = (process.env.PME_ADDRESS ?? zeroAddress) as Hex;
     logInfo("initializeV2 required", {
@@ -67,16 +82,24 @@ async function main() {
           ? "(unset — set later via setPortfolioMargin)"
           : addrUrl(pc, portfolioMarginAddress),
     });
-    initData = encodeFunctionData({
+    migrationCalls.push(encodeFunctionData({
       abi: perps.abi,
       functionName: "initializeV2",
       args: [vaultAddress, portfolioMarginAddress],
-    });
+    }));
   } else {
     logInfo("initializeV2 skipped", {
       reason: `proxy already at init version ${currentInitVersion}`,
     });
   }
+
+  const initData = migrationCalls.length > 1
+    ? encodeFunctionData({
+        abi: perps.abi,
+        functionName: "multicall",
+        args: [migrationCalls],
+      })
+    : migrationCalls[0] ?? "0x";
 
   await logPrompt("Review the configuration above. Proceed with upgrade?");
 
@@ -104,16 +127,28 @@ async function main() {
   logInfo("Upgrade proxy", {
     Proxy: addrUrl(pc, proxyAddress),
     "New implementation": addrUrl(pc, newImpl.address),
-    Call: needsV2Init ? "initializeV2(vault, portfolioMargin)" : "none",
+    Call: migrationCalls.length > 0 ? `${migrationCalls.length} migration call(s)` : "none",
   });
   await logPrompt("Proceed with upgradeToAndCall?");
   console.log("Upgrading proxy...");
+  const estimatedGas = await pc.estimateContractGas({
+    address: proxyAddress,
+    abi: newImpl.abi,
+    functionName: "upgradeToAndCall",
+    args: [newImpl.address, initData],
+    account: deployer.account,
+  });
+  logStep("Estimated gas", estimatedGas.toString());
   const upgradeRes = await perps.simulate.upgradeToAndCall([newImpl.address, initData]);
-  const upgradeReceipt = await writeAndWait(deployer, upgradeRes);
-  logStep("Upgraded", txUrl(pc, upgradeReceipt.transactionHash));
+  const upgradeReceipt = await writeAndWait(deployer, upgradeRes, UPGRADE_CONFIRMATIONS);
+  const atUpgradeBlock = { blockNumber: upgradeReceipt.blockNumber } as const;
+  logStep(
+    "Upgraded",
+    `${txUrl(pc, upgradeReceipt.transactionHash)}  block ${upgradeReceipt.blockNumber}`,
+  );
 
   if (needsV2Init) {
-    const postVersion = await readInitializedVersion(pc, proxyAddress);
+    const postVersion = await readInitializedVersion(pc, proxyAddress, upgradeReceipt.blockNumber);
     if (postVersion !== TARGET_INIT_VERSION) {
       throw new Error(
         `Post-upgrade init version is ${postVersion}, expected ${TARGET_INIT_VERSION}`,
@@ -121,6 +156,12 @@ async function main() {
     }
     logStep("Init version", postVersion.toString());
   }
+
+  const postCodeVersion = await perps.read.VERSION(atUpgradeBlock);
+  if (postCodeVersion !== "2.13.0") {
+    throw new Error(`Post-upgrade code version is ${postCodeVersion}, expected 2.13.0`);
+  }
+  logStep("Code version", postCodeVersion);
 
   // Optional: plug in the points/rewards hook. The venue must already hold
   // HOOK_CALLER_ROLE on the hook (granted by the points deploy) before this.

@@ -105,7 +105,9 @@ The two legs bound the requirement after *any* subset of the account's orders fi
 
 Two consequences worth naming. Order margin is no longer a per-venue scalar — ask the engine, via `orderMarginOf(user)`, and never sum per-venue figures. And it is no longer constant in price: both the stress term and the fill-loss term move with the mark, so anything modelling it off-chain has to re-evaluate rather than snapshot.
 
-`getOrderValues(user)` remains for off-chain consumers that need the per-side limit-price totals: the fill loss the view reports is clamped at the *current* mark, which makes it non-invertible once it reads zero, so a predictor evaluating at other prices needs the raw values.
+`getOrderAggregate(user)` exposes the cached per-side quantities and limit-price
+totals. The fill loss in `getRiskView` is clamped at the current mark, so a
+predictor evaluating other prices uses the aggregate's raw values instead.
 
 The engine then applies its own spot/vol stress scenarios to the netted delta and adds the order margin, unrealized loss and funding owed. Because delta is netted across products, a perps position hedged with futures or options requires less collateral than either leg would in isolation — the portfolio requirement is not the sum of the parts.
 
@@ -140,6 +142,23 @@ The hashprice oracle quotes the price of **1 PH/s sustained over one day**, matc
 ### Upgradeability
 
 The contract uses the UUPS proxy pattern (OpenZeppelin) so the implementation can be upgraded by the owner without redeploying state.
+
+#### v2.13 order aggregate migration
+
+v2.13 replaces four independent order-cache mappings with one appended
+`OrderAggregate` per user. The old mapping slots remain in storage but are dead:
+all reads and writes use the aggregate's buy/sell quantities and values.
+
+`upgrade:perps` only upgrades the implementation. After upgrading from a version
+before 2.13, immediately run `pnpm rebuild:order-aggregate-cache`. This is a
+deliberately non-atomic migration: existing orders have zero aggregate cache
+until the rebuild transactions complete.
+
+The rebuild script discovers order owners from `OrderCreated` RPC logs over the
+preceding 180 days and confirms candidates against `getUserOrders`. Set
+`EVENT_LOOKBACK_DAYS` to change the search period. It writes in
+`ORDER_CACHE_WRITE_BATCH_SIZE` batches (default 25) and verifies all four fields
+against a canonical order scan.
 
 ### Funding Fees
 

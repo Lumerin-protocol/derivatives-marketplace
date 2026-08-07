@@ -102,9 +102,9 @@ describe("HashPowerPerpsDEX - multicall", function () {
       const riskAfter = await perps.read.getRiskView([buyer.account.address]);
       assert.equal(riskAfter.buyOrderDelta, 0n);
       assert.equal(riskAfter.sellOrderDelta, 0n);
-      const [buyValue, sellValue] = await perps.read.getOrderValues([buyer.account.address]);
-      assert.equal(buyValue, 0n);
-      assert.equal(sellValue, 0n);
+      const aggregate = await perps.read.getOrderAggregate([buyer.account.address]);
+      assert.equal(aggregate.buyValue, 0n);
+      assert.equal(aggregate.sellValue, 0n);
     });
   });
 

@@ -198,6 +198,21 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
       const ordersAfter = await perps.read.getUserOrders([seller.account.address]);
       assert.equal(ordersAfter.length, ordersBefore.length - 1);
       assert.ok(!ordersAfter.includes(targetId));
+      const aggregateAfter = await perps.read.getOrderAggregate([seller.account.address]);
+      const remaining = await Promise.all(ordersAfter.map((id) => perps.read.getOrder([id])));
+      assert.equal(
+        aggregateAfter.sellQty,
+        remaining.reduce((total, order) => total - order.quantity, 0n),
+      );
+      assert.equal(
+        aggregateAfter.sellValue,
+        remaining.reduce(
+          (total, order) =>
+            total +
+            (order.price * -order.quantity) / 10n ** BigInt(data.config.quantityDecimals),
+          0n,
+        ),
+      );
 
       const events = parseEventLogs({ abi: perps.abi, logs: receipt.logs });
       const cancelled = events.find((e) => e.eventName === "OrderCancelled");
@@ -264,6 +279,12 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
       const ordersAfter = await perps.read.getUserOrders([seller.account.address]);
 
       assert.equal(ordersAfter.length, 0);
+      assert.deepEqual(await perps.read.getOrderAggregate([seller.account.address]), {
+        buyQty: 0n,
+        sellQty: 0n,
+        buyValue: 0n,
+        sellValue: 0n,
+      });
       assert.equal(liqBalanceAfter - liqBalanceBefore, 0n);
     });
 

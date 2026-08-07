@@ -1851,17 +1851,34 @@ export const HashPowerPerpsDEXAbi = [
         "type": "address"
       }
     ],
-    "name": "getOrderValues",
+    "name": "getOrderAggregate",
     "outputs": [
       {
-        "internalType": "uint256",
-        "name": "buyValue",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "sellValue",
-        "type": "uint256"
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "buyQty",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "sellQty",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "buyValue",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "sellValue",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct HashPowerPerpsDEXBase.OrderAggregate",
+        "name": "",
+        "type": "tuple"
       }
     ],
     "stateMutability": "view",
