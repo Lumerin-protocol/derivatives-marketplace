@@ -99,8 +99,10 @@ abstract contract HashPowerPerpsDEXBase is
 
     // Order book limits
     uint256 public minimumMarginPerOrder; // Minimum margin (collateral) locked per resting order (0 = no minimum)
-    mapping(address => uint256) internal userBuyOrderValue; // Cached total buy order value per user
-    mapping(address => uint256) internal userSellOrderValue; // Cached total sell order value per user
+    /// @dev Deprecated/dead legacy cache slots. Retained forever for proxy storage compatibility.
+    ///      v2.13+ must never read or write these mappings.
+    mapping(address => uint256) internal userBuyOrderValue;
+    mapping(address => uint256) internal userSellOrderValue;
 
     // Level 2: Unified collateral vault (moved to immutable)
     address private __gap6;
@@ -124,14 +126,21 @@ abstract contract HashPowerPerpsDEXBase is
     /// @dev Appended at end of storage to preserve the upgradeable layout.
     uint16 public liquidatorShareBps;
 
-    /// @notice Cached total resting quantity per user per side (QUANTITY_DECIMALS).
-    /// @dev Mirrors `userBuyOrderValue` / `userSellOrderValue` and is maintained at exactly
-    ///      the same sites. Unlike the value accumulators these accrue no dust: a quantity
-    ///      booked once is retired as the same quantity, whereas `_calculateValue` truncates
-    ///      per fill so an order booked as one `floor()` is retired as a sum of `floor()`s.
-    ///      Appended at end of storage to preserve the upgradeable layout.
+    /// @dev Deprecated/dead legacy cache slots. Retained forever for proxy storage compatibility.
+    ///      v2.13+ must never read or write these mappings.
     mapping(address => uint256) internal userBuyOrderQty;
     mapping(address => uint256) internal userSellOrderQty;
+
+    /// @notice Canonical cached totals for a user's remaining resting orders.
+    struct OrderAggregate {
+        uint256 buyQty;
+        uint256 sellQty;
+        uint256 buyValue;
+        uint256 sellValue;
+    }
+
+    /// @dev Appended at the storage tail in v2.13. Never move above the four legacy mappings.
+    mapping(address => OrderAggregate) internal userOrderAggregate;
 
     /// @notice Represents an order in the order book
     struct Order {
@@ -151,6 +160,7 @@ abstract contract HashPowerPerpsDEXBase is
         GTC, // rest unfilled size on the book
         IOC, // fill what is available now; cancel remainder; revert if nothing fills
         FOK // fill entire size now or revert
+
     }
 
     /// @notice One placement in a `createOrders` / `updateOrders` batch.
@@ -433,12 +443,10 @@ abstract contract HashPowerPerpsDEXBase is
 
     /// @dev Cancel overlapping size against the taker's own resting order.
     ///      No fill, no fees, no position change.
-    function _netSelfCross(
-        address _taker,
-        bytes32 _makerOrderId,
-        Order storage _makerOrder,
-        int256 _remainingQty
-    ) internal returns (int256) {
+    function _netSelfCross(address _taker, bytes32 _makerOrderId, Order storage _makerOrder, int256 _remainingQty)
+        internal
+        returns (int256)
+    {
         uint256 makerPrice = _makerOrder.price;
         int256 makerQty = _makerOrder.quantity;
         uint256 makerAbs = M.abs(makerQty);
@@ -446,8 +454,7 @@ abstract contract HashPowerPerpsDEXBase is
         uint256 cancelAmt = makerAbs < remainingAbs ? makerAbs : remainingAbs;
         bool makerIsBid = makerQty > 0;
 
-        _getOrderValue(makerIsBid)[_taker] -= _calculateValue(makerPrice, cancelAmt);
-        _getOrderQty(makerIsBid)[_taker] -= cancelAmt;
+        _subtractOrderAggregate(_taker, makerIsBid, makerPrice, makerAbs, makerAbs - cancelAmt);
 
         if (cancelAmt == makerAbs) {
             _removeOrder(_makerOrderId, _taker, makerPrice, makerIsBid);
@@ -459,9 +466,7 @@ abstract contract HashPowerPerpsDEXBase is
             emit OrderUpdated(_makerOrderId, _taker, newMakerQty);
         }
 
-        return _remainingQty > 0
-            ? int256(remainingAbs - cancelAmt)
-            : -int256(remainingAbs - cancelAmt);
+        return _remainingQty > 0 ? int256(remainingAbs - cancelAmt) : -int256(remainingAbs - cancelAmt);
     }
 
     /// @notice Execute a single order match
@@ -487,11 +492,8 @@ abstract contract HashPowerPerpsDEXBase is
 
         _notifyFill(makerParticipant, _taker, notionalValue, makerFee, takerFee, makerPrice);
 
-        // Update cached order value/quantity (maker is buy when taker is selling, and vice versa)
-        _getOrderValue(_remainingQty < 0)[makerParticipant] -= notionalValue;
-        _getOrderQty(_remainingQty < 0)[makerParticipant] -= matchAmt;
-
         int256 newMakerQty = _reduceQuantity(makerQty, matchAmt);
+        _subtractOrderAggregate(makerParticipant, _remainingQty < 0, makerPrice, M.abs(makerQty), M.abs(newMakerQty));
         _makerOrder.quantity = newMakerQty;
 
         emit OrderUpdated(_makerOrderId, makerParticipant, newMakerQty);
@@ -521,41 +523,61 @@ abstract contract HashPowerPerpsDEXBase is
 
     // ── Internal helpers: cancel / reduce / book upkeep ───────────────────────
 
-    function _getOrderValue(bool _isBuy) internal view returns (mapping(address => uint256) storage) {
+    /// @dev Add one canonical remaining order to the aggregate.
+    function _addOrderAggregate(address _user, bool _isBuy, uint256 _price, uint256 _absQty) internal {
+        OrderAggregate storage aggregate = userOrderAggregate[_user];
+        uint256 value = _calculateValue(_price, _absQty);
         if (_isBuy) {
-            return userBuyOrderValue;
+            aggregate.buyQty += _absQty;
+            aggregate.buyValue += value;
         } else {
-            return userSellOrderValue;
+            aggregate.sellQty += _absQty;
+            aggregate.sellValue += value;
         }
     }
 
-    function _getOrderQty(bool _isBuy) internal view returns (mapping(address => uint256) storage) {
+    /// @dev Replace an order's old remaining quantity with a smaller canonical remainder.
+    ///      Subtracting `value(old) - value(new)` keeps the cache exactly equal to a full
+    ///      scan while leaving fill notional and fee rounding unchanged.
+    function _subtractOrderAggregate(address _user, bool _isBuy, uint256 _price, uint256 _oldAbsQty, uint256 _newAbsQty)
+        internal
+    {
+        OrderAggregate storage aggregate = userOrderAggregate[_user];
+        uint256 qtyReduction = _oldAbsQty - _newAbsQty;
+        uint256 valueReduction = _calculateValue(_price, _oldAbsQty) - _calculateValue(_price, _newAbsQty);
         if (_isBuy) {
-            return userBuyOrderQty;
+            aggregate.buyQty -= qtyReduction;
+            aggregate.buyValue -= valueReduction;
         } else {
-            return userSellOrderQty;
+            aggregate.sellQty -= qtyReduction;
+            aggregate.sellValue -= valueReduction;
         }
     }
 
-    function _rebuildOrderQuantityCache(address _user) internal {
-        uint256 buyQty;
-        uint256 sellQty;
+    /// @dev Replace all four fields from canonical remaining orders. This also removes any
+    ///      historical value dust accumulated by the deprecated incremental mappings.
+    function _rebuildOrderAggregateCache(address _user) internal {
+        OrderAggregate memory aggregate;
         EnumerableSet.Bytes32Set storage ids = participantOrderIdsIndex[_user];
         uint256 len = ids.length();
         for (uint256 i = 0; i < len; i++) {
-            int256 quantity = orders[ids.at(i)].quantity;
+            Order storage order = orders[ids.at(i)];
+            int256 quantity = order.quantity;
             if (quantity > 0) {
-                buyQty += uint256(quantity);
+                uint256 absQty = uint256(quantity);
+                aggregate.buyQty += absQty;
+                aggregate.buyValue += _calculateValue(order.price, absQty);
             } else if (quantity < 0) {
-                sellQty += M.abs(quantity);
+                uint256 absQty = M.abs(quantity);
+                aggregate.sellQty += absQty;
+                aggregate.sellValue += _calculateValue(order.price, absQty);
             }
         }
-        userBuyOrderQty[_user] = buyQty;
-        userSellOrderQty[_user] = sellQty;
+        userOrderAggregate[_user] = aggregate;
     }
 
     /// @notice Remove an order from the book (internal)
-    /// @dev Callers are responsible for updating order values via _getOrderValue before this call.
+    /// @dev Callers are responsible for updating the aggregate before this call.
     function _removeOrder(bytes32 _orderId, address _participant, uint256 _price, bool _isBid) internal {
         _priceOrderIds(_price, _isBid).remove(uint256(_orderId));
         participantOrderIdsIndex[_participant].remove(_orderId);
@@ -864,7 +886,9 @@ abstract contract HashPowerPerpsDEXBase is
     }
 
     /// @notice Remove a price level from the sorted price list if order queue is empty
-    function _removePriceLevelIfEmpty(StructuredLinkedList.List storage orderQueue, uint256 _price, bool _isBid) internal {
+    function _removePriceLevelIfEmpty(StructuredLinkedList.List storage orderQueue, uint256 _price, bool _isBid)
+        internal
+    {
         StructuredLinkedList.List storage priceList = _isBid ? activeBidPrices : activeAskPrices;
         PriceLadderLib.removeIfEmpty(orderQueue, priceList, _price);
     }
@@ -1044,10 +1068,10 @@ abstract contract HashPowerPerpsDEXBase is
         while (orderIdUint != 0) {
             (, uint256 nextOrderIdUint) = queue.getNextNode(orderIdUint);
             bytes32 orderId = bytes32(orderIdUint);
-            address participant = orders[orderId].participant;
+            Order storage order = orders[orderId];
+            address participant = order.participant;
+            _subtractOrderAggregate(participant, _isBid, _price, M.abs(order.quantity), 0);
             participantOrderIdsIndex[participant].remove(orderId);
-            delete _getOrderValue(_isBid)[participant];
-            delete _getOrderQty(_isBid)[participant];
             delete orders[orderId];
             queue.remove(orderIdUint);
             orderIdUint = nextOrderIdUint;

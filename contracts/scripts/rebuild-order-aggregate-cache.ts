@@ -12,6 +12,7 @@ import { writeAndWait } from "../lib/writeContract.ts";
 
 const PAGE_SIZE = 1_000;
 const READ_BATCH_SIZE = 25;
+const DEFAULT_WRITE_BATCH_SIZE = 25;
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const ORDER_CREATED_EVENT = parseAbiItem(
   "event OrderCreated(bytes32 indexed orderId, address indexed participant, uint256 price, int256 quantity)",
@@ -122,9 +123,10 @@ async function discoverFromEvents(
   pc: PublicClient,
   perpsAddress: Address,
   latestBlock: bigint,
+  startBlock?: bigint,
 ): Promise<Set<Address>> {
   const addresses = new Set<Address>();
-  let fromBlock = readPositiveBigInt("PERPS_START_BLOCK");
+  let fromBlock = startBlock ?? readPositiveBigInt("PERPS_START_BLOCK");
   let chunkSize = readPositiveBigInt("EVENT_SCAN_CHUNK_SIZE", 5_000n);
   if (chunkSize === 0n) throw new Error("EVENT_SCAN_CHUNK_SIZE must be greater than zero");
 
@@ -155,7 +157,7 @@ async function discoverFromEvents(
 }
 
 async function main() {
-  logTitle("Rebuild Perps Order Quantity Caches");
+  logTitle("Rebuild Perps Order Aggregate Caches");
 
   const env = requireEnvsSet("PERPS_ADDRESS");
   const perpsAddress = getAddress(env.PERPS_ADDRESS);
@@ -182,6 +184,16 @@ async function main() {
       discovered = result.addresses;
       usedSource = "indexer";
       logStep("indexer block", result.indexedBlock.toString());
+      if (result.indexedBlock < latestBlock) {
+        const tail = await discoverFromEvents(
+          pc,
+          perpsAddress,
+          latestBlock,
+          result.indexedBlock + 1n,
+        );
+        for (const address of tail) discovered.add(address);
+        logStep("indexer tail scan", `${tail.size} participant(s)`);
+      }
     } catch (error) {
       if (source === "indexer") throw error;
       console.warn(`Indexer discovery failed: ${(error as Error).message}`);
@@ -221,17 +233,59 @@ async function main() {
   });
 
   if (activeUsers.length === 0) {
-    logSuccess("No active order caches require rebuilding");
+    logSuccess("No active order aggregates require rebuilding");
     return;
   }
 
   for (const address of activeUsers) console.log(`  ${address}`);
-  await logPrompt("Submit one rebuildOrderQuantityCache transaction for these accounts?");
+  const writeBatchSize = Number(
+    readPositiveBigInt("ORDER_CACHE_WRITE_BATCH_SIZE", BigInt(DEFAULT_WRITE_BATCH_SIZE)),
+  );
+  if (writeBatchSize === 0) {
+    throw new Error("ORDER_CACHE_WRITE_BATCH_SIZE must be greater than zero");
+  }
+  await logPrompt(
+    `Submit rebuildOrderAggregateCache in batches of ${writeBatchSize} account(s)?`,
+  );
 
-  const simulation = await perps.simulate.rebuildOrderQuantityCache([activeUsers]);
-  const receipt = await writeAndWait(deployer, simulation);
-  logStep("rebuildOrderQuantityCache", txUrl(pc, receipt.transactionHash));
-  logSuccess(`${activeUsers.length} cache(s) rebuilt`);
+  for (let offset = 0; offset < activeUsers.length; offset += writeBatchSize) {
+    const batch = activeUsers.slice(offset, offset + writeBatchSize);
+    const simulation = await perps.simulate.rebuildOrderAggregateCache([batch]);
+    const receipt = await writeAndWait(deployer, simulation);
+    logStep(
+      `rebuildOrderAggregateCache ${offset + 1}-${offset + batch.length}`,
+      txUrl(pc, receipt.transactionHash),
+    );
+  }
+
+  const quantityDecimals = await perps.read.QUANTITY_DECIMALS();
+  const scale = 10n ** BigInt(quantityDecimals);
+  for (const user of activeUsers) {
+    let buyQty = 0n;
+    let sellQty = 0n;
+    let buyValue = 0n;
+    let sellValue = 0n;
+    for (const id of await perps.read.getUserOrders([user])) {
+      const order = await perps.read.getOrder([id]);
+      if (order.quantity > 0n) {
+        buyQty += order.quantity;
+        buyValue += (order.price * order.quantity) / scale;
+      } else if (order.quantity < 0n) {
+        const absQty = -order.quantity;
+        sellQty += absQty;
+        sellValue += (order.price * absQty) / scale;
+      }
+    }
+    const expected = [buyQty, sellQty, buyValue, sellValue];
+    const actual = await perps.read.getOrderAggregate([user]);
+    if (actual.some((value, index) => value !== expected[index])) {
+      throw new Error(
+        `Verification failed for ${user}: cache=${actual.join(",")} scan=${expected.join(",")}`,
+      );
+    }
+  }
+
+  logSuccess(`${activeUsers.length} aggregate cache(s) rebuilt and verified`);
 }
 
 main();

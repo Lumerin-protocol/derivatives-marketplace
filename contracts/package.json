@@ -19,7 +19,7 @@
     "deploy:perps": "hardhat run scripts/deploy-perps.ts",
     "reset:perps": "hardhat run scripts/reset-perps.ts",
     "upgrade:perps": "hardhat run scripts/update-perps.ts",
-    "rebuild:order-cache": "hardhat run scripts/rebuild-order-quantity-cache.ts",
+    "rebuild:order-aggregate-cache": "hardhat run scripts/rebuild-order-aggregate-cache.ts",
     "deploy-local": "hardhat run scripts/deploy-local.ts",
     "node": "hardhat node",
     "typecheck": "tsgo --noEmit",

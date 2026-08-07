@@ -28,7 +28,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @dev Lives here rather than in {HashPowerPerpsDEXBase} so that a diff to
     ///      this file and the version it ships under stay in the same place,
     ///      mirroring {Futures}.
-    string public constant VERSION = "2.12.0";
+    string public constant VERSION = "2.13.0";
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ICollateralVault _vault) HashPowerPerpsDEXBase(_vault) { }
@@ -190,8 +190,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
 
                 // Create order with quantity that was not matched
                 orders[orderId] = Order({ participant: _participant, price: _price, quantity: remainingQuantity });
-                _getOrderValue(isBuy)[_participant] += _calculateValue(_price, M.abs(remainingQuantity));
-                _getOrderQty(isBuy)[_participant] += M.abs(remainingQuantity);
+                _addOrderAggregate(_participant, isBuy, _price, M.abs(remainingQuantity));
                 participantOrders.add(orderId);
                 StructuredLinkedList.List storage orderQueue = _priceOrderIds(_price, isBuy);
                 orderQueue.pushBack(uint256(orderId));
@@ -219,9 +218,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         }
 
         bool isBid = order.quantity > 0;
-        _getOrderValue(isBid)[order.participant] -= _calculateValue(order.price, M.abs(order.quantity));
-        _getOrderQty(isBid)[order.participant] -= M.abs(order.quantity);
-
+        _subtractOrderAggregate(order.participant, isBid, order.price, M.abs(order.quantity), 0);
         _removeOrder(_orderId, order.participant, order.price, isBid);
         _removePriceLevelIfEmpty(_priceOrderIds(order.price, isBid), order.price, isBid);
         emit OrderCancelled(_orderId, order.participant);
@@ -246,9 +243,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         }
 
         bool isBid = oldQty > 0;
-        uint256 reducedAbs = oldAbs - newAbs;
-        _getOrderValue(isBid)[order.participant] -= _calculateValue(order.price, reducedAbs);
-        _getOrderQty(isBid)[order.participant] -= reducedAbs;
+        _subtractOrderAggregate(order.participant, isBid, order.price, oldAbs, newAbs);
         order.quantity = _newQuantity;
         emit OrderUpdated(_orderId, order.participant, _newQuantity);
     }
@@ -367,8 +362,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         bool isBid = _order.quantity > 0;
         uint256 orderAbsQty = M.abs(_order.quantity);
         uint256 orderNotional = _calculateValue(_order.price, orderAbsQty);
-        _getOrderValue(isBid)[_user] -= orderNotional;
-        _getOrderQty(isBid)[_user] -= orderAbsQty;
+        _subtractOrderAggregate(_user, isBid, _order.price, orderAbsQty, 0);
         _removeOrder(_orderId, _user, _order.price, isBid);
         _removePriceLevelIfEmpty(_priceOrderIds(_order.price, isBid), _order.price, isBid);
 
@@ -509,8 +503,9 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         }
         view_.pendingFunding = getPendingFunding(_user);
 
-        uint256 buyQty = userBuyOrderQty[_user];
-        uint256 sellQty = userSellOrderQty[_user];
+        OrderAggregate storage aggregate = userOrderAggregate[_user];
+        uint256 buyQty = aggregate.buyQty;
+        uint256 sellQty = aggregate.sellQty;
         view_.buyOrderDelta = (buyQty * (10 ** collateralDecimals)) / (10 ** QUANTITY_DECIMALS);
         view_.sellOrderDelta = (sellQty * (10 ** collateralDecimals)) / (10 ** QUANTITY_DECIMALS);
 
@@ -518,15 +513,12 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         // the difference immediately and in full, which the old shock-scaled reservation
         // charged only a tenth of.
         //
-        // Known residue, not worth fixing: `_calculateValue` truncates, so an order booked
-        // as one `floor()` is retired as a sum of per-fill `floor()`s. The dust it leaves in
-        // the value accumulators is permanent and can only over-report the loss.
         uint256 buyMark = _calculateValue(currentPrice, buyQty);
-        uint256 buyVal = userBuyOrderValue[_user];
+        uint256 buyVal = aggregate.buyValue;
         if (buyVal > buyMark) view_.buyOrderFillLoss = buyVal - buyMark;
 
         uint256 sellMark = _calculateValue(currentPrice, sellQty);
-        uint256 sellVal = userSellOrderValue[_user];
+        uint256 sellVal = aggregate.sellValue;
         if (sellMark > sellVal) view_.sellOrderFillLoss = sellMark - sellVal;
     }
 
@@ -594,11 +586,13 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         return totalQuantity;
     }
 
-    /// @notice Total resting order notional per side for a user (token decimals).
-    /// @dev Book state, not a margin figure — margin against resting orders is the engine's
-    ///      to compute from `getRiskView`. Kept as a view because indexers and the market
-    ///      maker size quotes off it.
-    function getOrderValues(address _user) external view returns (uint256 buyValue, uint256 sellValue) {
-        return (userBuyOrderValue[_user], userSellOrderValue[_user]);
+    /// @notice Cached resting-order quantities and notionals per side for a user.
+    function getOrderAggregate(address _user)
+        external
+        view
+        returns (uint256 buyQty, uint256 sellQty, uint256 buyValue, uint256 sellValue)
+    {
+        OrderAggregate storage aggregate = userOrderAggregate[_user];
+        return (aggregate.buyQty, aggregate.sellQty, aggregate.buyValue, aggregate.sellValue);
     }
 }

@@ -91,7 +91,7 @@ describe("HashPowerPerpsDEX.updateOrders (cancel + reduce + create batch)", func
     assert.equal((await perps.read.getUserOrders([buyer.account.address])).length, 0);
   });
 
-  it("cancels legacy orders whose quantity cache was not initialized during upgrade", async function () {
+  it("cancels legacy orders whose aggregate cache was not initialized during upgrade", async function () {
     const { contracts, accounts, config } = await networkHelpers.loadFixture(
       deployPerpsWithCollateralFixture,
     );
@@ -112,14 +112,13 @@ describe("HashPowerPerpsDEX.updateOrders (cancel + reduce + create batch)", func
     await perps.write.upgradeToAndCall([migrationHarnessImpl.address, "0x"], { account: owner.account });
     const migrationHarness = await viem.getContractAt("HashPowerPerpsDEXMigrationHarness", perps.address);
 
-    // The quantity mappings were introduced by the upgrade. Existing orders and
-    // value caches survived, but these newly appended mappings started at zero.
-    await migrationHarness.write.clearOrderQuantityCache([buyer.account.address], { account: owner.account });
+    // Existing canonical orders survive while the newly appended aggregate starts at zero.
+    await migrationHarness.write.clearOrderAggregateCache([buyer.account.address], { account: owner.account });
 
     const fixedImpl = await viem.deployContract("HashPowerPerpsDEX", [vault.address]);
     const rebuildData = encodeFunctionData({
       abi: fixedImpl.abi,
-      functionName: "rebuildOrderQuantityCache",
+      functionName: "rebuildOrderAggregateCache",
       args: [[buyer.account.address]],
     });
     await migrationHarness.write.upgradeToAndCall([fixedImpl.address, rebuildData], {

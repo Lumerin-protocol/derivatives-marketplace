@@ -141,6 +141,25 @@ The hashprice oracle quotes the price of **1 PH/s sustained over one day**, matc
 
 The contract uses the UUPS proxy pattern (OpenZeppelin) so the implementation can be upgraded by the owner without redeploying state.
 
+#### v2.13 order aggregate migration
+
+v2.13 replaces four independent order-cache mappings with one appended
+`OrderAggregate` per user. The old mapping slots remain in storage but are dead:
+all reads and writes use the aggregate's buy/sell quantities and values.
+
+Upgrades from versions before 2.13 must set `PERPS_ORDER_CACHE_USERS` to the
+complete comma-separated list of addresses with open orders. `upgrade:perps`
+fails closed when that list is absent, encodes
+`rebuildOrderAggregateCache(users)` into the same `upgradeToAndCall`, simulates
+and estimates the atomic transaction, then verifies each aggregate against a
+canonical order scan. This prevents the new implementation from being live
+with zero caches.
+
+For a standalone repair or audit, run `pnpm rebuild:order-aggregate-cache`. It
+discovers active users from a sufficiently current indexer or a complete
+`OrderCreated` event scan, writes in `ORDER_CACHE_WRITE_BATCH_SIZE` batches
+(default 25), and verifies all four fields after writing.
+
 ### Funding Fees
 
 Funding fees keep the perpetual price anchored to the spot price by charging/rewarding position holders based on the deviation between the **mark price** (order book mid-price) and the **index price** (oracle). When mark > index, longs pay shorts (and vice versa). Funding accrues continuously (per-second) and settles lazily through the reserve pool when users interact.

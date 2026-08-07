@@ -67,14 +67,14 @@ describe("HashPowerPerpsDEX - cancelOrder", function () {
 
     await perps.write.createOrder([price, BigInt(quantity), TimeInForce.GTC], { account: buyer.account });
 
-    const [buyValueBefore] = await perps.read.getOrderValues([buyer.account.address]);
+    const [, , buyValueBefore] = await perps.read.getOrderAggregate([buyer.account.address]);
     assert.ok(buyValueBefore > 0n);
     assert.ok((await perps.read.getRiskView([buyer.account.address])).buyOrderDelta > 0n);
 
     const orders = await perps.read.getUserOrders([buyer.account.address]);
     await perps.write.cancelOrder([orders[0]], { account: buyer.account });
 
-    const [buyValueAfter] = await perps.read.getOrderValues([buyer.account.address]);
+    const [, , buyValueAfter] = await perps.read.getOrderAggregate([buyer.account.address]);
     assert.equal(buyValueAfter, 0n);
     assert.equal((await perps.read.getRiskView([buyer.account.address])).buyOrderDelta, 0n);
   });

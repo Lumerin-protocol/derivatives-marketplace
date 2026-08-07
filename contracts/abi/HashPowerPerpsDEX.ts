@@ -1014,6 +1014,40 @@ export const HashPowerPerpsDEXAbi = [
   {
     "inputs": [
       {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      }
+    ],
+    "name": "getOrderAggregate",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "buyQty",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "sellQty",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "buyValue",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "sellValue",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "uint256",
         "name": "_maxLevels",
         "type": "uint256"
@@ -1030,30 +1064,6 @@ export const HashPowerPerpsDEXAbi = [
         "internalType": "uint256[]",
         "name": "askPrices",
         "type": "uint256[]"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "_user",
-        "type": "address"
-      }
-    ],
-    "name": "getOrderValues",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "buyValue",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "sellValue",
-        "type": "uint256"
       }
     ],
     "stateMutability": "view",
@@ -1543,7 +1553,7 @@ export const HashPowerPerpsDEXAbi = [
         "type": "address[]"
       }
     ],
-    "name": "rebuildOrderQuantityCache",
+    "name": "rebuildOrderAggregateCache",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
