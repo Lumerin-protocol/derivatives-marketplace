@@ -276,11 +276,17 @@ async function main() {
         sellValue += (order.price * absQty) / scale;
       }
     }
-    const expected = [buyQty, sellQty, buyValue, sellValue];
+    const expected = { buyQty, sellQty, buyValue, sellValue };
     const actual = await perps.read.getOrderAggregate([user]);
-    if (actual.some((value, index) => value !== expected[index])) {
+    if (
+      actual.buyQty !== expected.buyQty ||
+      actual.sellQty !== expected.sellQty ||
+      actual.buyValue !== expected.buyValue ||
+      actual.sellValue !== expected.sellValue
+    ) {
       throw new Error(
-        `Verification failed for ${user}: cache=${actual.join(",")} scan=${expected.join(",")}`,
+        `Verification failed for ${user}: ` +
+          `cache=${Object.values(actual).join(",")} scan=${Object.values(expected).join(",")}`,
       );
     }
   }

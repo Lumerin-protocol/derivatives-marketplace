@@ -201,11 +201,11 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
       const aggregateAfter = await perps.read.getOrderAggregate([seller.account.address]);
       const remaining = await Promise.all(ordersAfter.map((id) => perps.read.getOrder([id])));
       assert.equal(
-        aggregateAfter[1],
+        aggregateAfter.sellQty,
         remaining.reduce((total, order) => total - order.quantity, 0n),
       );
       assert.equal(
-        aggregateAfter[3],
+        aggregateAfter.sellValue,
         remaining.reduce(
           (total, order) =>
             total +
@@ -279,12 +279,12 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
       const ordersAfter = await perps.read.getUserOrders([seller.account.address]);
 
       assert.equal(ordersAfter.length, 0);
-      assert.deepEqual(await perps.read.getOrderAggregate([seller.account.address]), [
-        0n,
-        0n,
-        0n,
-        0n,
-      ]);
+      assert.deepEqual(await perps.read.getOrderAggregate([seller.account.address]), {
+        buyQty: 0n,
+        sellQty: 0n,
+        buyValue: 0n,
+        sellValue: 0n,
+      });
       assert.equal(liqBalanceAfter - liqBalanceBefore, 0n);
     });
 

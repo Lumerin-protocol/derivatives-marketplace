@@ -587,12 +587,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     }
 
     /// @notice Cached resting-order quantities and notionals per side for a user.
-    function getOrderAggregate(address _user)
-        external
-        view
-        returns (uint256 buyQty, uint256 sellQty, uint256 buyValue, uint256 sellValue)
-    {
-        OrderAggregate storage aggregate = userOrderAggregate[_user];
-        return (aggregate.buyQty, aggregate.sellQty, aggregate.buyValue, aggregate.sellValue);
+    function getOrderAggregate(address _user) external view returns (OrderAggregate memory) {
+        return userOrderAggregate[_user];
     }
 }

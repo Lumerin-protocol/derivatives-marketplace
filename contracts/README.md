@@ -105,7 +105,9 @@ The two legs bound the requirement after *any* subset of the account's orders fi
 
 Two consequences worth naming. Order margin is no longer a per-venue scalar — ask the engine, via `orderMarginOf(user)`, and never sum per-venue figures. And it is no longer constant in price: both the stress term and the fill-loss term move with the mark, so anything modelling it off-chain has to re-evaluate rather than snapshot.
 
-`getOrderValues(user)` remains for off-chain consumers that need the per-side limit-price totals: the fill loss the view reports is clamped at the *current* mark, which makes it non-invertible once it reads zero, so a predictor evaluating at other prices needs the raw values.
+`getOrderAggregate(user)` exposes the cached per-side quantities and limit-price
+totals. The fill loss in `getRiskView` is clamped at the current mark, so a
+predictor evaluating other prices uses the aggregate's raw values instead.
 
 The engine then applies its own spot/vol stress scenarios to the netted delta and adds the order margin, unrealized loss and funding owed. Because delta is netted across products, a perps position hedged with futures or options requires less collateral than either leg would in isolation — the portfolio requirement is not the sum of the parts.
 

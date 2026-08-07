@@ -92,7 +92,7 @@ async function main() {
         sellValue += (order.price * absQty) / scale;
       }
     }
-    return [buyQty, sellQty, buyValue, sellValue] as const;
+    return { buyQty, sellQty, buyValue, sellValue };
   }
   const currentOwner = await perps.read.owner();
   const currentCodeVersion = await perps.read.VERSION().catch(() => "unknown");
@@ -221,10 +221,15 @@ async function main() {
     for (const user of orderCacheUsers) {
       const expected = await scanOrderAggregate(user);
       const actual = await perps.read.getOrderAggregate([user]);
-      if (actual.some((value, index) => value !== expected[index])) {
+      if (
+        actual.buyQty !== expected.buyQty ||
+        actual.sellQty !== expected.sellQty ||
+        actual.buyValue !== expected.buyValue ||
+        actual.sellValue !== expected.sellValue
+      ) {
         throw new Error(
           `Order aggregate verification failed for ${user}: ` +
-            `cache=${actual.join(",")} scan=${expected.join(",")}`,
+            `cache=${Object.values(actual).join(",")} scan=${Object.values(expected).join(",")}`,
         );
       }
     }

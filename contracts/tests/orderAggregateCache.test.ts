@@ -28,12 +28,12 @@ async function assertCacheMatchesScan(perps: Perps, user: `0x${string}`, quantit
       sellValue += (order.price * absQty) / scale;
     }
   }
-  assert.deepEqual(await perps.read.getOrderAggregate([user]), [
+  assert.deepEqual(await perps.read.getOrderAggregate([user]), {
     buyQty,
     sellQty,
     buyValue,
     sellValue,
-  ]);
+  });
 }
 
 describe("HashPowerPerpsDEX order aggregate cache migration", function () {
@@ -75,12 +75,12 @@ describe("HashPowerPerpsDEX order aggregate cache migration", function () {
       { account: owner.account },
     );
 
-    assert.deepEqual(await harness.read.getOrderAggregate([buyer.account.address]), [
-      0n,
-      0n,
-      0n,
-      0n,
-    ]);
+    assert.deepEqual(await harness.read.getOrderAggregate([buyer.account.address]), {
+      buyQty: 0n,
+      sellQty: 0n,
+      buyValue: 0n,
+      sellValue: 0n,
+    });
     const zeroRisk = await harness.read.getRiskView([buyer.account.address]);
     assert.equal(zeroRisk.buyOrderDelta, 0n);
     assert.equal(zeroRisk.sellOrderDelta, 0n);
@@ -126,18 +126,18 @@ describe("HashPowerPerpsDEX order aggregate cache migration", function () {
     });
 
     const upgraded = await viem.getContractAt("HashPowerPerpsDEX", perps.address);
-    assert.deepEqual(await upgraded.read.getOrderAggregate([buyer.account.address]), [
+    assert.deepEqual(await upgraded.read.getOrderAggregate([buyer.account.address]), {
       buyQty,
       sellQty,
-      (buyPrice * buyQty) / 10n ** BigInt(config.quantityDecimals),
-      (sellPrice * sellQty) / 10n ** BigInt(config.quantityDecimals),
-    ]);
-    assert.deepEqual(await upgraded.read.getOrderAggregate([owner.account.address]), [
-      0n,
-      0n,
-      0n,
-      0n,
-    ]);
+      buyValue: (buyPrice * buyQty) / 10n ** BigInt(config.quantityDecimals),
+      sellValue: (sellPrice * sellQty) / 10n ** BigInt(config.quantityDecimals),
+    });
+    assert.deepEqual(await upgraded.read.getOrderAggregate([owner.account.address]), {
+      buyQty: 0n,
+      sellQty: 0n,
+      buyValue: 0n,
+      sellValue: 0n,
+    });
     assert.equal(await upgraded.read.VERSION(), "2.13.0");
   });
 
@@ -233,12 +233,12 @@ describe("HashPowerPerpsDEX order aggregate cache migration", function () {
     );
     await perps.write.resetState({ account: owner.account });
 
-    assert.deepEqual(await perps.read.getOrderAggregate([buyer.account.address]), [
-      0n,
-      0n,
-      0n,
-      0n,
-    ]);
+    assert.deepEqual(await perps.read.getOrderAggregate([buyer.account.address]), {
+      buyQty: 0n,
+      sellQty: 0n,
+      buyValue: 0n,
+      sellValue: 0n,
+    });
     assert.equal((await perps.read.getUserOrders([buyer.account.address])).length, 0);
   });
 });
