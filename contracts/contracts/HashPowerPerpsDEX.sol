@@ -89,10 +89,11 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
 
     /// @notice Batched placement with per-leg time-in-force — IM check once at the end.
     function createOrders(OrderIntent[] calldata _intents) external {
+        uint256 len = _intents.length;
+        if (len == 0) return;
         address sender = _msgSender();
         _updateGlobalFunding();
-        uint256 len = _intents.length;
-        if (len != 0) _settleFunding(sender);
+        _settleFunding(sender);
         for (uint256 i = 0; i < len; i++) {
             OrderIntent calldata intent = _intents[i];
             _validateOrderIntent(intent.price, intent.quantity, intent.timeInForce);
