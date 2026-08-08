@@ -61,6 +61,38 @@ async function placeAsksMultiLevel(
   }
 }
 
+async function benchmarkBidLadderInsertion(
+  scenarioName: string,
+  selectPrice: (marketPrice: bigint, tick: bigint, prices: bigint[]) => bigint,
+) {
+  const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
+  const { perps } = contracts;
+  const { buyer, pc } = accounts;
+  const marketPrice = await perps.read.getMarketPrice();
+  const tick = config.minimumPriceIncrement;
+  const quantity = parseUnits("1", config.quantityDecimals);
+  const prices = Array.from({ length: 10 }, (_, index) => marketPrice - BigInt((index + 1) * 2) * tick);
+
+  await perps.write.createOrders(
+    [
+      prices.map((price) => ({
+        price,
+        quantity,
+        timeInForce: TimeInForce.GTC,
+      })),
+    ],
+    { account: buyer.account },
+  );
+
+  await createOrderAndLogGas(
+    perps,
+    pc,
+    scenarioName,
+    [selectPrice(marketPrice, tick, prices), quantity],
+    buyer.account,
+  );
+}
+
 describe("Gas: createOrder", function () {
   it("createOrder_restingOnly (no match)", async function () {
     const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
@@ -74,6 +106,25 @@ describe("Gas: createOrder", function () {
 
     const orders = await perps.read.getUserOrders([buyer.account.address]);
     assert.equal(orders.length, 1);
+  });
+
+  it("createOrder_priceLadderInsertions", async function () {
+    await benchmarkBidLadderInsertion(
+      "createOrder_priceLadder_existing",
+      (_marketPrice, _tick, prices) => prices[4],
+    );
+    await benchmarkBidLadderInsertion(
+      "createOrder_priceLadder_head",
+      (marketPrice, tick) => marketPrice - tick,
+    );
+    await benchmarkBidLadderInsertion(
+      "createOrder_priceLadder_middle",
+      (marketPrice, tick) => marketPrice - 11n * tick,
+    );
+    await benchmarkBidLadderInsertion(
+      "createOrder_priceLadder_tail",
+      (marketPrice, tick) => marketPrice - 21n * tick,
+    );
   });
 
   it("createOrder_1Match", async function () {

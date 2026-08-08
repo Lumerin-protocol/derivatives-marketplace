@@ -886,10 +886,10 @@ abstract contract HashPowerPerpsDEXBase is
         }
     }
 
-    /// @notice Add a price level to the sorted price list if not already present
+    /// @notice Add a new price level to the sorted price list.
     function _addPriceLevel(uint256 _price, bool _isBid) internal {
         StructuredLinkedList.List storage priceList = _isBid ? activeBidPrices : activeAskPrices;
-        PriceLadderLib.insertPrice(priceList, _price, _isBid, MAX_PRICE_LEVELS_PER_SIDE);
+        PriceLadderLib.insertNewPrice(priceList, _price, _isBid, MAX_PRICE_LEVELS_PER_SIDE);
     }
 
     /// @notice Remove a price level from the sorted price list if order queue is empty

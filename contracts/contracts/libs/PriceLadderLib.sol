@@ -11,19 +11,17 @@ using StructuredLinkedList for StructuredLinkedList.List;
 library PriceLadderLib {
     error MaxPriceLevelsReached();
 
-    /// @notice Insert a price into a sorted list of price levels.
+    /// @notice Insert a new price into a sorted list of price levels.
     /// @param priceList The sorted linked list (bids: descending, asks: ascending).
-    /// @param price The price to insert.
+    /// @param price The absent price to insert.
     /// @param isBid True for bid ladder (highest first), false for ask (lowest first).
     /// @param maxLevels Maximum number of price levels allowed. Reverts if exceeded.
-    function insertPrice(
+    function insertNewPrice(
         StructuredLinkedList.List storage priceList,
         uint256 price,
         bool isBid,
         uint256 maxLevels
     ) internal {
-        if (priceList.nodeExists(price)) return;
-
         uint256 size = priceList.sizeOf();
         if (size >= maxLevels) revert MaxPriceLevelsReached();
 
@@ -32,9 +30,19 @@ library PriceLadderLib {
             return;
         }
 
-        (, uint256 current) = priceList.getNextNode(0);
-        uint256 prev = 0;
+        (, uint256 head) = priceList.getNextNode(0);
+        if (isBid ? price > head : price < head) {
+            priceList.pushFront(price);
+            return;
+        }
 
+        (, uint256 tail) = priceList.getPreviousNode(0);
+        if (isBid ? price < tail : price > tail) {
+            priceList.pushBack(price);
+            return;
+        }
+
+        (, uint256 current) = priceList.getNextNode(head);
         while (current != 0) {
             if (isBid) {
                 // Bids: descending — insert before first smaller price
@@ -49,12 +57,8 @@ library PriceLadderLib {
                     return;
                 }
             }
-            prev = current;
             (, current) = priceList.getNextNode(current);
         }
-
-        // Insert at tail (after the last element)
-        priceList.insertAfter(prev, price);
     }
 
     /// @notice Remove a price from the ladder if its order queue is empty.

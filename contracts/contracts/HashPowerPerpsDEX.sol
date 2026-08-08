@@ -184,9 +184,10 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
                 _addOrderAggregate(_participant, isBuy, _price, M.abs(remainingQuantity));
                 participantOrders.add(orderId);
                 StructuredLinkedList.List storage orderQueue = _priceOrderIds(_price, isBuy);
+                bool newPriceLevel = orderQueue.sizeOf() == 0;
                 orderQueue.pushBack(uint256(orderId));
 
-                _addPriceLevel(_price, isBuy);
+                if (newPriceLevel) _addPriceLevel(_price, isBuy);
             }
         } else {
             // IOC (or FOK after a full fill): never rest; close the taker order id at 0.
