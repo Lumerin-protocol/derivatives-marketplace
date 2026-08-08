@@ -448,6 +448,7 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
         if (count == 0) return (0, 0, 0);
 
         uint256 F = _getForwardPriceWad();
+        uint256 strikeFactor = _oracleToWadFactor();
 
         for (uint256 i = 0; i < count; i++) {
             uint64 seriesId = uint64(_userActiveSeries[user].at(i));
@@ -457,10 +458,10 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
             IVState memory iv = _ivStates[seriesId];
             if (iv.ewmaIV == 0) continue;
 
-            (uint256 K, uint256 tSec, bool isCall) = _seriesParams(seriesId);
-            Black76Lib.Greeks memory g = Black76Lib.greeks(F, K, iv.ewmaIV, tSec, isCall);
-
             OptionMarketRegistry.OptionSeries memory s = registry.getSeries(seriesId);
+            uint256 K = uint256(s.strikeE8) * strikeFactor;
+            uint256 tSec = s.expiryTs > block.timestamp ? s.expiryTs - block.timestamp : 1;
+            Black76Lib.Greeks memory g = Black76Lib.greeks(F, K, iv.ewmaIV, tSec, s.isCall);
             int256 signedQty = int256(qty) * int256(WAD) / int256(uint256(s.lotSize));
 
             netDelta += int256(g.delta) * signedQty / int256(WAD);
