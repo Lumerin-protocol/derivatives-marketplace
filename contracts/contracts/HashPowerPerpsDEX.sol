@@ -577,4 +577,10 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     function getOrderAggregate(address _user) external view returns (OrderAggregate memory) {
         return userOrderAggregate[_user];
     }
+
+    /// @notice Whether the participant has margin-relevant resting-order delta.
+    function hasRestingOrderDelta(address _user) external view returns (bool) {
+        OrderAggregate storage aggregate = userOrderAggregate[_user];
+        return aggregate.buyQty != 0 || aggregate.sellQty != 0;
+    }
 }
