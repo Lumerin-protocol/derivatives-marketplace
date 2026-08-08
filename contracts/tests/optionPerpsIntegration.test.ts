@@ -5,7 +5,7 @@ import { encodeFunctionData, maxUint256 } from "viem";
 import type { NetworkConnection } from "hardhat/types/network";
 import { defaultSeries, INITIAL_PRICE_E8, ORACLE_DECIMALS } from "./optionsFixtures.ts";
 
-const { networkHelpers } = await network.getOrCreate();
+const { networkHelpers, viem } = await network.getOrCreate();
 
 const LOT = BigInt(defaultSeries.lotSize);
 const LIMIT = 0;
@@ -334,6 +334,16 @@ describe("Level 1 Perps Integration", () => {
       await perpsMock.write.setOrderDeltas([traders.trader1.account.address, 0n, 1_000_000n]);
       await perpsMock.write.setMaintenanceMargin([traders.trader1.account.address, 3_000_000_000n]);
 
+      const gas = await (await viem.getPublicClient()).estimateGas({
+        account: traders.trader1.account,
+        to: engine.address,
+        data: encodeFunctionData({
+          abi: engine.abi,
+          functionName: "getPortfolioOverview",
+          args: [traders.trader1.account.address],
+        }),
+      });
+      console.log(`  getPortfolioOverview combined exposure: ${gas.toLocaleString()} gas`);
       const p = await engine.read.getPortfolioOverview([traders.trader1.account.address]);
 
       assert.equal(p.optionsIM, 0n, "long option position has no ongoing margin");

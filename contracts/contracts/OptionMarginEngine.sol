@@ -510,8 +510,7 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
         p.optionsReserved = _reservedMargin[user];
         p.activeSeriesCount = _userActiveSeries[user].length();
         if (address(portfolioMargin) != address(0)) {
-            p.portfolioIM = portfolioMargin.computePortfolioIM(user);
-            p.portfolioMM = portfolioMargin.computePortfolioMM(user);
+            (p.portfolioIM, p.portfolioMM) = portfolioMargin.computePortfolioMargins(user);
             p.perpOrderMargin = portfolioMargin.orderMarginOf(user);
         }
 
