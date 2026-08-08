@@ -90,6 +90,28 @@ describe("Gas: createOrder", function () {
     assert.equal(position.netQuantity, qty);
   });
 
+  it("createOrder_portfolioReducingResting", async function () {
+    const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
+    const { perps } = contracts;
+    const { seller, buyer2, pc } = accounts;
+    const marketPrice = await perps.read.getMarketPrice();
+    const tick = config.minimumPriceIncrement;
+    const qty = parseUnits("1", config.quantityDecimals);
+
+    await perps.write.createOrder([marketPrice, -qty, TimeInForce.GTC], { account: seller.account });
+    await perps.write.createOrder([marketPrice, qty, TimeInForce.GTC], { account: buyer2.account });
+    await createOrderAndLogGas(
+      perps,
+      pc,
+      "createOrder_portfolioReducingResting",
+      [marketPrice + tick, -qty],
+      buyer2.account,
+    );
+
+    const orders = await perps.read.getUserOrders([buyer2.account.address]);
+    assert.equal(orders.length, 1);
+  });
+
   it("createOrder_3Matches (one price level)", async function () {
     const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
     const { perps } = contracts;

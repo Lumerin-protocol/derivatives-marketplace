@@ -77,10 +77,14 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     function createOrder(uint256 _price, int256 _quantity, TimeInForce _tif) external {
         address sender = _msgSender();
         _updateGlobalFunding();
-        bool skipMargin = _createOrder(sender, _price, _quantity, _tif);
-        if (!skipMargin) {
-            _ensureInitialMargin(sender);
+        _settleFunding(sender);
+        _validateOrderIntent(_price, _quantity, _tif);
+        uint256 allowedImPlusOne;
+        if (_isLocallyReducing(sender, _quantity)) {
+            allowedImPlusOne = portfolioMargin.computePortfolioIM(sender) + 1;
         }
+        _createOrder(sender, _price, _quantity, _tif);
+        _ensureInitialMargin(sender, allowedImPlusOne);
     }
 
     /// @notice Batched placement with per-leg time-in-force — IM check once at the end.
@@ -88,11 +92,13 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         address sender = _msgSender();
         _updateGlobalFunding();
         uint256 len = _intents.length;
+        if (len != 0) _settleFunding(sender);
         for (uint256 i = 0; i < len; i++) {
             OrderIntent calldata intent = _intents[i];
+            _validateOrderIntent(intent.price, intent.quantity, intent.timeInForce);
             _createOrder(sender, intent.price, intent.quantity, intent.timeInForce);
         }
-        _ensureInitialMargin(sender);
+        _ensureInitialMargin(sender, 0);
     }
 
     /// @notice Cancel, reduce-in-place, then place orders — IM check once at the end.
@@ -105,6 +111,8 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     ) external {
         address sender = _msgSender();
         _updateGlobalFunding();
+        uint256 createLen = _intents.length;
+        if (createLen != 0) _settleFunding(sender);
         uint256 cancelLen = _cancelIds.length;
         for (uint256 i = 0; i < cancelLen; i++) {
             _cancelOrder(sender, _cancelIds[i]);
@@ -113,12 +121,12 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         for (uint256 r = 0; r < reduceLen; r++) {
             _reduceOrderSize(sender, _reduces[r].orderId, _reduces[r].newQuantity);
         }
-        uint256 createLen = _intents.length;
         for (uint256 j = 0; j < createLen; j++) {
             OrderIntent calldata intent = _intents[j];
+            _validateOrderIntent(intent.price, intent.quantity, intent.timeInForce);
             _createOrder(sender, intent.price, intent.quantity, intent.timeInForce);
         }
-        _ensureInitialMargin(sender);
+        _ensureInitialMargin(sender, 0);
     }
 
     /// @notice Shrink a resting order owned by the caller without losing FIFO priority.
@@ -135,29 +143,13 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         _cancelOrder(_msgSender(), _orderId);
     }
 
-    /// @dev Per-leg body of `createOrder` / `createOrders` without the IM-check epilogue.
-    ///      Returns true when the leg is reduce-only (single-order callers may skip IM);
-    ///      batch callers always check once at the end.
-    ///      Caller must have already run `_updateGlobalFunding()` for this tx.
-    function _createOrder(address _participant, uint256 _price, int256 _quantity, TimeInForce _tif)
-        internal
-        returns (bool isReduceOnly)
-    {
-        _validateTIF(_tif);
-        _validateQty(_quantity);
-        _validatePrice(_price);
-
-        // Settle taker's funding once before matching so per-match _updateUserPosition
-        // calls can skip it (cumulativeFundingPerUnit is constant within this tx).
-        _settleFunding(_participant);
+    /// @dev Validated per-leg body of `createOrder` / `createOrders` without the IM-check epilogue.
+    ///      Caller has already updated global funding and settled the taker once for this tx.
+    function _createOrder(address _participant, uint256 _price, int256 _quantity, TimeInForce _tif) internal {
 
         bool isBuy = _quantity > 0;
         bytes32 orderId = _nextOrderId();
         emit OrderCreated(orderId, _participant, _price, _quantity);
-
-        // Snapshot before matching — reduce-only vs position minus already-resting reduces.
-        int256 positionBefore = positions[_participant].netQuantity;
-        uint256 reducingBefore = _restingReduceAbs(_participant, positionBefore);
 
         int256 remainingQuantity = _matchWithOppositeOrders(_participant, _price, _quantity);
         bool partiallyOrFullyFilled = remainingQuantity != _quantity;
@@ -203,9 +195,6 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
             }
         }
 
-        // Opposite side and combined reducing size (resting + this intent) ≤ position.
-        isReduceOnly = positionBefore != 0 && (positionBefore > 0 ? _quantity < 0 : _quantity > 0)
-            && M.abs(_quantity) + reducingBefore <= M.abs(positionBefore);
     }
 
     /// @dev Shared cancel body for `cancelOrder` / `updateOrders`. Caller must

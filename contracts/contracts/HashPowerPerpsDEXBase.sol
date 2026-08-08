@@ -850,8 +850,9 @@ abstract contract HashPowerPerpsDEXBase is
 
     /// @notice Ensure user meets initial margin requirement.
     ///         Delegates to the cross-product PortfolioMarginEngine.
-    function _ensureInitialMargin(address _user) internal view {
-        if (vault.balanceOf(_user) < portfolioMargin.computePortfolioIM(_user)) {
+    function _ensureInitialMargin(address _user, uint256 _allowedImPlusOne) internal view {
+        uint256 required = portfolioMargin.computePortfolioIM(_user);
+        if (vault.balanceOf(_user) < required && (_allowedImPlusOne == 0 || required >= _allowedImPlusOne)) {
             revert InsufficientMargin();
         }
     }
@@ -860,6 +861,18 @@ abstract contract HashPowerPerpsDEXBase is
 
     function _validateTIF(TimeInForce _tif) internal pure {
         if (uint8(_tif) > uint8(TimeInForce.FOK)) revert InvalidTimeInForce();
+    }
+
+    function _validateOrderIntent(uint256 _price, int256 _quantity, TimeInForce _tif) internal pure {
+        _validateTIF(_tif);
+        _validateQty(_quantity);
+        _validatePrice(_price);
+    }
+
+    function _isLocallyReducing(address _participant, int256 _quantity) internal view returns (bool) {
+        int256 position = positions[_participant].netQuantity;
+        if (position == 0 || (position > 0 ? _quantity >= 0 : _quantity <= 0)) return false;
+        return M.abs(_quantity) + _restingReduceAbs(_participant, position) <= M.abs(position);
     }
 
     function _validateQty(int256 _quantity) internal pure {
