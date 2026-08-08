@@ -826,8 +826,8 @@ abstract contract HashPowerPerpsDEXBase is
         uint256 liquidatorShare = totalFee * uint256(liqShareBps) / BPS;
         uint256 insuranceShare = totalFee - liquidatorShare;
 
-        _move(_user, liquidator, liquidatorShare);
-        _move(_user, insurance, insuranceShare);
+        if (liquidatorShare != 0) _move(_user, liquidator, liquidatorShare);
+        if (insuranceShare != 0) _move(_user, insurance, insuranceShare);
     }
 
     /// @notice Calculate PnL for a position at a given price

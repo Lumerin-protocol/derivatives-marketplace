@@ -11,12 +11,13 @@ async function deployUnderwaterOrdersFixture(connection: Parameters<typeof deplo
   const data = await deployPerpsFixture(connection);
   const { contracts, accounts, config, utils } = data;
   const { perps, priceOracle, vault } = contracts;
-  const { seller, buyer } = accounts;
+  const { owner, seller, buyer } = accounts;
   const initialPrice = await perps.read.getMarketPrice();
   const tick = config.minimumPriceIncrement;
   const qty = parseUnits("1", config.quantityDecimals);
   const minCollateral = utils.getMinimumCollateral(initialPrice, qty);
 
+  await perps.write.setLiquidationFeeBps([100], { account: owner.account });
   await vault.write.deposit([minCollateral], { account: seller.account });
   await vault.write.deposit([minCollateral * 2n], { account: buyer.account });
   await perps.write.createOrder([initialPrice, -qty, TimeInForce.GTC], { account: seller.account });
