@@ -468,6 +468,11 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     ///      when filling it would take the portfolio genuinely short.
     function getRiskView(address _user) external view returns (ILinearMarket.RiskView memory view_) {
         Position memory position = positions[_user];
+        OrderAggregate storage aggregate = userOrderAggregate[_user];
+        uint256 buyQty = aggregate.buyQty;
+        uint256 sellQty = aggregate.sellQty;
+        if (position.netQuantity == 0 && buyQty == 0 && sellQty == 0) return view_;
+
         uint256 currentPrice = getMarketPrice();
 
         view_.netPositionDelta =
@@ -480,9 +485,6 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         }
         view_.pendingFunding = getPendingFunding(_user);
 
-        OrderAggregate storage aggregate = userOrderAggregate[_user];
-        uint256 buyQty = aggregate.buyQty;
-        uint256 sellQty = aggregate.sellQty;
         view_.buyOrderDelta = (buyQty * (10 ** collateralDecimals)) / (10 ** QUANTITY_DECIMALS);
         view_.sellOrderDelta = (sellQty * (10 ** collateralDecimals)) / (10 ** QUANTITY_DECIMALS);
 
