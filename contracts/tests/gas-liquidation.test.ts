@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { network } from "hardhat";
-import { parseUnits, type Hash } from "viem";
+import { maxUint256, parseUnits, type Hash } from "viem";
 import { TimeInForce } from "../fixtures/timeInForce.ts";
-import { deployPerpsFixture } from "./fixtures.ts";
+import { deployPerpsFixture, deployPerpsWithLiquidatablePositionFixture } from "./fixtures.ts";
 
 const { networkHelpers } = await network.getOrCreate();
 
@@ -36,6 +36,21 @@ async function deployUnderwaterOrdersFixture(connection: Parameters<typeof deplo
 }
 
 describe("Gas: liquidation", () => {
+  it("liquidatePosition_fullNoOrders", async () => {
+    const data = await networkHelpers.loadFixture(deployPerpsWithLiquidatablePositionFixture);
+    const { perps } = data.contracts;
+    const { seller, buyer2, pc } = data.accounts;
+    await data.makeLiquidatable();
+
+    const hash = await perps.write.liquidatePosition(
+      [seller.account.address, maxUint256],
+      { account: buyer2.account },
+    );
+    const receipt = await pc.waitForTransactionReceipt({ hash });
+    assert.equal(receipt.status, "success");
+    console.log(`  liquidatePosition_fullNoOrders: ${Number(receipt.gasUsed).toLocaleString()} gas`);
+  });
+
   it("liquidateOrders_threeStaleThenTwoValid", async () => {
     const { contracts, accounts } = await networkHelpers.loadFixture(deployUnderwaterOrdersFixture);
     const { perps } = contracts;
