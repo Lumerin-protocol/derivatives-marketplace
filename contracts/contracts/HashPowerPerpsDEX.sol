@@ -297,8 +297,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
 
         // Over-liquidation guard: a position remains here, so if there is a real IM buffer
         // (`im > mm`) the leftover balance must sit at/under IM.
-        uint256 im = portfolioMargin.computePortfolioIM(_user);
-        uint256 mm = portfolioMargin.computePortfolioMM(_user);
+        (uint256 im, uint256 mm) = portfolioMargin.computePortfolioMargins(_user);
         if (im > mm && balanceOf(_user) > im) revert OverLiquidation();
 
         emit PositionLiquidated(_user, _msgSender(), signedClose, pnl, liqFee);
