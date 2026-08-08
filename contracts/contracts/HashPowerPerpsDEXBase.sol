@@ -928,6 +928,7 @@ abstract contract HashPowerPerpsDEXBase is
     ///      clamp only bites for an account already below MM, where it costs the
     ///      insurance fund a few bps rather than blocking the book.
     function _transferFee(address _participant, int256 _fee) internal {
+        if (_fee == 0) return;
         if (_fee >= 0) {
             uint256 owed = uint256(_fee);
             uint256 available = vault.balanceOf(_participant);
