@@ -717,12 +717,16 @@ abstract contract HashPowerPerpsDEXBase is
     ///      Returns the realized `pnl` on the closed slice and the SIGNED closed quantity (same
     ///      sign as the position). Callers MUST have already checked the underwater / orders-clear
     ///      / partial invariants.
-    function _doPartialLiquidatePosition(address _user, Position memory _position, uint256 _closeAbs)
+    function _doPartialLiquidatePosition(
+        address _user,
+        Position memory _position,
+        uint256 _closeAbs,
+        uint256 _currentPrice
+    )
         internal
         returns (int256 pnl, int256 signedClose)
     {
-        uint256 currentPrice = _marketPrice();
-        int256 priceDiff = int256(currentPrice) - int256(_position.aggregatedEntryPrice);
+        int256 priceDiff = int256(_currentPrice) - int256(_position.aggregatedEntryPrice);
 
         bool isLong = _position.netQuantity > 0;
         signedClose = M.toSigned(isLong, _closeAbs);

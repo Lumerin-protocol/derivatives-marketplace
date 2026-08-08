@@ -288,10 +288,10 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
             return;
         }
 
-        (int256 pnl, int256 signedClose) = _doPartialLiquidatePosition(_user, position, closeAbs);
+        uint256 currentPrice = getMarketPrice();
+        (int256 pnl, int256 signedClose) = _doPartialLiquidatePosition(_user, position, closeAbs, currentPrice);
 
         // Charge liquidation fee on the closed notional
-        uint256 currentPrice = getMarketPrice();
         uint256 closedNotional = _calculateValue(currentPrice, closeAbs);
         uint256 liqFee = _chargeLiquidationFee(_user, closedNotional);
 
