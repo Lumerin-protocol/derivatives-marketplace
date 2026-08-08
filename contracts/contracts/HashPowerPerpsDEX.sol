@@ -126,7 +126,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
             _validateOrderIntent(intent.price, intent.quantity, intent.timeInForce);
             _createOrder(sender, intent.price, intent.quantity, intent.timeInForce);
         }
-        _ensureInitialMargin(sender, 0);
+        if (createLen != 0) _ensureInitialMargin(sender, 0);
     }
 
     /// @notice Shrink a resting order owned by the caller without losing FIFO priority.
