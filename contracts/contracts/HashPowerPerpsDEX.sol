@@ -429,7 +429,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @param _user Address of the user
     /// @return pendingFunding Positive = user owes, negative = user receives (in collateral token units)
     function getPendingFunding(address _user) public view returns (int256) {
-        return _pendingFunding(_user);
+        return _pendingFunding(_user, 0);
     }
 
     // View functions
@@ -483,7 +483,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
             // This deliberately differs from `getUnrealizedPnl`, which is a UX view.
             view_.unrealizedPnl = _calculatePositionPnl(position, currentPrice);
         }
-        view_.pendingFunding = getPendingFunding(_user);
+        view_.pendingFunding = _pendingFunding(_user, currentPrice);
 
         view_.buyOrderDelta = (buyQty * (10 ** collateralDecimals)) / (10 ** QUANTITY_DECIMALS);
         view_.sellOrderDelta = (sellQty * (10 ** collateralDecimals)) / (10 ** QUANTITY_DECIMALS);

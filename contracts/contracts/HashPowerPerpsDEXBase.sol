@@ -953,8 +953,9 @@ abstract contract HashPowerPerpsDEXBase is
     /// @notice Compute the current cumulative funding per unit without writing state
     /// @dev Uses the order-book mid-price as mark price and the oracle as index price.
     ///      If either side of the book is empty, no additional funding accrues.
+    /// @dev Reuses `_indexPrice` when already loaded by a caller; zero loads it lazily.
     /// @return currentCumFunding The theoretical cumulative funding as of block.timestamp
-    function _getCurrentCumulativeFunding() internal view returns (int256 currentCumFunding) {
+    function _getCurrentCumulativeFunding(uint256 _indexPrice) internal view returns (int256 currentCumFunding) {
         currentCumFunding = cumulativeFundingPerUnit;
 
         if (lastFundingUpdateTime == 0 || fundingPeriod == 0) return currentCumFunding;
@@ -968,7 +969,7 @@ abstract contract HashPowerPerpsDEXBase is
         if (bestBid == 0 || bestAsk == 0) return currentCumFunding;
 
         uint256 markPrice = (bestBid + bestAsk) / 2;
-        uint256 indexPrice = _marketPrice();
+        uint256 indexPrice = _indexPrice == 0 ? _marketPrice() : _indexPrice;
 
         // fundingRate (scaled by 10^FUNDING_DECIMALS) = (mark - index) * 10^FUNDING_DECIMALS / index
         int256 priceDiff = int256(markPrice) - int256(indexPrice);
@@ -991,7 +992,7 @@ abstract contract HashPowerPerpsDEXBase is
     function _updateGlobalFunding() internal {
         if (lastFundingUpdateTime == 0 || fundingPeriod == 0) return;
 
-        int256 newCumFunding = _getCurrentCumulativeFunding();
+        int256 newCumFunding = _getCurrentCumulativeFunding(0);
 
         if (newCumFunding != cumulativeFundingPerUnit) {
             // Derive the effective rate for the event
@@ -1055,11 +1056,12 @@ abstract contract HashPowerPerpsDEXBase is
 
     /// @dev Body of {getPendingFunding}: pending (unsettled) funding for a user.
     ///      Positive = user owes, negative = user receives (in collateral token units).
-    function _pendingFunding(address _user) internal view returns (int256) {
+    /// @dev Reuses `_indexPrice` when already loaded by a caller; zero loads it lazily.
+    function _pendingFunding(address _user, uint256 _indexPrice) internal view returns (int256) {
         Position memory position = positions[_user];
         if (position.netQuantity == 0) return 0;
 
-        int256 currentCumFunding = _getCurrentCumulativeFunding();
+        int256 currentCumFunding = _getCurrentCumulativeFunding(_indexPrice);
         int256 delta = currentCumFunding - userFundingSnapshot[_user];
         if (delta == 0) return 0;
 
