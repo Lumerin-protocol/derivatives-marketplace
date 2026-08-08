@@ -372,15 +372,8 @@ abstract contract HashPowerPerpsDEXBase is
     /// @dev Absolute qty of resting orders that reduce `_net`.
     function _restingReduceAbs(address _user, int256 _net) internal view returns (uint256 total) {
         if (_net == 0) return 0;
-        EnumerableSet.Bytes32Set storage ids = participantOrderIdsIndex[_user];
-        uint256 len = ids.length();
-        for (uint256 i = 0; i < len; i++) {
-            Order memory order = orders[ids.at(i)];
-            if (order.quantity == 0) continue;
-            if (_net > 0 ? order.quantity < 0 : order.quantity > 0) {
-                total += M.abs(order.quantity);
-            }
-        }
+        OrderAggregate storage aggregate = userOrderAggregate[_user];
+        return _net > 0 ? aggregate.sellQty : aggregate.buyQty;
     }
 
     /// @notice Match incoming order with opposite orders using limit price logic (direct walk).
