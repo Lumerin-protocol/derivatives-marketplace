@@ -27,8 +27,8 @@ importers:
         specifier: ^3.9.1
         version: 3.9.1(@nomicfoundation/hardhat-ethers@3.1.3(ethers@6.17.0)(hardhat@3.9.1))(@nomicfoundation/hardhat-verify@3.0.17(hardhat@3.9.1))(ethers@6.17.0)(hardhat@3.9.1)
       collateral-margin:
-        specifier: github:Lumerin-protocol/collateral-margin#b445276ae4de4141ec63e2e61e1da3cf954aafb2
-        version: https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/b445276ae4de4141ec63e2e61e1da3cf954aafb2
+        specifier: github:Lumerin-protocol/collateral-margin#863a4e66e9ca929e8a8e434c1c436c1880256e75
+        version: https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/863a4e66e9ca929e8a8e434c1c436c1880256e75
       hashprice-oracle:
         specifier: github:Lumerin-protocol/hashprice-oracle.git#main
         version: https://codeload.github.com/Lumerin-protocol/hashprice-oracle/tar.gz/b65adbfeb7e6c4417747bfd3d94b6e89e162ed50
@@ -1449,8 +1449,8 @@ packages:
     resolution: {integrity: sha512-JQHZ2QMW6l3aH/j6xCqQThY/9OH4D/9ls34cgkUBiEeocRTU04tHfKPBsUK1PqZCUQM7GiA0IIXJSuXHI64Kbg==}
     engines: {node: '>=0.8'}
 
-  collateral-margin@https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/b445276ae4de4141ec63e2e61e1da3cf954aafb2:
-    resolution: {tarball: https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/b445276ae4de4141ec63e2e61e1da3cf954aafb2}
+  collateral-margin@https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/863a4e66e9ca929e8a8e434c1c436c1880256e75:
+    resolution: {tarball: https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/863a4e66e9ca929e8a8e434c1c436c1880256e75}
     version: 1.0.0
 
   color-convert@2.0.1:
@@ -4622,7 +4622,7 @@ snapshots:
   clone@1.0.4:
     optional: true
 
-  collateral-margin@https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/b445276ae4de4141ec63e2e61e1da3cf954aafb2: {}
+  collateral-margin@https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/863a4e66e9ca929e8a8e434c1c436c1880256e75: {}
 
   color-convert@2.0.1:
     dependencies:
