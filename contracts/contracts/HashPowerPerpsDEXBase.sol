@@ -287,20 +287,21 @@ abstract contract HashPowerPerpsDEXBase is
 
     /// @dev Notify the points hook of a fill. Skipped when no hook is configured. The call is
     ///      intentionally not isolated: a reverting hook reverts the fill (unplug via setHook).
-    ///      `_makerPrice` is the resting maker order's price; `_refPriceForPoints()` supplies the
-    ///      oracle reference for the hook's price-improvement multiplier (0 when stale → no bonus).
+    ///      `_makerPrice` is the resting maker order's price; `_refPrice` is cached once per
+    ///      taker order for the hook's price-improvement multiplier (0 when stale → no bonus).
     function _notifyFill(
+        IPointsHook _hook,
         address _maker,
         address _taker,
         uint256 _notional,
         int256 _makerFee,
         int256 _takerFee,
-        uint256 _makerPrice
+        uint256 _makerPrice,
+        uint256 _refPrice
     ) internal {
-        IPointsHook _hook = hook;
         if (address(_hook) == address(0)) return;
         uint256 takerFeeAbs = _takerFee > 0 ? uint256(_takerFee) : 0;
-        _hook.onFill(_maker, _taker, _notional, _makerFee, takerFeeAbs, _makerPrice, _refPriceForPoints());
+        _hook.onFill(_maker, _taker, _notional, _makerFee, takerFeeAbs, _makerPrice, _refPrice);
     }
 
     /// @dev Oracle reference price for the points price-improvement multiplier, in the same
@@ -389,13 +390,19 @@ abstract contract HashPowerPerpsDEXBase is
         if (oppositePrices.sizeOf() == 0) return remainingQuantity;
 
         (, uint256 currentPrice) = oppositePrices.getNextNode(0);
+        if ((_isBuy && currentPrice > _limitPrice) || (!_isBuy && currentPrice < _limitPrice)) {
+            return remainingQuantity;
+        }
+        IPointsHook pointsHook = hook;
+        uint256 refPrice = address(pointsHook) == address(0) ? 0 : _refPriceForPoints();
 
         while (currentPrice != 0 && remainingQuantity != 0) {
             if (_isBuy && currentPrice > _limitPrice) break;
             if (!_isBuy && currentPrice < _limitPrice) break;
 
             (, uint256 nextPrice) = oppositePrices.getNextNode(currentPrice);
-            remainingQuantity = _matchOrdersAtPrice(_taker, currentPrice, remainingQuantity, _isBuy);
+            remainingQuantity =
+                _matchOrdersAtPrice(_taker, currentPrice, remainingQuantity, _isBuy, pointsHook, refPrice);
             currentPrice = nextPrice;
         }
 
@@ -405,7 +412,14 @@ abstract contract HashPowerPerpsDEXBase is
     /// @notice Match orders at a specific price level (direct walk).
     /// @dev Self-cross (maker == taker) nets out size with no trade, fees, or
     ///      position update — same STP semantics as Futures.
-    function _matchOrdersAtPrice(address _taker, uint256 _price, int256 _remainingQty, bool _isBuy)
+    function _matchOrdersAtPrice(
+        address _taker,
+        uint256 _price,
+        int256 _remainingQty,
+        bool _isBuy,
+        IPointsHook _pointsHook,
+        uint256 _refPrice
+    )
         internal
         returns (int256)
     {
@@ -422,7 +436,7 @@ abstract contract HashPowerPerpsDEXBase is
                 continue;
             }
 
-            _remainingQty = _executeMatch(_taker, makerOrderId, makerOrder, _remainingQty);
+            _remainingQty = _executeMatch(_taker, makerOrderId, makerOrder, _remainingQty, _pointsHook, _refPrice);
             (, orderIdUint) = makerOrderQueue.getNextNode(0);
         }
 
@@ -461,7 +475,14 @@ abstract contract HashPowerPerpsDEXBase is
     }
 
     /// @notice Execute a single order match
-    function _executeMatch(address _taker, bytes32 _makerOrderId, Order storage _makerOrder, int256 _remainingQty)
+    function _executeMatch(
+        address _taker,
+        bytes32 _makerOrderId,
+        Order storage _makerOrder,
+        int256 _remainingQty,
+        IPointsHook _pointsHook,
+        uint256 _refPrice
+    )
         internal
         returns (int256)
     {
@@ -481,7 +502,7 @@ abstract contract HashPowerPerpsDEXBase is
         _transferFee(_taker, takerFee);
         _transferFee(makerParticipant, makerFee);
 
-        _notifyFill(makerParticipant, _taker, notionalValue, makerFee, takerFee, makerPrice);
+        _notifyFill(_pointsHook, makerParticipant, _taker, notionalValue, makerFee, takerFee, makerPrice, _refPrice);
 
         int256 newMakerQty = _reduceQuantity(makerQty, matchAmt);
         _subtractOrderAggregate(makerParticipant, _remainingQty < 0, makerPrice, M.abs(makerQty), M.abs(newMakerQty));

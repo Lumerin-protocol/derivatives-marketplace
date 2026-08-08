@@ -11,6 +11,7 @@ import { deployPerpsWithCollateralFixture, deployPerpsWithOrdersFixture } from "
 import { TimeInForce } from "../fixtures/timeInForce.ts";
 
 const { viem, networkHelpers } = await network.getOrCreate();
+const WAD = 10n ** 18n;
 
 function getPerps(addr: `0x${string}`) {
   return viem.getContractAt("HashPowerPerpsDEX", addr);
@@ -42,6 +43,21 @@ async function placeAsksAtPrice(perps: Perps, seller: Client, price: bigint, qty
   for (let i = 0; i < count; i++) {
     await perps.write.createOrder([price, -qty, TimeInForce.GTC], { account: seller.account });
   }
+}
+
+async function enablePointsHook(perps: Perps, owner: { account: Account }) {
+  const points = await viem.deployContract("Points", [owner.account.address]);
+  const hook = await viem.deployContract(
+    "PointsHook",
+    [points.address, owner.account.address, WAD, WAD, parseUnits("10", 6)],
+  );
+  await points.write.grantRole([await points.read.MINTER_ROLE(), hook.address], {
+    account: owner.account,
+  });
+  await hook.write.grantRole([await hook.read.HOOK_CALLER_ROLE(), perps.address], {
+    account: owner.account,
+  });
+  await perps.write.setHook([hook.address], { account: owner.account });
 }
 
 async function placeAsksMultiLevel(
@@ -231,6 +247,26 @@ describe("Gas: createOrder", function () {
 
     const position = await perps.read.getUserPosition([buyer2.account.address]);
     assert.equal(position.netQuantity, qty * 10n);
+  });
+
+  it("createOrder_10Matches_pointsHook", async function () {
+    const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
+    const { perps } = contracts;
+    const { owner, seller, buyer2, pc } = accounts;
+    const marketPrice = await perps.read.getMarketPrice();
+    const tick = config.minimumPriceIncrement;
+    const qty = parseUnits("1", config.quantityDecimals);
+
+    await enablePointsHook(perps, owner);
+    await placeAsksAtPrice(perps, seller, marketPrice + tick, qty, 10);
+    await createOrderAndLogGas(
+      perps,
+      pc,
+      "createOrder_10Matches_pointsHook",
+      [marketPrice + tick, qty * 10n],
+      buyer2.account,
+      10,
+    );
   });
 
   it("createOrder_10Matches_5Levels", async function () {
