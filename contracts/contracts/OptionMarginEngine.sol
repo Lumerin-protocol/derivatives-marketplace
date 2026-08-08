@@ -441,9 +441,9 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     ///         Used by PortfolioMarginEngine for cross-product stress margin.
     ///         Returned values are WAD-scaled.
     /// @return netDelta Signed net delta (long = positive, short = negative)
-    /// @return netGamma Total gamma (always non-negative)
-    /// @return netVega Total vega (always non-negative)
-    function getNetGreeks(address user) external view returns (int256 netDelta, uint256 netGamma, uint256 netVega) {
+    /// @return netGamma Signed net gamma (long = positive, short = negative)
+    /// @return netVega Signed net vega (long = positive, short = negative)
+    function getNetGreeks(address user) external view returns (int256 netDelta, int256 netGamma, int256 netVega) {
         uint256 count = _userActiveSeries[user].length();
         if (count == 0) return (0, 0, 0);
 
@@ -464,8 +464,8 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
             int256 signedQty = int256(qty) * int256(WAD) / int256(uint256(s.lotSize));
 
             netDelta += int256(g.delta) * signedQty / int256(WAD);
-            netGamma += g.gamma * _abs128(qty) / uint256(s.lotSize);
-            netVega += g.vega * _abs128(qty) / uint256(s.lotSize);
+            netGamma += int256(g.gamma) * signedQty / int256(WAD);
+            netVega += int256(g.vega) * signedQty / int256(WAD);
         }
     }
 
@@ -651,10 +651,6 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
 
     function _fromWad(uint256 wadAmount) private view returns (uint256) {
         return wadAmount / 10 ** (18 - uint256(tokenDecimals));
-    }
-
-    function _abs128(int128 x) private pure returns (uint256) {
-        return x >= 0 ? uint256(int256(x)) : uint256(-int256(x));
     }
 
     // ── Upgrade ─────────────────────────────────────────────────────────────

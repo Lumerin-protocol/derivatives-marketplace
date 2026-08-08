@@ -219,6 +219,31 @@ describe("OptionMarginEngine", () => {
     });
   });
 
+  describe("portfolio Greeks", () => {
+    it("preserves gamma and vega signs across short and long positions", async () => {
+      const { engine, traders, seriesId, accounts } =
+        await networkHelpers.loadFixture(deployMarginEngineFixture);
+      const user = traders.trader1.account.address;
+
+      await engine.write.initializeIV([seriesId]);
+      await engine.write.updatePosition([user, seriesId, -5n], {
+        account: accounts.owner.account,
+      });
+
+      const [, shortGamma, shortVega] = await engine.read.getNetGreeks([user]);
+      assert.ok(shortGamma < 0n, "short options must report negative gamma");
+      assert.ok(shortVega < 0n, "short options must report negative vega");
+
+      await engine.write.updatePosition([user, seriesId, 10n], {
+        account: accounts.owner.account,
+      });
+
+      const [, longGamma, longVega] = await engine.read.getNetGreeks([user]);
+      assert.ok(longGamma > 0n, "net long options must report positive gamma");
+      assert.ok(longVega > 0n, "net long options must report positive vega");
+    });
+  });
+
   // ── Margin computation ────────────────────────────────────────────────
 
   describe("margin computation", () => {
