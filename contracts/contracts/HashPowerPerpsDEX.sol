@@ -280,15 +280,15 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
 
         uint256 absNet = M.abs(position.netQuantity);
         uint256 closeAbs = _closeQty < absNet ? _closeQty : absNet;
+        uint256 currentPrice = getMarketPrice();
 
         // Full close: delete the position and settle the whole PnL (bad-debt path). No IM buffer
         // guard — the keeper deliberately deleveraged the entire position (deep underwater).
         if (closeAbs == absNet) {
-            _doLiquidatePosition(_user);
+            _doLiquidatePosition(_user, currentPrice);
             return;
         }
 
-        uint256 currentPrice = getMarketPrice();
         (int256 pnl, int256 signedClose) = _doPartialLiquidatePosition(_user, position, closeAbs, currentPrice);
 
         // Charge liquidation fee on the closed notional

@@ -741,11 +741,10 @@ abstract contract HashPowerPerpsDEXBase is
     /// @dev Closes the user's position and settles PnL against the insurance fund. Caller must
     ///      have verified all predicates. Charges a liquidation fee on the closed notional
     ///      (computed as `currentPrice * |closedQuantity| / 10^QUANTITY_DECIMALS`).
-    function _doLiquidatePosition(address _user) internal {
+    function _doLiquidatePosition(address _user, uint256 _currentPrice) internal {
         Position memory position = positions[_user];
-        uint256 currentPrice = _marketPrice();
 
-        int256 pnl = _calculatePositionPnl(position, currentPrice);
+        int256 pnl = _calculatePositionPnl(position, _currentPrice);
 
         // Settle PnL
         if (pnl < 0) {
@@ -766,7 +765,7 @@ abstract contract HashPowerPerpsDEXBase is
         }
 
         int256 closedQuantity = position.netQuantity;
-        uint256 closedNotional = _calculateValue(currentPrice, M.abs(closedQuantity));
+        uint256 closedNotional = _calculateValue(_currentPrice, M.abs(closedQuantity));
         uint256 liqFee = _chargeLiquidationFee(_user, closedNotional);
 
         delete positions[_user];
