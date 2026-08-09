@@ -28,7 +28,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @dev Lives here rather than in {HashPowerPerpsDEXBase} so that a diff to
     ///      this file and the version it ships under stay in the same place,
     ///      mirroring {Futures}.
-    string public constant VERSION = "2.14.0";
+    string public constant VERSION = "2.15.0";
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ICollateralVault _vault) HashPowerPerpsDEXBase(_vault) { }
@@ -55,6 +55,12 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     ///      applies the checks.
     function initializeV2(ICollateralVault _vault, IPortfolioMarginEngine _pm) external reinitializer(2) onlyOwner {
         portfolioMargin = _pm;
+    }
+
+    /// @notice One-shot migration that clears the reused legacy flat-liquidation-fee slot.
+    /// @dev Invoke atomically through `upgradeToAndCall` before any v2.15 fee path executes.
+    function initializeV3() external reinitializer(3) onlyOwner {
+        collectedFeesBalance = 0;
     }
 
     // ── Vault integration ───────────────────────────────────────────────────

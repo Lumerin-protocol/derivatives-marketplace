@@ -291,6 +291,11 @@ export const contractErrors = [
   },
   {
     "inputs": [],
+    "name": "EmptyBatch",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "InsuranceFundNotConfigured",
     "type": "error"
   },

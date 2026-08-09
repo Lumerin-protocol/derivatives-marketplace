@@ -217,7 +217,7 @@ describe("HashPowerPerpsDEX - liquidatePosition(user, closeQty) partial close", 
   //    notional (capped at the user's balance) and emits it as
   //    `PositionLiquidated.liquidatorFee`. The liquidator's cut is
   //    `liquidatorShareBps * fee` — default 0, so at default config the whole fee
-  //    goes to the insurance fund and the keeper's balance is unchanged.
+  //    becomes venue revenue and the keeper's balance is unchanged.
 
   it("charges the bps fee on a restoring partial close; liquidator share defaults to 0", async function () {
     const data = await networkHelpers.loadFixture(partialPerpsFixture);
@@ -230,6 +230,7 @@ describe("HashPowerPerpsDEX - liquidatePosition(user, closeQty) partial close", 
 
     const newMark = await data.pump(13n, 10n); // +30% — closing 30 lands in [MM, IM]
     const before = await vault.read.balanceOf([buyer2.account.address]);
+    const revenueBefore = await perps.read.collectedFeesBalance();
 
     const closeQty = parseUnits("30", config.quantityDecimals);
     const hash = await perps.write.liquidatePosition([seller.account.address, closeQty], {
@@ -244,6 +245,7 @@ describe("HashPowerPerpsDEX - liquidatePosition(user, closeQty) partial close", 
 
     const after = await vault.read.balanceOf([buyer2.account.address]);
     assert.equal(after, before, "liquidator balance unchanged (share defaults to 0)");
+    assert.equal(await perps.read.collectedFeesBalance(), revenueBefore + expectedFee);
   });
 
   it("charges the bps fee on a full close; liquidator share defaults to 0", async function () {
@@ -257,6 +259,7 @@ describe("HashPowerPerpsDEX - liquidatePosition(user, closeQty) partial close", 
 
     const newMark = await data.pump(13n, 10n);
     const before = await vault.read.balanceOf([buyer2.account.address]);
+    const revenueBefore = await perps.read.collectedFeesBalance();
 
     const hash = await perps.write.liquidatePosition([seller.account.address, maxUint256], {
       account: buyer2.account,
@@ -273,6 +276,7 @@ describe("HashPowerPerpsDEX - liquidatePosition(user, closeQty) partial close", 
 
     const after = await vault.read.balanceOf([buyer2.account.address]);
     assert.equal(after, before, "liquidator balance unchanged (share defaults to 0)");
+    assert.equal(await perps.read.collectedFeesBalance(), revenueBefore + expectedFee);
   });
 
   it("degenerate IM <= MM: no over-liquidation ceiling even when over-closing", async function () {

@@ -31,7 +31,7 @@ async function deployUnderwaterWithOrdersFixture(conn: Parameters<typeof deployP
 
   // Configure a small liquidation fee so the per-order bps fee math is exercised: the fee
   // is charged on cancelled-order notional, but the liquidator share defaults to 0 (the
-  // whole fee goes to the insurance fund). Tests that need to exercise the position-side
+  // whole fee becomes venue revenue). Tests that need to exercise the position-side
   // path don't depend on this override.
   const liquidationFeeBps = 50; // 0.5%
   await perps.write.setLiquidationFeeBps([liquidationFeeBps], { account: owner.account });
@@ -136,7 +136,7 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition", function () {
     it("cancels the order and charges the bps fee (liquidator share defaults to 0)", async function () {
       const data = await networkHelpers.loadFixture(deployUnderwaterWithOrdersFixture);
       const { contracts, accounts } = data;
-      const { perps } = contracts;
+      const { perps, vault } = contracts;
       const { seller, buyer2, pc } = accounts;
 
       await data.makeUnderwater();
@@ -147,6 +147,8 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition", function () {
 
       const liqBalanceBefore = await perps.read.balanceOf([buyer2.account.address]);
       const sellerBalanceBefore = await perps.read.balanceOf([seller.account.address]);
+      const revenueBefore = await perps.read.collectedFeesBalance();
+      const insuranceBefore = await vault.read.insuranceFundBalance();
 
       const hash = await perps.write.liquidateOrder([seller.account.address, targetId], {
         account: buyer2.account,
@@ -192,6 +194,8 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition", function () {
       );
       assert.ok(liquidated.args.fee > 0n, "fee should be non-zero");
       assert.equal(sellerBalanceBefore - sellerBalanceAfter, liquidated.args.fee);
+      assert.equal(await perps.read.collectedFeesBalance(), revenueBefore + liquidated.args.fee);
+      assert.equal(await vault.read.insuranceFundBalance(), insuranceBefore);
     });
 
     it("does not pay the liquidator even when liquidationFeeBps is set high (share defaults to 0)", async function () {

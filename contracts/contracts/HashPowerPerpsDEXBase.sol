@@ -63,8 +63,10 @@ abstract contract HashPowerPerpsDEXBase is
     uint8 private __gap1;
     /// @dev Dead — former maintenanceMarginPercent. Margin is now delegated to PortfolioMarginEngine.
     uint8 private __gap2;
-    /// @dev Dead — former liquidationFee (flat). Now bps-based via liquidationFeeBps.
-    uint256 private __gap3;
+    /// @notice Trading fees and the exchange share of liquidation penalties.
+    /// @dev Reuses the former flat `liquidationFee` slot. `initializeV3` must zero
+    ///      the legacy value atomically with the upgrade before revenue accounting starts.
+    uint256 public collectedFeesBalance;
     uint8 private __gap4;
     uint8 internal oracleDecimals;
     uint256 private nonce; // Nonce for order IDs
@@ -120,7 +122,7 @@ abstract contract HashPowerPerpsDEXBase is
     uint16 public liquidationFeeBps;
     /// @notice Share of the liquidation fee paid to the keeper (msg.sender).
     ///         In basis points: 10_000 = 100% to liquidator, 5_000 = 50/50 split.
-    ///         The remainder goes to the insurance fund.
+    ///         The remainder becomes venue revenue in this contract's vault account.
     /// @dev Appended at end of storage to preserve the upgradeable layout.
     uint16 public liquidatorShareBps;
 
@@ -500,8 +502,15 @@ abstract contract HashPowerPerpsDEXBase is
 
         _createPosition(_makerOrderId, makerParticipant, _taker, makerPrice, takerQty, takerFee, makerFee);
 
-        _transferFee(_taker, takerFee);
-        _transferFee(makerParticipant, makerFee);
+        // Collect the positive side first so a same-match rebate can use revenue
+        // earned by that match instead of depending on a pre-funded fee pot.
+        if (makerFee < 0) {
+            _transferFee(_taker, takerFee);
+            _transferFee(makerParticipant, makerFee);
+        } else {
+            _transferFee(makerParticipant, makerFee);
+            _transferFee(_taker, takerFee);
+        }
 
         _notifyFill(_pointsHook, makerParticipant, _taker, notionalValue, makerFee, takerFee, makerPrice, _refPrice);
 
@@ -823,10 +832,10 @@ abstract contract HashPowerPerpsDEXBase is
     }
 
     /// @notice Charge a liquidation fee on the closed notional value, split between
-    ///         liquidator (msg.sender) and insurance fund according to `liquidatorShareBps`.
+    ///         liquidator (msg.sender) and venue revenue according to `liquidatorShareBps`.
     /// @dev Fee is `_notionalValue * liquidationFeeBps / 10000`, capped at the user's
     ///      actual vault balance. The liquidator receives `fee * liquidatorShareBps / 10000`
-    ///      (also capped at available balance), and the remainder goes to the insurance fund.
+    ///      (also capped at available balance), and the remainder becomes venue revenue.
     /// @param _user The liquidated user (fee source)
     /// @param _notionalValue Notional value of the liquidated position/order
     /// @return totalFee Total fee actually collected (may be less than computed if balance insufficient)
@@ -842,14 +851,15 @@ abstract contract HashPowerPerpsDEXBase is
         if (totalFee == 0) return 0;
 
         address liquidator = _msgSender();
-        address insurance = _insuranceFundAccount();
-
         uint16 liqShareBps = liquidatorShareBps;
         uint256 liquidatorShare = totalFee * uint256(liqShareBps) / BPS;
-        uint256 insuranceShare = totalFee - liquidatorShare;
+        uint256 exchangeShare = totalFee - liquidatorShare;
 
         if (liquidatorShare != 0) _move(_user, liquidator, liquidatorShare);
-        if (insuranceShare != 0) _move(_user, insurance, insuranceShare);
+        if (exchangeShare != 0) {
+            collectedFeesBalance += exchangeShare;
+            _move(_user, address(this), exchangeShare);
+        }
     }
 
     /// @notice Calculate PnL for a position at a given price
@@ -956,17 +966,20 @@ abstract contract HashPowerPerpsDEXBase is
             uint256 available = vault.balanceOf(_participant);
             uint256 paid = owed < available ? owed : available;
             if (paid > 0) {
-                _move(_participant, _insuranceFundAccount(), paid);
+                collectedFeesBalance += paid;
+                _move(_participant, address(this), paid);
             }
             if (paid < owed) {
                 emit BadDebt(_participant, owed - paid);
             }
         } else {
             uint256 rebate = uint256(-_fee);
-            uint256 reserveBalance = vault.balanceOf(_insuranceFundAccount());
-            uint256 payout = rebate < reserveBalance ? rebate : reserveBalance;
+            uint256 payout = rebate < collectedFeesBalance ? rebate : collectedFeesBalance;
+            uint256 revenueBalance = vault.balanceOf(address(this));
+            if (payout > revenueBalance) payout = revenueBalance;
             if (payout > 0) {
-                _move(_insuranceFundAccount(), _participant, payout);
+                collectedFeesBalance -= payout;
+                _move(address(this), _participant, payout);
             }
         }
     }

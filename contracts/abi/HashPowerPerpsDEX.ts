@@ -39,6 +39,11 @@ export const HashPowerPerpsDEXAbi = [
   },
   {
     "inputs": [],
+    "name": "EmptyBatch",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "FailedCall",
     "type": "error"
   },
@@ -815,6 +820,19 @@ export const HashPowerPerpsDEXAbi = [
     "type": "function"
   },
   {
+    "inputs": [],
+    "name": "collectedFeesBalance",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [
       {
         "internalType": "uint256",
@@ -1310,6 +1328,13 @@ export const HashPowerPerpsDEXAbi = [
       }
     ],
     "name": "initializeV2",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "initializeV3",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -1832,6 +1857,13 @@ export const HashPowerPerpsDEXAbi = [
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "withdrawCollectedFees",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   }
 ] as const;

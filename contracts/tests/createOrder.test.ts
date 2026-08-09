@@ -448,7 +448,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       const { contracts, accounts, config } = await networkHelpers.loadFixture(
         deployPerpsWithCollateralFixture,
       );
-      const { perps } = contracts;
+      const { perps, vault } = contracts;
       const { buyer, seller } = accounts;
 
       const marketPrice = await perps.read.getMarketPrice();
@@ -457,6 +457,8 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       await perps.write.createOrder([marketPrice, -quantity, TimeInForce.GTC], { account: seller.account });
 
       const balanceBefore = await perps.read.balanceOf([buyer.account.address]);
+      const revenueBefore = await perps.read.collectedFeesBalance();
+      const insuranceBefore = await vault.read.insuranceFundBalance();
 
       await perps.write.createOrder([marketPrice, quantity, TimeInForce.GTC], { account: buyer.account });
 
@@ -465,6 +467,8 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       const expectedFee = (notionalValue * config.takerFeeBps) / 10000n;
 
       assert.equal(balanceBefore - balanceAfter, expectedFee);
+      assert.equal(await perps.read.collectedFeesBalance(), revenueBefore + expectedFee);
+      assert.equal(await vault.read.insuranceFundBalance(), insuranceBefore);
     });
 
     it("should not charge maker fee when makerFeeBps is 0", async function () {
@@ -490,6 +494,42 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       const sellerBalanceAfter = await perps.read.balanceOf([seller.account.address]);
 
       assert.equal(sellerBalanceBefore, sellerBalanceAfter);
+    });
+
+    it("funds a maker rebate from the same match's taker fee", async function () {
+      const { contracts, accounts, config } = await networkHelpers.loadFixture(
+        deployPerpsWithCollateralFixture,
+      );
+      const { perps } = contracts;
+      const { buyer, seller, owner } = accounts;
+
+      const marketPrice = await perps.read.getMarketPrice();
+      const quantity = parseUnits("1", config.quantityDecimals);
+      const feeBps = 30;
+      const notional = (marketPrice * quantity) / 10n ** BigInt(config.quantityDecimals);
+      const expectedFee = (notional * BigInt(feeBps)) / 10_000n;
+
+      await perps.write.setTakerFeeBps([feeBps], { account: owner.account });
+      await perps.write.setMakerFeeBps([-feeBps], { account: owner.account });
+      await perps.write.createOrder([marketPrice, -quantity, TimeInForce.GTC], {
+        account: seller.account,
+      });
+
+      const makerBefore = await perps.read.balanceOf([seller.account.address]);
+      const takerBefore = await perps.read.balanceOf([buyer.account.address]);
+      await perps.write.createOrder([marketPrice, quantity, TimeInForce.GTC], {
+        account: buyer.account,
+      });
+
+      assert.equal(
+        (await perps.read.balanceOf([seller.account.address])) - makerBefore,
+        expectedFee,
+      );
+      assert.equal(
+        takerBefore - (await perps.read.balanceOf([buyer.account.address])),
+        expectedFee,
+      );
+      assert.equal(await perps.read.collectedFeesBalance(), 0n);
     });
   });
 

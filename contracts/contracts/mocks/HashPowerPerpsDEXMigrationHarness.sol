@@ -21,6 +21,11 @@ contract HashPowerPerpsDEXMigrationHarness is HashPowerPerpsDEX, MulticallUpgrad
         delete userSellOrderQty[_user];
     }
 
+    /// @dev Simulates a non-zero legacy flat-liquidation-fee value in the reused slot.
+    function setLegacyRevenueSlot(uint256 _value) external {
+        collectedFeesBalance = _value;
+    }
+
     function setLegacyOrderCache(
         address _user,
         uint256 _buyQty,
