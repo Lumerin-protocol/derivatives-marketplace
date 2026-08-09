@@ -63,8 +63,10 @@ abstract contract HashPowerPerpsDEXBase is
     uint8 private __gap1;
     /// @dev Dead — former maintenanceMarginPercent. Margin is now delegated to PortfolioMarginEngine.
     uint8 private __gap2;
-    /// @dev Dead — former liquidationFee (flat). Now bps-based via liquidationFeeBps.
-    uint256 private __gap3;
+    /// @notice Trading fees and the exchange share of liquidation penalties.
+    /// @dev Reuses the former flat `liquidationFee` slot. `initializeV3` must zero
+    ///      the legacy value atomically with the upgrade before revenue accounting starts.
+    uint256 public collectedFeesBalance;
     uint8 private __gap4;
     uint8 internal oracleDecimals;
     uint256 private nonce; // Nonce for order IDs
@@ -120,7 +122,7 @@ abstract contract HashPowerPerpsDEXBase is
     uint16 public liquidationFeeBps;
     /// @notice Share of the liquidation fee paid to the keeper (msg.sender).
     ///         In basis points: 10_000 = 100% to liquidator, 5_000 = 50/50 split.
-    ///         The remainder goes to the insurance fund.
+    ///         The remainder becomes venue revenue in this contract's vault account.
     /// @dev Appended at end of storage to preserve the upgradeable layout.
     uint16 public liquidatorShareBps;
 
@@ -244,6 +246,7 @@ abstract contract HashPowerPerpsDEXBase is
     error InvalidTimeInForce();
     error InvalidReduceQuantity();
     error OrderNotExists();
+    error EmptyBatch();
     error ZeroAddress();
     /// @notice The margin engine aggregates a different vault than this venue settles into.
     error VaultMismatch();
@@ -287,20 +290,21 @@ abstract contract HashPowerPerpsDEXBase is
 
     /// @dev Notify the points hook of a fill. Skipped when no hook is configured. The call is
     ///      intentionally not isolated: a reverting hook reverts the fill (unplug via setHook).
-    ///      `_makerPrice` is the resting maker order's price; `_refPriceForPoints()` supplies the
-    ///      oracle reference for the hook's price-improvement multiplier (0 when stale → no bonus).
+    ///      `_makerPrice` is the resting maker order's price; `_refPrice` is cached once per
+    ///      taker order for the hook's price-improvement multiplier (0 when stale → no bonus).
     function _notifyFill(
+        IPointsHook _hook,
         address _maker,
         address _taker,
         uint256 _notional,
         int256 _makerFee,
         int256 _takerFee,
-        uint256 _makerPrice
+        uint256 _makerPrice,
+        uint256 _refPrice
     ) internal {
-        IPointsHook _hook = hook;
         if (address(_hook) == address(0)) return;
         uint256 takerFeeAbs = _takerFee > 0 ? uint256(_takerFee) : 0;
-        _hook.onFill(_maker, _taker, _notional, _makerFee, takerFeeAbs, _makerPrice, _refPriceForPoints());
+        _hook.onFill(_maker, _taker, _notional, _makerFee, takerFeeAbs, _makerPrice, _refPrice);
     }
 
     /// @dev Oracle reference price for the points price-improvement multiplier, in the same
@@ -372,15 +376,8 @@ abstract contract HashPowerPerpsDEXBase is
     /// @dev Absolute qty of resting orders that reduce `_net`.
     function _restingReduceAbs(address _user, int256 _net) internal view returns (uint256 total) {
         if (_net == 0) return 0;
-        EnumerableSet.Bytes32Set storage ids = participantOrderIdsIndex[_user];
-        uint256 len = ids.length();
-        for (uint256 i = 0; i < len; i++) {
-            Order memory order = orders[ids.at(i)];
-            if (order.quantity == 0) continue;
-            if (_net > 0 ? order.quantity < 0 : order.quantity > 0) {
-                total += M.abs(order.quantity);
-            }
-        }
+        OrderAggregate storage aggregate = userOrderAggregate[_user];
+        return _net > 0 ? aggregate.sellQty : aggregate.buyQty;
     }
 
     /// @notice Match incoming order with opposite orders using limit price logic (direct walk).
@@ -396,13 +393,19 @@ abstract contract HashPowerPerpsDEXBase is
         if (oppositePrices.sizeOf() == 0) return remainingQuantity;
 
         (, uint256 currentPrice) = oppositePrices.getNextNode(0);
+        if ((_isBuy && currentPrice > _limitPrice) || (!_isBuy && currentPrice < _limitPrice)) {
+            return remainingQuantity;
+        }
+        IPointsHook pointsHook = hook;
+        uint256 refPrice = address(pointsHook) == address(0) ? 0 : _refPriceForPoints();
 
         while (currentPrice != 0 && remainingQuantity != 0) {
             if (_isBuy && currentPrice > _limitPrice) break;
             if (!_isBuy && currentPrice < _limitPrice) break;
 
             (, uint256 nextPrice) = oppositePrices.getNextNode(currentPrice);
-            remainingQuantity = _matchOrdersAtPrice(_taker, currentPrice, remainingQuantity, _isBuy);
+            remainingQuantity =
+                _matchOrdersAtPrice(_taker, currentPrice, remainingQuantity, _isBuy, pointsHook, refPrice);
             currentPrice = nextPrice;
         }
 
@@ -412,7 +415,14 @@ abstract contract HashPowerPerpsDEXBase is
     /// @notice Match orders at a specific price level (direct walk).
     /// @dev Self-cross (maker == taker) nets out size with no trade, fees, or
     ///      position update — same STP semantics as Futures.
-    function _matchOrdersAtPrice(address _taker, uint256 _price, int256 _remainingQty, bool _isBuy)
+    function _matchOrdersAtPrice(
+        address _taker,
+        uint256 _price,
+        int256 _remainingQty,
+        bool _isBuy,
+        IPointsHook _pointsHook,
+        uint256 _refPrice
+    )
         internal
         returns (int256)
     {
@@ -429,7 +439,7 @@ abstract contract HashPowerPerpsDEXBase is
                 continue;
             }
 
-            _remainingQty = _executeMatch(_taker, makerOrderId, makerOrder, _remainingQty);
+            _remainingQty = _executeMatch(_taker, makerOrderId, makerOrder, _remainingQty, _pointsHook, _refPrice);
             (, orderIdUint) = makerOrderQueue.getNextNode(0);
         }
 
@@ -468,7 +478,14 @@ abstract contract HashPowerPerpsDEXBase is
     }
 
     /// @notice Execute a single order match
-    function _executeMatch(address _taker, bytes32 _makerOrderId, Order storage _makerOrder, int256 _remainingQty)
+    function _executeMatch(
+        address _taker,
+        bytes32 _makerOrderId,
+        Order storage _makerOrder,
+        int256 _remainingQty,
+        IPointsHook _pointsHook,
+        uint256 _refPrice
+    )
         internal
         returns (int256)
     {
@@ -485,10 +502,17 @@ abstract contract HashPowerPerpsDEXBase is
 
         _createPosition(_makerOrderId, makerParticipant, _taker, makerPrice, takerQty, takerFee, makerFee);
 
-        _transferFee(_taker, takerFee);
-        _transferFee(makerParticipant, makerFee);
+        // Collect the positive side first so a same-match rebate can use revenue
+        // earned by that match instead of depending on a pre-funded fee pot.
+        if (makerFee < 0) {
+            _transferFee(_taker, takerFee);
+            _transferFee(makerParticipant, makerFee);
+        } else {
+            _transferFee(makerParticipant, makerFee);
+            _transferFee(_taker, takerFee);
+        }
 
-        _notifyFill(makerParticipant, _taker, notionalValue, makerFee, takerFee, makerPrice);
+        _notifyFill(_pointsHook, makerParticipant, _taker, notionalValue, makerFee, takerFee, makerPrice, _refPrice);
 
         int256 newMakerQty = _reduceQuantity(makerQty, matchAmt);
         _subtractOrderAggregate(makerParticipant, _remainingQty < 0, makerPrice, M.abs(makerQty), M.abs(newMakerQty));
@@ -717,12 +741,16 @@ abstract contract HashPowerPerpsDEXBase is
     ///      Returns the realized `pnl` on the closed slice and the SIGNED closed quantity (same
     ///      sign as the position). Callers MUST have already checked the underwater / orders-clear
     ///      / partial invariants.
-    function _doPartialLiquidatePosition(address _user, Position memory _position, uint256 _closeAbs)
+    function _doPartialLiquidatePosition(
+        address _user,
+        Position memory _position,
+        uint256 _closeAbs,
+        uint256 _currentPrice
+    )
         internal
         returns (int256 pnl, int256 signedClose)
     {
-        uint256 currentPrice = _marketPrice();
-        int256 priceDiff = int256(currentPrice) - int256(_position.aggregatedEntryPrice);
+        int256 priceDiff = int256(_currentPrice) - int256(_position.aggregatedEntryPrice);
 
         bool isLong = _position.netQuantity > 0;
         signedClose = M.toSigned(isLong, _closeAbs);
@@ -737,11 +765,10 @@ abstract contract HashPowerPerpsDEXBase is
     /// @dev Closes the user's position and settles PnL against the insurance fund. Caller must
     ///      have verified all predicates. Charges a liquidation fee on the closed notional
     ///      (computed as `currentPrice * |closedQuantity| / 10^QUANTITY_DECIMALS`).
-    function _doLiquidatePosition(address _user) internal {
+    function _doLiquidatePosition(address _user, uint256 _currentPrice) internal {
         Position memory position = positions[_user];
-        uint256 currentPrice = _marketPrice();
 
-        int256 pnl = _calculatePositionPnl(position, currentPrice);
+        int256 pnl = _calculatePositionPnl(position, _currentPrice);
 
         // Settle PnL
         if (pnl < 0) {
@@ -762,7 +789,7 @@ abstract contract HashPowerPerpsDEXBase is
         }
 
         int256 closedQuantity = position.netQuantity;
-        uint256 closedNotional = _calculateValue(currentPrice, M.abs(closedQuantity));
+        uint256 closedNotional = _calculateValue(_currentPrice, M.abs(closedQuantity));
         uint256 liqFee = _chargeLiquidationFee(_user, closedNotional);
 
         delete positions[_user];
@@ -805,10 +832,10 @@ abstract contract HashPowerPerpsDEXBase is
     }
 
     /// @notice Charge a liquidation fee on the closed notional value, split between
-    ///         liquidator (msg.sender) and insurance fund according to `liquidatorShareBps`.
+    ///         liquidator (msg.sender) and venue revenue according to `liquidatorShareBps`.
     /// @dev Fee is `_notionalValue * liquidationFeeBps / 10000`, capped at the user's
     ///      actual vault balance. The liquidator receives `fee * liquidatorShareBps / 10000`
-    ///      (also capped at available balance), and the remainder goes to the insurance fund.
+    ///      (also capped at available balance), and the remainder becomes venue revenue.
     /// @param _user The liquidated user (fee source)
     /// @param _notionalValue Notional value of the liquidated position/order
     /// @return totalFee Total fee actually collected (may be less than computed if balance insufficient)
@@ -824,14 +851,15 @@ abstract contract HashPowerPerpsDEXBase is
         if (totalFee == 0) return 0;
 
         address liquidator = _msgSender();
-        address insurance = _insuranceFundAccount();
-
         uint16 liqShareBps = liquidatorShareBps;
         uint256 liquidatorShare = totalFee * uint256(liqShareBps) / BPS;
-        uint256 insuranceShare = totalFee - liquidatorShare;
+        uint256 exchangeShare = totalFee - liquidatorShare;
 
-        _move(_user, liquidator, liquidatorShare);
-        _move(_user, insurance, insuranceShare);
+        if (liquidatorShare != 0) _move(_user, liquidator, liquidatorShare);
+        if (exchangeShare != 0) {
+            collectedFeesBalance += exchangeShare;
+            _move(_user, address(this), exchangeShare);
+        }
     }
 
     /// @notice Calculate PnL for a position at a given price
@@ -847,8 +875,9 @@ abstract contract HashPowerPerpsDEXBase is
 
     /// @notice Ensure user meets initial margin requirement.
     ///         Delegates to the cross-product PortfolioMarginEngine.
-    function _ensureInitialMargin(address _user) internal view {
-        if (vault.balanceOf(_user) < portfolioMargin.computePortfolioIM(_user)) {
+    function _ensureInitialMargin(address _user, uint256 _maxAllowedIm) internal view {
+        uint256 required = portfolioMargin.computePortfolioIM(_user);
+        if (vault.balanceOf(_user) < required && required > _maxAllowedIm) {
             revert InsufficientMargin();
         }
     }
@@ -857,6 +886,18 @@ abstract contract HashPowerPerpsDEXBase is
 
     function _validateTIF(TimeInForce _tif) internal pure {
         if (uint8(_tif) > uint8(TimeInForce.FOK)) revert InvalidTimeInForce();
+    }
+
+    function _validateOrderIntent(uint256 _price, int256 _quantity, TimeInForce _tif) internal pure {
+        _validateTIF(_tif);
+        _validateQty(_quantity);
+        _validatePrice(_price);
+    }
+
+    function _isLocallyReducing(address _participant, int256 _quantity) internal view returns (bool) {
+        int256 position = positions[_participant].netQuantity;
+        if (position == 0 || (position > 0 ? _quantity >= 0 : _quantity <= 0)) return false;
+        return M.abs(_quantity) + _restingReduceAbs(_participant, position) <= M.abs(position);
     }
 
     function _validateQty(int256 _quantity) internal pure {
@@ -877,10 +918,10 @@ abstract contract HashPowerPerpsDEXBase is
         }
     }
 
-    /// @notice Add a price level to the sorted price list if not already present
+    /// @notice Add a new price level to the sorted price list.
     function _addPriceLevel(uint256 _price, bool _isBid) internal {
         StructuredLinkedList.List storage priceList = _isBid ? activeBidPrices : activeAskPrices;
-        PriceLadderLib.insertPrice(priceList, _price, _isBid, MAX_PRICE_LEVELS_PER_SIDE);
+        PriceLadderLib.insertNewPrice(priceList, _price, _isBid, MAX_PRICE_LEVELS_PER_SIDE);
     }
 
     /// @notice Remove a price level from the sorted price list if order queue is empty
@@ -919,22 +960,26 @@ abstract contract HashPowerPerpsDEXBase is
     ///      clamp only bites for an account already below MM, where it costs the
     ///      insurance fund a few bps rather than blocking the book.
     function _transferFee(address _participant, int256 _fee) internal {
+        if (_fee == 0) return;
         if (_fee >= 0) {
             uint256 owed = uint256(_fee);
             uint256 available = vault.balanceOf(_participant);
             uint256 paid = owed < available ? owed : available;
             if (paid > 0) {
-                _move(_participant, _insuranceFundAccount(), paid);
+                collectedFeesBalance += paid;
+                _move(_participant, address(this), paid);
             }
             if (paid < owed) {
                 emit BadDebt(_participant, owed - paid);
             }
         } else {
             uint256 rebate = uint256(-_fee);
-            uint256 reserveBalance = vault.balanceOf(_insuranceFundAccount());
-            uint256 payout = rebate < reserveBalance ? rebate : reserveBalance;
+            uint256 payout = rebate < collectedFeesBalance ? rebate : collectedFeesBalance;
+            uint256 revenueBalance = vault.balanceOf(address(this));
+            if (payout > revenueBalance) payout = revenueBalance;
             if (payout > 0) {
-                _move(_insuranceFundAccount(), _participant, payout);
+                collectedFeesBalance -= payout;
+                _move(address(this), _participant, payout);
             }
         }
     }
@@ -944,8 +989,9 @@ abstract contract HashPowerPerpsDEXBase is
     /// @notice Compute the current cumulative funding per unit without writing state
     /// @dev Uses the order-book mid-price as mark price and the oracle as index price.
     ///      If either side of the book is empty, no additional funding accrues.
+    /// @dev Reuses `_indexPrice` when already loaded by a caller; zero loads it lazily.
     /// @return currentCumFunding The theoretical cumulative funding as of block.timestamp
-    function _getCurrentCumulativeFunding() internal view returns (int256 currentCumFunding) {
+    function _getCurrentCumulativeFunding(uint256 _indexPrice) internal view returns (int256 currentCumFunding) {
         currentCumFunding = cumulativeFundingPerUnit;
 
         if (lastFundingUpdateTime == 0 || fundingPeriod == 0) return currentCumFunding;
@@ -959,7 +1005,7 @@ abstract contract HashPowerPerpsDEXBase is
         if (bestBid == 0 || bestAsk == 0) return currentCumFunding;
 
         uint256 markPrice = (bestBid + bestAsk) / 2;
-        uint256 indexPrice = _marketPrice();
+        uint256 indexPrice = _indexPrice == 0 ? _marketPrice() : _indexPrice;
 
         // fundingRate (scaled by 10^FUNDING_DECIMALS) = (mark - index) * 10^FUNDING_DECIMALS / index
         int256 priceDiff = int256(markPrice) - int256(indexPrice);
@@ -982,7 +1028,7 @@ abstract contract HashPowerPerpsDEXBase is
     function _updateGlobalFunding() internal {
         if (lastFundingUpdateTime == 0 || fundingPeriod == 0) return;
 
-        int256 newCumFunding = _getCurrentCumulativeFunding();
+        int256 newCumFunding = _getCurrentCumulativeFunding(0);
 
         if (newCumFunding != cumulativeFundingPerUnit) {
             // Derive the effective rate for the event
@@ -1046,11 +1092,12 @@ abstract contract HashPowerPerpsDEXBase is
 
     /// @dev Body of {getPendingFunding}: pending (unsettled) funding for a user.
     ///      Positive = user owes, negative = user receives (in collateral token units).
-    function _pendingFunding(address _user) internal view returns (int256) {
+    /// @dev Reuses `_indexPrice` when already loaded by a caller; zero loads it lazily.
+    function _pendingFunding(address _user, uint256 _indexPrice) internal view returns (int256) {
         Position memory position = positions[_user];
         if (position.netQuantity == 0) return 0;
 
-        int256 currentCumFunding = _getCurrentCumulativeFunding();
+        int256 currentCumFunding = _getCurrentCumulativeFunding(_indexPrice);
         int256 delta = currentCumFunding - userFundingSnapshot[_user];
         if (delta == 0) return 0;
 

@@ -28,7 +28,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @dev Lives here rather than in {HashPowerPerpsDEXBase} so that a diff to
     ///      this file and the version it ships under stay in the same place,
     ///      mirroring {Futures}.
-    string public constant VERSION = "2.14.0";
+    string public constant VERSION = "2.15.0";
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ICollateralVault _vault) HashPowerPerpsDEXBase(_vault) { }
@@ -57,6 +57,12 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         portfolioMargin = _pm;
     }
 
+    /// @notice One-shot migration that clears the reused legacy flat-liquidation-fee slot.
+    /// @dev Invoke atomically through `upgradeToAndCall` before any v2.15 fee path executes.
+    function initializeV3() external reinitializer(3) onlyOwner {
+        collectedFeesBalance = 0;
+    }
+
     // ── Vault integration ───────────────────────────────────────────────────
 
     /// @notice Returns the user's collateral balance from the vault.
@@ -77,27 +83,43 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     function createOrder(uint256 _price, int256 _quantity, TimeInForce _tif) external {
         address sender = _msgSender();
         _updateGlobalFunding();
-        bool skipMargin = _createOrder(sender, _price, _quantity, _tif);
-        if (!skipMargin) {
-            _ensureInitialMargin(sender);
+        _settleFunding(sender);
+        _validateOrderIntent(_price, _quantity, _tif);
+        uint256 maxAllowedIm;
+        if (_isLocallyReducing(sender, _quantity)) {
+            maxAllowedIm = portfolioMargin.computePortfolioIM(sender);
         }
+        _createOrder(sender, _price, _quantity, _tif);
+        _ensureInitialMargin(sender, maxAllowedIm);
     }
 
     /// @notice Batched placement with per-leg time-in-force — IM check once at the end.
+    /// @dev Unlike `createOrder`, batch placement does not use the below-IM,
+    ///      portfolio-non-increasing exception. Any non-empty batch must leave
+    ///      the account fully above portfolio IM. This avoids an additional
+    ///      pre-batch PME traversal.
+    ///      Empty input reverts so simulate-before-write callers do not submit
+    ///      a no-op transaction.
     function createOrders(OrderIntent[] calldata _intents) external {
+        uint256 len = _intents.length;
+        if (len == 0) revert EmptyBatch();
         address sender = _msgSender();
         _updateGlobalFunding();
-        uint256 len = _intents.length;
+        _settleFunding(sender);
         for (uint256 i = 0; i < len; i++) {
             OrderIntent calldata intent = _intents[i];
+            _validateOrderIntent(intent.price, intent.quantity, intent.timeInForce);
             _createOrder(sender, intent.price, intent.quantity, intent.timeInForce);
         }
-        _ensureInitialMargin(sender);
+        _ensureInitialMargin(sender, 0);
     }
 
     /// @notice Cancel, reduce-in-place, then place orders — IM check once at the end.
     /// @dev Cancels/reduces run first so freed margin is available to the creates.
     ///      Reduces keep FIFO queue position; creates always join the back.
+    ///      Cancel/reduce-only batches skip PME because they cannot expand possible
+    ///      post-fill exposures. Batches with creates use one strict final IM check;
+    ///      the single-order below-IM exception does not apply.
     function updateOrders(
         bytes32[] calldata _cancelIds,
         ReduceIntent[] calldata _reduces,
@@ -105,6 +127,8 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     ) external {
         address sender = _msgSender();
         _updateGlobalFunding();
+        uint256 createLen = _intents.length;
+        if (createLen != 0) _settleFunding(sender);
         uint256 cancelLen = _cancelIds.length;
         for (uint256 i = 0; i < cancelLen; i++) {
             _cancelOrder(sender, _cancelIds[i]);
@@ -113,12 +137,12 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         for (uint256 r = 0; r < reduceLen; r++) {
             _reduceOrderSize(sender, _reduces[r].orderId, _reduces[r].newQuantity);
         }
-        uint256 createLen = _intents.length;
         for (uint256 j = 0; j < createLen; j++) {
             OrderIntent calldata intent = _intents[j];
+            _validateOrderIntent(intent.price, intent.quantity, intent.timeInForce);
             _createOrder(sender, intent.price, intent.quantity, intent.timeInForce);
         }
-        _ensureInitialMargin(sender);
+        if (createLen != 0) _ensureInitialMargin(sender, 0);
     }
 
     /// @notice Shrink a resting order owned by the caller without losing FIFO priority.
@@ -135,29 +159,13 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         _cancelOrder(_msgSender(), _orderId);
     }
 
-    /// @dev Per-leg body of `createOrder` / `createOrders` without the IM-check epilogue.
-    ///      Returns true when the leg is reduce-only (single-order callers may skip IM);
-    ///      batch callers always check once at the end.
-    ///      Caller must have already run `_updateGlobalFunding()` for this tx.
-    function _createOrder(address _participant, uint256 _price, int256 _quantity, TimeInForce _tif)
-        internal
-        returns (bool isReduceOnly)
-    {
-        _validateTIF(_tif);
-        _validateQty(_quantity);
-        _validatePrice(_price);
-
-        // Settle taker's funding once before matching so per-match _updateUserPosition
-        // calls can skip it (cumulativeFundingPerUnit is constant within this tx).
-        _settleFunding(_participant);
+    /// @dev Validated per-leg body of `createOrder` / `createOrders` without the IM-check epilogue.
+    ///      Caller has already updated global funding and settled the taker once for this tx.
+    function _createOrder(address _participant, uint256 _price, int256 _quantity, TimeInForce _tif) internal {
 
         bool isBuy = _quantity > 0;
         bytes32 orderId = _nextOrderId();
         emit OrderCreated(orderId, _participant, _price, _quantity);
-
-        // Snapshot before matching — reduce-only vs position minus already-resting reduces.
-        int256 positionBefore = positions[_participant].netQuantity;
-        uint256 reducingBefore = _restingReduceAbs(_participant, positionBefore);
 
         int256 remainingQuantity = _matchWithOppositeOrders(_participant, _price, _quantity);
         bool partiallyOrFullyFilled = remainingQuantity != _quantity;
@@ -192,9 +200,10 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
                 _addOrderAggregate(_participant, isBuy, _price, M.abs(remainingQuantity));
                 participantOrders.add(orderId);
                 StructuredLinkedList.List storage orderQueue = _priceOrderIds(_price, isBuy);
+                bool newPriceLevel = orderQueue.sizeOf() == 0;
                 orderQueue.pushBack(uint256(orderId));
 
-                _addPriceLevel(_price, isBuy);
+                if (newPriceLevel) _addPriceLevel(_price, isBuy);
             }
         } else {
             // IOC (or FOK after a full fill): never rest; close the taker order id at 0.
@@ -203,9 +212,6 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
             }
         }
 
-        // Opposite side and combined reducing size (resting + this intent) ≤ position.
-        isReduceOnly = positionBefore != 0 && (positionBefore > 0 ? _quantity < 0 : _quantity > 0)
-            && M.abs(_quantity) + reducingBefore <= M.abs(positionBefore);
     }
 
     /// @dev Shared cancel body for `cancelOrder` / `updateOrders`. Caller must
@@ -280,25 +286,24 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
 
         uint256 absNet = M.abs(position.netQuantity);
         uint256 closeAbs = _closeQty < absNet ? _closeQty : absNet;
+        uint256 currentPrice = getMarketPrice();
 
         // Full close: delete the position and settle the whole PnL (bad-debt path). No IM buffer
         // guard — the keeper deliberately deleveraged the entire position (deep underwater).
         if (closeAbs == absNet) {
-            _doLiquidatePosition(_user);
+            _doLiquidatePosition(_user, currentPrice);
             return;
         }
 
-        (int256 pnl, int256 signedClose) = _doPartialLiquidatePosition(_user, position, closeAbs);
+        (int256 pnl, int256 signedClose) = _doPartialLiquidatePosition(_user, position, closeAbs, currentPrice);
 
         // Charge liquidation fee on the closed notional
-        uint256 currentPrice = getMarketPrice();
         uint256 closedNotional = _calculateValue(currentPrice, closeAbs);
         uint256 liqFee = _chargeLiquidationFee(_user, closedNotional);
 
         // Over-liquidation guard: a position remains here, so if there is a real IM buffer
         // (`im > mm`) the leftover balance must sit at/under IM.
-        uint256 im = portfolioMargin.computePortfolioIM(_user);
-        uint256 mm = portfolioMargin.computePortfolioMM(_user);
+        (uint256 im, uint256 mm) = portfolioMargin.computePortfolioMargins(_user);
         if (im > mm && balanceOf(_user) > im) revert OverLiquidation();
 
         emit PositionLiquidated(_user, _msgSender(), signedClose, pnl, liqFee);
@@ -324,11 +329,11 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         uint256 cancelled = 0;
         uint256 len = _orderIds.length;
         for (uint256 i = 0; i < len; i++) {
-            if (!_underwater(_user)) break;
             bytes32 orderId = _orderIds[i];
             Order memory order = orders[orderId];
-            // Skip raced/stale ids; stop only once healthy.
+            // Skip raced/stale ids before the expensive portfolio MM check.
             if (order.participant != _user || order.quantity == 0) continue;
+            if (!_underwater(_user)) break;
             _doLiquidateOrder(_user, orderId, order);
             cancelled++;
         }
@@ -439,7 +444,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @param _user Address of the user
     /// @return pendingFunding Positive = user owes, negative = user receives (in collateral token units)
     function getPendingFunding(address _user) public view returns (int256) {
-        return _pendingFunding(_user);
+        return _pendingFunding(_user, 0);
     }
 
     // View functions
@@ -478,6 +483,11 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     ///      when filling it would take the portfolio genuinely short.
     function getRiskView(address _user) external view returns (ILinearMarket.RiskView memory view_) {
         Position memory position = positions[_user];
+        OrderAggregate storage aggregate = userOrderAggregate[_user];
+        uint256 buyQty = aggregate.buyQty;
+        uint256 sellQty = aggregate.sellQty;
+        if (position.netQuantity == 0 && buyQty == 0 && sellQty == 0) return view_;
+
         uint256 currentPrice = getMarketPrice();
 
         view_.netPositionDelta =
@@ -488,11 +498,8 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
             // This deliberately differs from `getUnrealizedPnl`, which is a UX view.
             view_.unrealizedPnl = _calculatePositionPnl(position, currentPrice);
         }
-        view_.pendingFunding = getPendingFunding(_user);
+        view_.pendingFunding = _pendingFunding(_user, currentPrice);
 
-        OrderAggregate storage aggregate = userOrderAggregate[_user];
-        uint256 buyQty = aggregate.buyQty;
-        uint256 sellQty = aggregate.sellQty;
         view_.buyOrderDelta = (buyQty * (10 ** collateralDecimals)) / (10 ** QUANTITY_DECIMALS);
         view_.sellOrderDelta = (sellQty * (10 ** collateralDecimals)) / (10 ** QUANTITY_DECIMALS);
 
@@ -576,5 +583,11 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @notice Cached resting-order quantities and notionals per side for a user.
     function getOrderAggregate(address _user) external view returns (OrderAggregate memory) {
         return userOrderAggregate[_user];
+    }
+
+    /// @notice Whether the participant has margin-relevant resting-order delta.
+    function hasRestingOrderDelta(address _user) external view returns (bool) {
+        OrderAggregate storage aggregate = userOrderAggregate[_user];
+        return aggregate.buyQty != 0 || aggregate.sellQty != 0;
     }
 }

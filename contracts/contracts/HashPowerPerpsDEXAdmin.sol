@@ -126,6 +126,13 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
         emit TakerFeeBpsUpdated(_takerFeeBps);
     }
 
+    /// @notice Withdraw accrued trading and liquidation revenue to the venue owner.
+    function withdrawCollectedFees() external onlyOwner {
+        uint256 amount = collectedFeesBalance;
+        collectedFeesBalance = 0;
+        vault.withdrawTo(owner(), amount);
+    }
+
     /// @notice Set the liquidation fee in basis points on the liquidated notional.
     /// @param _bps Fee in bps (e.g., 50 = 0.5% of the closed position or cancelled order value).
     function setLiquidationFeeBps(uint16 _bps) external onlyOwner {
@@ -134,7 +141,7 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
     }
 
     /// @notice Set the liquidator's share of the liquidation fee in basis points.
-    /// @param _bps Share in bps (e.g., 5000 = 50% to liquidator, remainder to insurance fund).
+    /// @param _bps Share in bps (e.g., 5000 = 50% to liquidator, remainder to venue revenue).
     function setLiquidatorShareBps(uint16 _bps) external onlyOwner {
         if (_bps > BPS) revert InvalidMarginPercent();
         liquidatorShareBps = _bps;

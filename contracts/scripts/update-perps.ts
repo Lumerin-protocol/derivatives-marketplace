@@ -12,9 +12,9 @@ import { verifyContract } from "../lib/verify.ts";
 import { txUrl, addrUrl } from "../lib/explorer.ts";
 import { logTitle, logInfo, logStep, logSuccess, logPrompt } from "../lib/log.ts";
 
-// Target init version after running `initializeV2` on the proxy.
-const TARGET_INIT_VERSION = 2n;
-const TARGET_CODE_VERSION = "2.14.0";
+// Target init version after clearing the reused legacy fee slot through `initializeV3`.
+const TARGET_INIT_VERSION = 3n;
+const TARGET_CODE_VERSION = "2.15.0";
 const UPGRADE_CONFIRMATIONS = 5;
 
 // ERC-7201 namespaced storage slot for OpenZeppelin's `Initializable`:
@@ -70,26 +70,21 @@ async function main() {
 
   const vaultAddress = env.VAULT_ADDRESS as Hex;
 
-  // Decide which migrations must run atomically with the upgrade.
-  const needsV2Init = currentInitVersion < TARGET_INIT_VERSION;
+  // The reused legacy flat-liquidation-fee slot must be cleared atomically with
+  // the implementation upgrade before any v2.15 revenue or rebate path executes.
+  const needsV3Init = currentInitVersion < TARGET_INIT_VERSION;
   let initData: Hex = "0x";
-  if (needsV2Init) {
-    const portfolioMarginAddress = (process.env.PME_ADDRESS ?? zeroAddress) as Hex;
-    logInfo("initializeV2 required", {
+  if (needsV3Init) {
+    logInfo("initializeV3 required", {
       from: currentInitVersion.toString(),
       to: TARGET_INIT_VERSION.toString(),
-      portfolioMargin:
-        portfolioMarginAddress === zeroAddress
-          ? "(unset — set later via setPortfolioMargin)"
-          : addrUrl(pc, portfolioMarginAddress),
     });
     initData = encodeFunctionData({
       abi: perps.abi,
-      functionName: "initializeV2",
-      args: [vaultAddress, portfolioMarginAddress],
+      functionName: "initializeV3",
     });
   } else {
-    logInfo("initializeV2 skipped", {
+    logInfo("initializeV3 skipped", {
       reason: `proxy already at init version ${currentInitVersion}`,
     });
   }
@@ -120,7 +115,7 @@ async function main() {
   logInfo("Upgrade proxy", {
     Proxy: addrUrl(pc, proxyAddress),
     "New implementation": addrUrl(pc, newImpl.address),
-    Call: needsV2Init ? "initializeV2" : "none",
+    Call: needsV3Init ? "initializeV3" : "none",
   });
   await logPrompt("Proceed with upgradeToAndCall?");
   console.log("Upgrading proxy...");
@@ -140,7 +135,7 @@ async function main() {
     `${txUrl(pc, upgradeReceipt.transactionHash)}  block ${upgradeReceipt.blockNumber}`,
   );
 
-  if (needsV2Init) {
+  if (needsV3Init) {
     const postVersion = await readInitializedVersion(pc, proxyAddress, upgradeReceipt.blockNumber);
     if (postVersion !== TARGET_INIT_VERSION) {
       throw new Error(

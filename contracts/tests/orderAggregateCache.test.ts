@@ -138,7 +138,44 @@ describe("HashPowerPerpsDEX order aggregate cache migration", function () {
       buyValue: 0n,
       sellValue: 0n,
     });
-    assert.equal(await upgraded.read.VERSION(), "2.14.0");
+    assert.equal(await upgraded.read.VERSION(), "2.15.0");
+  });
+
+  it("atomically zeros the reused legacy liquidation-fee slot", async function () {
+    const { contracts, accounts } = await networkHelpers.loadFixture(
+      deployPerpsWithCollateralFixture,
+    );
+    const { perps, vault } = contracts;
+    const { owner } = accounts;
+
+    const harnessImpl = await viem.deployContract("HashPowerPerpsDEXMigrationHarness", [
+      vault.address,
+    ]);
+    await perps.write.upgradeToAndCall([harnessImpl.address, "0x"], {
+      account: owner.account,
+    });
+    const harness = await viem.getContractAt(
+      "HashPowerPerpsDEXMigrationHarness",
+      perps.address,
+    );
+    await harness.write.setLegacyRevenueSlot([123_456n], { account: owner.account });
+    assert.equal(await harness.read.collectedFeesBalance(), 123_456n);
+
+    const fixedImpl = await viem.deployContract("HashPowerPerpsDEX", [vault.address]);
+    const migrationData = encodeFunctionData({
+      abi: fixedImpl.abi,
+      functionName: "initializeV3",
+    });
+    await harness.write.upgradeToAndCall([fixedImpl.address, migrationData], {
+      account: owner.account,
+    });
+
+    const upgraded = await viem.getContractAt("HashPowerPerpsDEX", perps.address);
+    assert.equal(await upgraded.read.collectedFeesBalance(), 0n);
+    await assert.rejects(
+      () => upgraded.write.initializeV3({ account: owner.account }),
+      /InvalidInitialization/,
+    );
   });
 
   it("keeps mixed aggregates exact across create, reduce, cancel, fill, and self-cross", async function () {

@@ -40,6 +40,36 @@ async function addOtherVenue(
  * relieve.
  */
 describe("HashPowerPerpsDEX - cross-venue liquidation", function () {
+  it("rejects a locally reducing order that increases portfolio IM", async function () {
+    const { contracts, accounts, config } = await networkHelpers.loadFixture(
+      deployPerpsWithLiquidatablePositionFixture,
+    );
+    const { perps, pme, vault } = contracts;
+    const { seller } = accounts;
+    const sellerAddr = seller.account.address;
+
+    // The real DEX position is short 1; a long 2 position elsewhere makes the
+    // portfolio net long 1. A local buy looks reducing here but would move the
+    // portfolio's all-bids-fill endpoint to long 2.
+    const otherVenue = await viem.deployContract("PerpsDEXMock", []);
+    await otherVenue.write.setVault([vault.address]);
+    await otherVenue.write.setUserPosition([sellerAddr, 2_000_000n, 0n]);
+    await pme.write.addLinearMarket([otherVenue.address]);
+
+    const imBefore = await pme.read.computePortfolioIM([sellerAddr]);
+    const balance = await vault.read.balanceOf([sellerAddr]);
+    assert.ok(balance >= imBefore, "fixture must cover the pre-order portfolio IM");
+
+    await viem.assertions.revertWithCustomError(
+      perps.write.createOrder(
+        [config.initialPrice - config.minimumPriceIncrement, config.qty, 0],
+        { account: seller.account },
+      ),
+      perps,
+      "InsufficientMargin",
+    );
+  });
+
   it("closing position delta raises the requirement when opposite-side orders rest elsewhere", async function () {
     const { contracts, accounts } = await networkHelpers.loadFixture(
       deployPerpsWithLiquidatablePositionFixture,
