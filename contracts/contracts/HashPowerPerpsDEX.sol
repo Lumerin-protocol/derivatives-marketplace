@@ -307,6 +307,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         if (im > mm && balanceOf(_user) > im) revert OverLiquidation();
 
         emit PositionLiquidated(_user, _msgSender(), signedClose, pnl, liqFee);
+        _notifyLiquidation(_msgSender(), liqFee);
     }
 
     /// @notice Force-cancel a single resting order owned by an underwater user. Permissionless.
