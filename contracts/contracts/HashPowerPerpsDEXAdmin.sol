@@ -4,7 +4,6 @@ pragma solidity ^0.8.20;
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import { StructuredLinkedList } from "solidity-linked-list/contracts/StructuredLinkedList.sol";
 import { AggregatorV3Interface } from "./interfaces/AggregatorV3Interface.sol";
-import { ICollateralVault } from "collateral-margin/contracts/contracts/interfaces/ICollateralVault.sol";
 import { IPortfolioMarginEngine } from "collateral-margin/contracts/contracts/interfaces/IPortfolioMarginEngine.sol";
 import { IPointsHook } from "collateral-margin/contracts/contracts/interfaces/IPointsHook.sol";
 import { HashPowerPerpsDEXBase } from "./HashPowerPerpsDEXBase.sol";
@@ -37,28 +36,11 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
     /// @notice Set the portfolio margin engine for cross-product margin checks.
     /// @dev Every order and every liquidation routes through the engine, and the venue
     ///      never null-checks it, so a wrong address here bricks the book. The engine must
-    ///      also aggregate this venue's own vault.
+    ///      also aggregate this venue's own vault and answer every risk-parameter read used
+    ///      by the venue.
     function setPortfolioMargin(IPortfolioMarginEngine _pm) external onlyOwner {
-        address pm = address(_pm);
-        if (pm == address(0)) revert ZeroAddress();
-        _requireContract(pm);
-
-        // Probe the order-margin read rather than `computePortfolioIM`: it is what every
-        // order placement calls, and unlike the IM path it needs no oracle, so wiring a
-        // venue must not depend on the engine's feed being set yet.
-        try _pm.linearOrderMargin(0) returns (uint256) { }
-        catch {
-            revert InvalidDependency();
-        }
-
-        try _pm.vault() returns (ICollateralVault pinned) {
-            if (address(pinned) != address(vault)) revert VaultMismatch();
-        } catch {
-            revert InvalidDependency();
-        }
-
-        portfolioMargin = _pm;
-        emit PortfolioMarginUpdated(pm);
+        if (address(_pm) == address(0)) revert ZeroAddress();
+        _setPortfolioMargin(_pm);
     }
 
     /// @notice Set (or clear) the points/rewards hook. Pass `address(0)` to disable points.

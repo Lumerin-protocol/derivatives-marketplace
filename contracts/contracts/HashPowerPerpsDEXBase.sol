@@ -289,6 +289,45 @@ abstract contract HashPowerPerpsDEXBase is
         if (target.code.length == 0) revert InvalidDependency();
     }
 
+    /// @dev Historical initializer arguments still include the vault even though the
+    ///      dependency is immutable. Reject a proxy wired with deployment calldata for a
+    ///      different implementation vault instead of silently accepting the mismatch.
+    function _validateVault(ICollateralVault _vault) internal view {
+        if (address(_vault) != address(vault)) revert VaultMismatch();
+    }
+
+    /// @dev Validate every read the venue relies on before adopting a portfolio margin
+    ///      engine. The zero address is handled by callers because initializeV2 deliberately
+    ///      permits it while the ongoing governance setter does not.
+    function _setPortfolioMargin(IPortfolioMarginEngine _pm) internal {
+        address pm = address(_pm);
+        _requireContract(pm);
+
+        try _pm.vault() returns (ICollateralVault pinned) {
+            if (address(pinned) != address(vault)) revert VaultMismatch();
+        } catch {
+            revert InvalidDependency();
+        }
+
+        try _pm.linearOrderMargin(0) returns (uint256) { }
+        catch {
+            revert InvalidDependency();
+        }
+
+        try _pm.imSpotShock() returns (uint256) { }
+        catch {
+            revert InvalidDependency();
+        }
+
+        try _pm.mmSpotShock() returns (uint256) { }
+        catch {
+            revert InvalidDependency();
+        }
+
+        portfolioMargin = _pm;
+        emit PortfolioMarginUpdated(pm);
+    }
+
     // ── Internal helpers: points hook ─────────────────────────────────────────
 
     /// @dev Notify the points hook of a fill. Skipped when no hook is configured. The call is

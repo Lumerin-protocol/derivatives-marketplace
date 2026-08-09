@@ -35,9 +35,10 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
 
     /// @notice Initialize the contract
     /// @param _priceOracle The Chainlink-style price oracle
-    /// @param _vault Ignored — vault is now an immutable set in the constructor.
-    ///        Kept for backwards compatibility with existing proxy deployments.
+    /// @param _vault Must match the immutable constructor vault. The argument is retained
+    ///        to preserve the historical initializer signature.
     function initialize(AggregatorV3Interface _priceOracle, ICollateralVault _vault) external initializer {
+        _validateVault(_vault);
         __Ownable_init(_msgSender());
         __UUPSUpgradeable_init();
 
@@ -47,14 +48,18 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @notice One-shot post-upgrade migration to wire up the portfolio margin engine added in v2.
     /// @dev Intended to be invoked atomically via `upgradeToAndCall`:
     ///      `proxy.upgradeToAndCall(newImpl, abi.encodeCall(this.initializeV2, (vault, pm)))`.
-    /// @param _vault Ignored — vault is now an immutable set in the constructor.
-    ///        Kept for backwards compatibility.
+    /// @param _vault Must match the immutable constructor vault. The argument is retained
+    ///        to preserve the historical initializer signature.
     /// @param _pm The portfolio margin engine (may be `address(0)` to set later via `setPortfolioMargin`).
-    /// @dev Deliberately unvalidated: the migration has to be able to run atomically with the
-    ///      upgrade, before the engine on the other side is wired up. `setPortfolioMargin`
-    ///      applies the checks.
+    /// @dev A nonzero engine must already expose the complete dependency surface. Pass zero
+    ///      when an atomic upgrade must precede wiring the engine on the other side.
     function initializeV2(ICollateralVault _vault, IPortfolioMarginEngine _pm) external reinitializer(2) onlyOwner {
-        portfolioMargin = _pm;
+        _validateVault(_vault);
+        if (address(_pm) == address(0)) {
+            portfolioMargin = _pm;
+        } else {
+            _setPortfolioMargin(_pm);
+        }
     }
 
     /// @notice One-shot migration that clears the reused legacy flat-liquidation-fee slot.

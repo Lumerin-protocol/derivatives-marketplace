@@ -30,7 +30,92 @@ async function deployEngine(vaultAddress: `0x${string}`) {
   return pme;
 }
 
+async function deployUninitializedPerps(vaultAddress: `0x${string}`) {
+  const impl = await viem.deployContract("HashPowerPerpsDEX", [vaultAddress]);
+  const proxy = await viem.deployContract("ERC1967Proxy", [impl.address, "0x"]);
+  return await viem.getContractAt("HashPowerPerpsDEX", proxy.address);
+}
+
+async function deployCapabilityMock(vaultAddress: `0x${string}`, failingCapability: number) {
+  return await viem.deployContract("PortfolioMarginEngineDependencyMock", [
+    vaultAddress,
+    failingCapability,
+  ]);
+}
+
 describe("HashPowerPerpsDEX - dependency validation", function () {
+  describe("initializers", function () {
+    it("initialize accepts the historical signature when its vault matches the immutable", async function () {
+      const { contracts, accounts } = await networkHelpers.loadFixture(
+        deployPerpsWithCollateralFixture,
+      );
+      const { vault, priceOracle } = contracts;
+      const { owner } = accounts;
+      const perps = await deployUninitializedPerps(vault.address);
+
+      await perps.write.initialize([priceOracle.address, vault.address]);
+
+      assert.equal(await perps.read.vault(), getAddress(vault.address));
+      assert.equal(await perps.read.owner(), getAddress(owner.account.address));
+    });
+
+    it("initialize rejects a supplied vault that differs from the immutable", async function () {
+      const { contracts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
+      const { vault, priceOracle, usdcMock } = contracts;
+      const perps = await deployUninitializedPerps(vault.address);
+      const strayVault = await deployVault(usdcMock.address);
+
+      await viem.assertions.revertWithCustomError(
+        perps.write.initialize([priceOracle.address, strayVault.address]),
+        perps,
+        "VaultMismatch",
+      );
+    });
+
+    it("initializeV2 rejects a supplied vault that differs from the immutable", async function () {
+      const { contracts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
+      const { perps, pme, usdcMock } = contracts;
+      const strayVault = await deployVault(usdcMock.address);
+
+      await viem.assertions.revertWithCustomError(
+        perps.write.initializeV2([strayVault.address, pme.address]),
+        perps,
+        "VaultMismatch",
+      );
+    });
+
+    it("initializeV2 permits zero PME for atomic upgrades that wire it later", async function () {
+      const { contracts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
+      const { perps, vault } = contracts;
+
+      await perps.write.initializeV2([vault.address, zeroAddress]);
+
+      assert.equal(await perps.read.portfolioMargin(), zeroAddress);
+    });
+
+    it("initializeV2 validates a nonzero PME through the setter path", async function () {
+      const { contracts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
+      const { perps, vault } = contracts;
+      const missingImShock = await deployCapabilityMock(vault.address, 3);
+
+      await viem.assertions.revertWithCustomError(
+        perps.write.initializeV2([vault.address, missingImShock.address]),
+        perps,
+        "InvalidDependency",
+      );
+    });
+
+    it("initializeV2 adopts a valid nonzero PME", async function () {
+      const { contracts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
+      const { perps, vault } = contracts;
+      const engine = await deployEngine(vault.address);
+
+      await perps.write.initializeV2([vault.address, engine.address]);
+
+      assert.equal(await perps.read.portfolioMargin(), getAddress(engine.address));
+    });
+  });
+
   describe("setPortfolioMargin", function () {
     it("rejects the zero address", async function () {
       const { contracts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
@@ -78,6 +163,20 @@ describe("HashPowerPerpsDEX - dependency validation", function () {
         perps,
         "VaultMismatch",
       );
+    });
+
+    it("probes every PME capability used by venue risk validation", async function () {
+      const { contracts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
+      const { perps, vault } = contracts;
+
+      for (const failingCapability of [1, 2, 3, 4]) {
+        const incompleteEngine = await deployCapabilityMock(vault.address, failingCapability);
+        await viem.assertions.revertWithCustomError(
+          perps.write.setPortfolioMargin([incompleteEngine.address]),
+          perps,
+          "InvalidDependency",
+        );
+      }
     });
 
     it("accepts an engine aggregating the venue's own vault", async function () {
