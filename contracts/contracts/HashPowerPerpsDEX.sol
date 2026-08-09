@@ -79,12 +79,12 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         _updateGlobalFunding();
         _settleFunding(sender);
         _validateOrderIntent(_price, _quantity, _tif);
-        uint256 allowedImPlusOne;
+        uint256 maxAllowedIm;
         if (_isLocallyReducing(sender, _quantity)) {
-            allowedImPlusOne = portfolioMargin.computePortfolioIM(sender) + 1;
+            maxAllowedIm = portfolioMargin.computePortfolioIM(sender);
         }
         _createOrder(sender, _price, _quantity, _tif);
-        _ensureInitialMargin(sender, allowedImPlusOne);
+        _ensureInitialMargin(sender, maxAllowedIm);
     }
 
     /// @notice Batched placement with per-leg time-in-force — IM check once at the end.

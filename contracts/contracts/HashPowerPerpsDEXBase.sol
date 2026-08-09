@@ -864,9 +864,9 @@ abstract contract HashPowerPerpsDEXBase is
 
     /// @notice Ensure user meets initial margin requirement.
     ///         Delegates to the cross-product PortfolioMarginEngine.
-    function _ensureInitialMargin(address _user, uint256 _allowedImPlusOne) internal view {
+    function _ensureInitialMargin(address _user, uint256 _maxAllowedIm) internal view {
         uint256 required = portfolioMargin.computePortfolioIM(_user);
-        if (vault.balanceOf(_user) < required && (_allowedImPlusOne == 0 || required >= _allowedImPlusOne)) {
+        if (vault.balanceOf(_user) < required && required > _maxAllowedIm) {
             revert InsufficientMargin();
         }
     }
