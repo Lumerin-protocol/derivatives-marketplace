@@ -731,6 +731,7 @@ abstract contract HashPowerPerpsDEXBase is
             userFundingSnapshot[_user] = cumulativeFundingPerUnit;
         } else if (position.netQuantity + _quantity == 0) {
             position.netQuantity = 0;
+            position.aggregatedEntryPrice = 0;
             usersWithPositions.remove(_user);
         } else {
             position.netQuantity += _quantity;

@@ -67,7 +67,7 @@ describe("HashPowerPerpsDEX - getUserPosition", function () {
 
     const buyerPosition = await perps.read.getUserPosition([buyer.account.address]);
     assert.equal(buyerPosition.netQuantity, 0n);
-    assert.equal(buyerPosition.aggregatedEntryPrice, config.marketPrice, "closed position entry price preserved for event/indexer");
+    assert.equal(buyerPosition.aggregatedEntryPrice, 0n, "closed position clears legacy entry price");
   });
 
   it("should overwrite entry price when new position opened after full close", async function () {
@@ -84,7 +84,7 @@ describe("HashPowerPerpsDEX - getUserPosition", function () {
 
     const afterClose = await perps.read.getUserPosition([buyer.account.address]);
     assert.equal(afterClose.netQuantity, 0n);
-    assert.equal(afterClose.aggregatedEntryPrice, config.marketPrice);
+    assert.equal(afterClose.aggregatedEntryPrice, 0n);
 
     const newPrice = config.marketPrice + tick;
     await perps.write.createOrder([newPrice, -BigInt(config.qty), TimeInForce.GTC], { account: seller.account });
