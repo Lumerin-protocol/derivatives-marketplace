@@ -187,6 +187,33 @@ describe("HashPowerPerpsDEX - liquidatePosition(user, closeQty) partial close", 
     assert.ok(badDebt.length >= 1, "expected a BadDebt event on the bad-debt full close");
   });
 
+  it("partially liquidates through a user-loss shortfall and reports the unpaid amount", async function () {
+    const data = await networkHelpers.loadFixture(partialPerpsFixture);
+    const { contracts, accounts, config } = data;
+    const { perps, vault } = contracts;
+    const { seller, buyer2, pc } = accounts;
+    const mark = await data.pump(3n, 1n);
+    const closeQty = parseUnits("10", config.quantityDecimals);
+    const available = await vault.read.balanceOf([seller.account.address]);
+    const loss = ((mark - config.entry) * closeQty) / 10n ** BigInt(config.quantityDecimals);
+    assert.ok(loss > available);
+
+    const hash = await perps.write.liquidatePosition([seller.account.address, closeQty], {
+      account: buyer2.account,
+    });
+    const receipt = await pc.waitForTransactionReceipt({ hash });
+    const debts = parseEventLogs({ logs: receipt.logs, abi: perps.abi, eventName: "BadDebt" });
+
+    assert.equal(debts.length, 1);
+    assert.equal(debts[0].args.user.toLowerCase(), seller.account.address.toLowerCase());
+    assert.equal(debts[0].args.amount, loss - available);
+    assert.equal(await vault.read.balanceOf([seller.account.address]), 0n);
+    assert.equal(
+      (await perps.read.getUserPosition([seller.account.address])).netQuantity,
+      -(config.qty - closeQty),
+    );
+  });
+
   it("emits PositionLiquidated carrying the partial closedQuantity + realized pnl", async function () {
     const data = await networkHelpers.loadFixture(partialPerpsFixture);
     const { contracts, accounts, config } = data;

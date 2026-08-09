@@ -775,23 +775,7 @@ abstract contract HashPowerPerpsDEXBase is
 
         int256 pnl = _calculatePositionPnl(position, _currentPrice);
 
-        // Settle PnL
-        if (pnl < 0) {
-            uint256 loss = uint256(-pnl);
-            uint256 userBalance = vault.balanceOf(_user);
-            uint256 transferAmount = loss < userBalance ? loss : userBalance;
-            if (transferAmount > 0) {
-                _move(_user, _insuranceFundAccount(), transferAmount);
-            }
-            if (transferAmount < loss) {
-                emit BadDebt(_user, loss - transferAmount);
-            }
-        } else if (pnl > 0) {
-            uint256 profit = uint256(pnl);
-            if (vault.balanceOf(_insuranceFundAccount()) >= profit) {
-                _move(_insuranceFundAccount(), _user, profit);
-            }
-        }
+        _transferRealizedPnl(_user, pnl);
 
         int256 closedQuantity = position.netQuantity;
         uint256 closedNotional = _calculateValue(_currentPrice, M.abs(closedQuantity));
@@ -815,25 +799,22 @@ abstract contract HashPowerPerpsDEXBase is
         // Short (negative qty): profit when price goes down (negative priceDiff)
         pnl = (_priceDiff * _quantity) / int256(10 ** QUANTITY_DECIMALS);
 
-        // Transfer PnL to/from user
-        if (pnl > 0) {
-            uint256 profit = uint256(pnl);
-            if (vault.balanceOf(_insuranceFundAccount()) < profit) {
-                revert InsufficientReservePool();
-            }
-            _move(_insuranceFundAccount(), _user, profit);
-        } else if (pnl < 0) {
-            uint256 loss = uint256(-pnl);
-            uint256 available = vault.balanceOf(_user);
-            if (available >= loss) {
-                _move(_user, _insuranceFundAccount(), loss);
-            } else {
-                if (available > 0) {
-                    _move(_user, _insuranceFundAccount(), available);
-                }
-                emit BadDebt(_user, loss - available);
-            }
-        }
+        _transferRealizedPnl(_user, pnl);
+    }
+
+    /// @dev Settle realized PnL against the insurance account without blocking position
+    ///      reduction. The payer contributes everything available and every shortfall is
+    ///      surfaced immediately as bad debt; no deferred claim is created.
+    function _transferRealizedPnl(address _user, int256 _pnl) internal {
+        if (_pnl == 0) return;
+
+        address fund = _insuranceFundAccount();
+        address payer = _pnl > 0 ? fund : _user;
+        address receiver = _pnl > 0 ? _user : fund;
+        uint256 owed = M.abs(_pnl);
+        uint256 paid = M.min(owed, vault.balanceOf(payer));
+        if (paid != 0) _move(payer, receiver, paid);
+        if (paid < owed) emit BadDebt(payer, owed - paid);
     }
 
     /// @notice Charge a liquidation fee on the closed notional value, split between
