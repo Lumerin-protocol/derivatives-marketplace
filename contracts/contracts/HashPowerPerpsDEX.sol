@@ -88,6 +88,10 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     }
 
     /// @notice Batched placement with per-leg time-in-force — IM check once at the end.
+    /// @dev Unlike `createOrder`, batch placement does not use the below-IM,
+    ///      portfolio-non-increasing exception. Any non-empty batch must leave
+    ///      the account fully above portfolio IM. This avoids an additional
+    ///      pre-batch PME traversal.
     function createOrders(OrderIntent[] calldata _intents) external {
         uint256 len = _intents.length;
         if (len == 0) return;
@@ -105,6 +109,9 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @notice Cancel, reduce-in-place, then place orders — IM check once at the end.
     /// @dev Cancels/reduces run first so freed margin is available to the creates.
     ///      Reduces keep FIFO queue position; creates always join the back.
+    ///      Cancel/reduce-only batches skip PME because they cannot expand possible
+    ///      post-fill exposures. Batches with creates use one strict final IM check;
+    ///      the single-order below-IM exception does not apply.
     function updateOrders(
         bytes32[] calldata _cancelIds,
         ReduceIntent[] calldata _reduces,
