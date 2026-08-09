@@ -94,7 +94,7 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
         } catch {
             revert InvalidDependency();
         }
-        if (answer <= 0 || updatedAt == 0) revert InvalidOracle();
+        _validateOracleRound(answer, updatedAt);
 
         uint8 dec;
         try _oracle.decimals() returns (uint8 _dec) {

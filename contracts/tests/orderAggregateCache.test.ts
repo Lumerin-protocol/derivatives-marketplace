@@ -84,12 +84,6 @@ describe("HashPowerPerpsDEX order aggregate cache migration", function () {
     const zeroRisk = await harness.read.getRiskView([buyer.account.address]);
     assert.equal(zeroRisk.buyOrderDelta, 0n);
     assert.equal(zeroRisk.sellOrderDelta, 0n);
-    assert.deepEqual(await harness.read.getLegacyOrderCache([buyer.account.address]), [
-      111n,
-      222n,
-      333n,
-      444n,
-    ]);
     await assert.rejects(
       () =>
         harness.write.rebuildOrderAggregateCache([[buyer.account.address]], {

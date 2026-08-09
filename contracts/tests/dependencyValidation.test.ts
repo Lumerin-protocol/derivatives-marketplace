@@ -140,6 +140,39 @@ describe("HashPowerPerpsDEX - dependency validation", function () {
       );
     });
 
+    it("applies the same stale and invalid-round checks before adopting a feed", async function () {
+      const { contracts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
+      const { perps } = contracts;
+      const now = BigInt(await networkHelpers.time.latest());
+
+      const staleFeed = await viem.deployContract("PriceOracleMock", [LIVE_PRICE, ORACLE_DECIMALS]);
+      await staleFeed.write.setRoundData([LIVE_PRICE, 1n, now - 3601n, 1n]);
+      await viem.assertions.revertWithCustomError(
+        perps.write.setOracle([staleFeed.address]),
+        perps,
+        "OracleStale",
+      );
+
+      const invalidRounds = [
+        { roundId: 0n, updatedAt: 0n, answeredInRound: 0n },
+        { roundId: 1n, updatedAt: now + 1000n, answeredInRound: 1n },
+      ] as const;
+      for (const round of invalidRounds) {
+        const feed = await viem.deployContract("PriceOracleMock", [LIVE_PRICE, ORACLE_DECIMALS]);
+        await feed.write.setRoundData([
+          LIVE_PRICE,
+          round.roundId,
+          round.updatedAt,
+          round.answeredInRound,
+        ]);
+        await viem.assertions.revertWithCustomError(
+          perps.write.setOracle([feed.address]),
+          perps,
+          "InvalidOracle",
+        );
+      }
+    });
+
     it("accepts a live feed", async function () {
       const { contracts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
       const { perps } = contracts;

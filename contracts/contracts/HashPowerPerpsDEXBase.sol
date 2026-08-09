@@ -32,7 +32,7 @@ abstract contract HashPowerPerpsDEXBase is
     using StructuredLinkedList for StructuredLinkedList.List;
 
     // Constants
-    uint256 private constant MAX_ORACLE_STALENESS = 3600; // 1 hour
+    uint256 public constant MAX_ORACLE_STALENESS = 3600; // 1 hour
     uint8 public constant FUNDING_DECIMALS = 18;
     uint8 public constant MAX_ORDERS_PER_PARTICIPANT = 100;
     uint8 public constant QUANTITY_DECIMALS = 6;
@@ -54,7 +54,6 @@ abstract contract HashPowerPerpsDEXBase is
 
     // Immutables (set in constructor, derived from vault)
     ICollateralVault public immutable vault;
-    uint8 internal immutable collateralDecimals;
 
     // State variables
     address private __gap0;
@@ -253,13 +252,17 @@ abstract contract HashPowerPerpsDEXBase is
     /// @dev A dependency did not answer a call the venue depends on: no code at the address,
     ///      or the call reverted. Which dependency is bad is implied by the setter that reverted.
     error InvalidDependency();
+    /// @notice Perps prices, values, and ticks are denominated in six-decimal collateral.
+    error InvalidCollateralDecimals();
 
     /// @param _vault The shared collateral vault. Its `collateralToken()` becomes the underlying ERC20.
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ICollateralVault _vault) {
         if (address(_vault) == address(0)) revert InsufficientCollateral();
         vault = _vault;
-        collateralDecimals = IERC20Metadata(address(_vault.collateralToken())).decimals();
+        if (IERC20Metadata(address(_vault.collateralToken())).decimals() != QUANTITY_DECIMALS) {
+            revert InvalidCollateralDecimals();
+        }
         _disableInitializers();
     }
 
@@ -313,9 +316,8 @@ abstract contract HashPowerPerpsDEXBase is
     ///      block a fill — the hook simply applies no bonus (1x) when the reference is 0.
     function _refPriceForPoints() internal view returns (uint256) {
         (, int256 answer,, uint256 updatedAt,) = priceOracle.latestRoundData();
-        if (answer <= 0) return 0;
-        if (block.timestamp - updatedAt > MAX_ORACLE_STALENESS) return 0;
-        uint256 price = M.scaleDecimals(uint256(answer), oracleDecimals, collateralDecimals);
+        if (_oracleRoundStatus(answer, updatedAt) != 0) return 0;
+        uint256 price = M.scaleDecimals(uint256(answer), oracleDecimals, QUANTITY_DECIMALS);
         return M.roundToNearest(price, minimumPriceIncrement);
     }
 
@@ -343,22 +345,25 @@ abstract contract HashPowerPerpsDEXBase is
 
     // ── Internal helpers: pricing ─────────────────────────────────────────────
 
+    /// @return status 0 when usable, 1 when stale, and 2 when invalid.
+    function _oracleRoundStatus(int256 answer, uint256 updatedAt) internal view returns (uint256 status) {
+        if (answer <= 0 || updatedAt == 0 || updatedAt > block.timestamp) return 2;
+        if (block.timestamp - updatedAt > MAX_ORACLE_STALENESS) return 1;
+    }
+
+    function _validateOracleRound(int256 answer, uint256 updatedAt) internal view {
+        uint256 status = _oracleRoundStatus(answer, updatedAt);
+        if (status == 1) revert OracleStale();
+        if (status != 0) revert InvalidOracle();
+    }
+
     /// @dev Body of {getMarketPrice}: current oracle price scaled to collateral decimals.
     function _marketPrice() internal view returns (uint256) {
         (, int256 answer,, uint256 updatedAt,) = priceOracle.latestRoundData();
-
-        // Check for stale price
-        if (block.timestamp - updatedAt > MAX_ORACLE_STALENESS) {
-            revert OracleStale();
-        }
-
-        // Handle negative prices
-        if (answer < 0) {
-            revert InvalidOracle();
-        }
+        _validateOracleRound(answer, updatedAt);
 
         // Convert oracle price to collateral token decimals (oracle already quotes 1 PH/s/day)
-        uint256 price = M.scaleDecimals(uint256(answer), oracleDecimals, collateralDecimals);
+        uint256 price = M.scaleDecimals(uint256(answer), oracleDecimals, QUANTITY_DECIMALS);
 
         // Round to nearest minimumPriceIncrement
         price = M.roundToNearest(price, minimumPriceIncrement);

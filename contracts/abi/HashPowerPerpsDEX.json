@@ -69,6 +69,11 @@
   },
   {
     "inputs": [],
+    "name": "InvalidCollateralDecimals",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "InvalidDependency",
     "type": "error"
   },
@@ -717,6 +722,19 @@
         "internalType": "uint8",
         "name": "",
         "type": "uint8"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "MAX_ORACLE_STALENESS",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
       }
     ],
     "stateMutability": "view",

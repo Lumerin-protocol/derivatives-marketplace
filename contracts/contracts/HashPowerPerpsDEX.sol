@@ -464,13 +464,10 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         return positions[_user];
     }
 
-    /// @notice Net linear delta of the user's position, signed and scaled by
-    ///         10^collateralDecimals (ILinearMarket). Each unit of net quantity
-    ///         contributes ±10^collateralDecimals of delta; quantity decimals are
-    ///         scaled off here so the portfolio margin engine needs no
-    ///         product-specific constants.
+    /// @notice Net linear delta of the user's position, signed and scaled to the
+    ///         six-decimal collateral used by ILinearMarket.
     function getNetPositionDelta(address _user) external view returns (int256) {
-        return (positions[_user].netQuantity * int256(10 ** collateralDecimals)) / int256(10 ** QUANTITY_DECIMALS);
+        return positions[_user].netQuantity;
     }
 
     /// @notice ILinearMarket: all per-user margin inputs in a single call
@@ -490,8 +487,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
 
         uint256 currentPrice = getMarketPrice();
 
-        view_.netPositionDelta =
-            (position.netQuantity * int256(10 ** collateralDecimals)) / int256(10 ** QUANTITY_DECIMALS);
+        view_.netPositionDelta = position.netQuantity;
         if (position.netQuantity != 0) {
             // Mark PnL only. Funding travels in `pendingFunding`; netting it in here too
             // would have the engine charge the same debt twice (it adds both terms).
@@ -500,8 +496,8 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         }
         view_.pendingFunding = _pendingFunding(_user, currentPrice);
 
-        view_.buyOrderDelta = (buyQty * (10 ** collateralDecimals)) / (10 ** QUANTITY_DECIMALS);
-        view_.sellOrderDelta = (sellQty * (10 ** collateralDecimals)) / (10 ** QUANTITY_DECIMALS);
+        view_.buyOrderDelta = buyQty;
+        view_.sellOrderDelta = sellQty;
 
         // Instant mark-to-market loss if a whole side fills. Filling a bid above spot costs
         // the difference immediately and in full, which the old shock-scaled reservation

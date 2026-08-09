@@ -238,6 +238,11 @@ export const contractErrors = [
     "type": "error"
   },
   {
+    "inputs": [],
+    "name": "InvalidCollateralDecimals",
+    "type": "error"
+  },
+  {
     "inputs": [
       {
         "internalType": "address",

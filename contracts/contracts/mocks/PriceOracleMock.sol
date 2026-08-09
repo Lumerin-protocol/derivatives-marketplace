@@ -8,6 +8,9 @@ contract PriceOracleMock {
     int256 private _price;
     string private _description = "Price Oracle Mock";
     uint256 private _frozenTimestamp; // If non-zero, use this instead of block.timestamp
+    bool private _timestampFrozen;
+    uint80 private _roundId = 1;
+    uint80 private _answeredInRound = 1;
 
     constructor(int256 initialPrice, uint8 decimals_) {
         _price = initialPrice;
@@ -27,7 +30,7 @@ contract PriceOracleMock {
     }
 
     function _getUpdatedAt() private view returns (uint256) {
-        return _frozenTimestamp > 0 ? _frozenTimestamp : block.timestamp;
+        return _timestampFrozen ? _frozenTimestamp : block.timestamp;
     }
 
     function getRoundData(uint80)
@@ -36,7 +39,7 @@ contract PriceOracleMock {
         returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)
     {
         uint256 ts = _getUpdatedAt();
-        return (0, _price, ts, ts, 0);
+        return (_roundId, _price, ts, ts, _answeredInRound);
     }
 
     function latestRoundData()
@@ -45,7 +48,7 @@ contract PriceOracleMock {
         returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)
     {
         uint256 ts = _getUpdatedAt();
-        return (0, _price, ts, ts, 0);
+        return (_roundId, _price, ts, ts, _answeredInRound);
     }
 
     function setPrice(int256 price, uint8 decimals_) external {
@@ -53,14 +56,25 @@ contract PriceOracleMock {
         _decimals = decimals_;
     }
 
+    /// @notice Override all round fields to exercise Chainlink boundary behavior.
+    function setRoundData(int256 price, uint80 roundId, uint256 updatedAt, uint80 answeredInRound) external {
+        _price = price;
+        _roundId = roundId;
+        _frozenTimestamp = updatedAt;
+        _timestampFrozen = true;
+        _answeredInRound = answeredInRound;
+    }
+
     /// @notice Freeze the timestamp at the current block.timestamp
     /// @dev After calling this, advancing time will make the oracle appear stale
     function freezeTimestamp() external {
         _frozenTimestamp = block.timestamp;
+        _timestampFrozen = true;
     }
 
     /// @notice Unfreeze the timestamp to always return current block.timestamp
     function unfreezeTimestamp() external {
         _frozenTimestamp = 0;
+        _timestampFrozen = false;
     }
 }
