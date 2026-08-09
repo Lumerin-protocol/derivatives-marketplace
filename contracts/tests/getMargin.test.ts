@@ -235,12 +235,12 @@ describe("HashPowerPerpsDEX - Margin View Functions", function () {
     it("should correctly identify liquidatable when balance < portfolio maintenance margin", async function () {
       const data = await loadFixture(deployPerpsWithLiquidatablePositionFixture);
       const { contracts, accounts } = data;
-      const { perps, pme } = contracts;
+      const { perps, pme, vault } = contracts;
       const { seller } = accounts;
 
       await data.makeLiquidatable();
 
-      const balance = await perps.read.balanceOf([seller.account.address]);
+      const balance = await vault.read.balanceOf([seller.account.address]);
       const maintenanceMargin = await pme.read.computePortfolioMM([seller.account.address]);
 
       assert.ok(balance < maintenanceMargin);

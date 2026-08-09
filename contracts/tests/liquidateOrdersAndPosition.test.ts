@@ -145,8 +145,8 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition", function () {
       assert.ok(ordersBefore.length >= 1);
       const targetId = ordersBefore[0];
 
-      const liqBalanceBefore = await perps.read.balanceOf([buyer2.account.address]);
-      const sellerBalanceBefore = await perps.read.balanceOf([seller.account.address]);
+      const liqBalanceBefore = await vault.read.balanceOf([buyer2.account.address]);
+      const sellerBalanceBefore = await vault.read.balanceOf([seller.account.address]);
       const revenueBefore = await perps.read.collectedFeesBalance();
       const insuranceBefore = await vault.read.insuranceFundBalance();
 
@@ -155,8 +155,8 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition", function () {
       });
       const receipt = await pc.waitForTransactionReceipt({ hash });
 
-      const liqBalanceAfter = await perps.read.balanceOf([buyer2.account.address]);
-      const sellerBalanceAfter = await perps.read.balanceOf([seller.account.address]);
+      const liqBalanceAfter = await vault.read.balanceOf([buyer2.account.address]);
+      const sellerBalanceAfter = await vault.read.balanceOf([seller.account.address]);
 
       // Liquidator gets nothing (liquidatorShareBps defaults to 0); the user pays the fee.
       assert.equal(liqBalanceAfter - liqBalanceBefore, 0n);
@@ -201,7 +201,7 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition", function () {
     it("does not pay the liquidator even when liquidationFeeBps is set high (share defaults to 0)", async function () {
       const data = await networkHelpers.loadFixture(deployUnderwaterWithOrdersFixture);
       const { contracts, accounts } = data;
-      const { perps } = contracts;
+      const { perps, vault } = contracts;
       const { seller, buyer2, owner } = accounts;
 
       await data.makeUnderwater();
@@ -209,16 +209,16 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition", function () {
       // 100% fee — capped at the seller's balance; still nothing for the liquidator.
       await perps.write.setLiquidationFeeBps([10000], { account: owner.account });
 
-      const sellerBalanceBefore = await perps.read.balanceOf([seller.account.address]);
-      const liqBalanceBefore = await perps.read.balanceOf([buyer2.account.address]);
+      const sellerBalanceBefore = await vault.read.balanceOf([seller.account.address]);
+      const liqBalanceBefore = await vault.read.balanceOf([buyer2.account.address]);
 
       const orders = await perps.read.getUserOrders([seller.account.address]);
       await perps.write.liquidateOrder([seller.account.address, orders[0]], {
         account: buyer2.account,
       });
 
-      const sellerBalanceAfter = await perps.read.balanceOf([seller.account.address]);
-      const liqBalanceAfter = await perps.read.balanceOf([buyer2.account.address]);
+      const sellerBalanceAfter = await vault.read.balanceOf([seller.account.address]);
+      const liqBalanceAfter = await vault.read.balanceOf([buyer2.account.address]);
 
       // Liquidator still gets 0 at default share. User pays what they can.
       assert.equal(liqBalanceAfter, liqBalanceBefore, "liquidator balance unchanged");
@@ -230,7 +230,7 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition", function () {
     it("cancels all specified orders without paying a fee (payout disabled)", async function () {
       const data = await networkHelpers.loadFixture(deployUnderwaterWithOrdersFixture);
       const { contracts, accounts } = data;
-      const { perps } = contracts;
+      const { perps, vault } = contracts;
       const { seller, buyer2 } = accounts;
 
       await data.makeUnderwater();
@@ -238,13 +238,13 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition", function () {
       const ordersBefore = await perps.read.getUserOrders([seller.account.address]);
       assert.equal(ordersBefore.length, 2);
 
-      const liqBalanceBefore = await perps.read.balanceOf([buyer2.account.address]);
+      const liqBalanceBefore = await vault.read.balanceOf([buyer2.account.address]);
 
       await perps.write.liquidateOrders([seller.account.address, ordersBefore], {
         account: buyer2.account,
       });
 
-      const liqBalanceAfter = await perps.read.balanceOf([buyer2.account.address]);
+      const liqBalanceAfter = await vault.read.balanceOf([buyer2.account.address]);
       const ordersAfter = await perps.read.getUserOrders([seller.account.address]);
 
       assert.equal(ordersAfter.length, 0);
@@ -354,7 +354,7 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition", function () {
     it("succeeds after orders are cleared via liquidateOrders", async function () {
       const data = await networkHelpers.loadFixture(deployUnderwaterWithOrdersFixture);
       const { contracts, accounts } = data;
-      const { perps } = contracts;
+      const { perps, vault } = contracts;
       const { seller, buyer2 } = accounts;
 
       await data.makeUnderwater();
@@ -362,7 +362,7 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition", function () {
       const orders = await perps.read.getUserOrders([seller.account.address]);
       await perps.write.liquidateOrders([seller.account.address, orders], { account: buyer2.account });
 
-      const liqBalanceBefore = await perps.read.balanceOf([buyer2.account.address]);
+      const liqBalanceBefore = await vault.read.balanceOf([buyer2.account.address]);
 
       await perps.write.liquidatePosition([seller.account.address, maxUint256], {
         account: buyer2.account,
@@ -371,7 +371,7 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition", function () {
       const positionAfter = await perps.read.getUserPosition([seller.account.address]);
       assert.equal(positionAfter.netQuantity, 0n);
 
-      const liqBalanceAfter = await perps.read.balanceOf([buyer2.account.address]);
+      const liqBalanceAfter = await vault.read.balanceOf([buyer2.account.address]);
       // Liquidator gets nothing (liquidatorShareBps defaults to 0).
       assert.equal(liqBalanceAfter, liqBalanceBefore);
     });

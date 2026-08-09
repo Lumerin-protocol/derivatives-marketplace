@@ -305,7 +305,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
     it("should allow reduce-only order when margin is tight", async function () {
       const data = await networkHelpers.loadFixture(deployPerpsWithLiquidatablePositionFixture);
       const { contracts, accounts, config } = data;
-      const { perps, pme, priceOracle } = contracts;
+      const { perps, pme, priceOracle, vault } = contracts;
       const { seller } = accounts;
 
       // Move price against the short seller (up) so margin is tight but not liquidatable
@@ -315,7 +315,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       await priceOracle.write.setPrice([newPrice, config.oracle.decimals]);
 
       // Verify seller is in the buffer zone: above maintenance (5%) but below initial (10%)
-      const balance = await perps.read.balanceOf([seller.account.address]);
+      const balance = await vault.read.balanceOf([seller.account.address]);
       const maintenanceMargin = await pme.read.computePortfolioMM([seller.account.address]);
       assert.ok(balance > maintenanceMargin, "balance should be above maintenance margin");
       assert.ok(
@@ -335,7 +335,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
     it("should not become liquidatable after placing a reduce-only order", async function () {
       const data = await networkHelpers.loadFixture(deployPerpsWithLiquidatablePositionFixture);
       const { contracts, accounts, config } = data;
-      const { perps, pme, priceOracle } = contracts;
+      const { perps, pme, priceOracle, vault } = contracts;
       const { seller } = accounts;
 
       // Move price against seller enough that adding a resting closing order's value
@@ -346,7 +346,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       await priceOracle.write.setPrice([newPrice, config.oracle.decimals]);
 
       // Verify seller is in the buffer zone and not liquidatable
-      const balance = await perps.read.balanceOf([seller.account.address]);
+      const balance = await vault.read.balanceOf([seller.account.address]);
       const maintenanceMargin = await pme.read.computePortfolioMM([seller.account.address]);
       assert.ok(balance > maintenanceMargin, "balance should be above maintenance margin");
       assert.ok(
@@ -368,7 +368,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
     it("should reject position-increasing order when margin is tight", async function () {
       const data = await networkHelpers.loadFixture(deployPerpsWithLiquidatablePositionFixture);
       const { contracts, accounts, config } = data;
-      const { perps, pme, priceOracle } = contracts;
+      const { perps, pme, priceOracle, vault } = contracts;
       const { seller } = accounts;
 
       const tick = config.minimumPriceIncrement;
@@ -377,7 +377,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       await priceOracle.write.setPrice([newPrice, config.oracle.decimals]);
 
       // Verify seller is in the buffer zone: above maintenance (5%) but below initial (10%)
-      const balance = await perps.read.balanceOf([seller.account.address]);
+      const balance = await vault.read.balanceOf([seller.account.address]);
       const maintenanceMargin = await pme.read.computePortfolioMM([seller.account.address]);
       assert.ok(balance > maintenanceMargin, "balance should be above maintenance margin");
       assert.ok(
@@ -396,7 +396,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
     it("should reject order exceeding position size even if opposite side", async function () {
       const data = await networkHelpers.loadFixture(deployPerpsWithLiquidatablePositionFixture);
       const { contracts, accounts, config } = data;
-      const { perps, pme, priceOracle } = contracts;
+      const { perps, pme, priceOracle, vault } = contracts;
       const { seller } = accounts;
 
       const tick = config.minimumPriceIncrement;
@@ -405,7 +405,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       await priceOracle.write.setPrice([newPrice, config.oracle.decimals]);
 
       // Verify seller is in the buffer zone: above maintenance (5%) but below initial (10%)
-      const balance = await perps.read.balanceOf([seller.account.address]);
+      const balance = await vault.read.balanceOf([seller.account.address]);
       const maintenanceMargin = await pme.read.computePortfolioMM([seller.account.address]);
       assert.ok(balance > maintenanceMargin, "balance should be above maintenance margin");
       assert.ok(
@@ -428,10 +428,10 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       const { contracts, accounts, config } = await networkHelpers.loadFixture(
         deployPerpsWithCollateralFixture,
       );
-      const { perps } = contracts;
+      const { perps, vault } = contracts;
       const { buyer } = accounts;
 
-      const balanceBefore = await perps.read.balanceOf([buyer.account.address]);
+      const balanceBefore = await vault.read.balanceOf([buyer.account.address]);
       const marketPrice = await perps.read.getMarketPrice();
       const quantity = parseUnits("1", 6);
 
@@ -440,7 +440,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
         { account: buyer.account },
       );
 
-      const balanceAfter = await perps.read.balanceOf([buyer.account.address]);
+      const balanceAfter = await vault.read.balanceOf([buyer.account.address]);
       assert.equal(balanceBefore - balanceAfter, 0n);
     });
 
@@ -456,13 +456,13 @@ describe("HashPowerPerpsDEX - createOrder", function () {
 
       await perps.write.createOrder([marketPrice, -quantity, TimeInForce.GTC], { account: seller.account });
 
-      const balanceBefore = await perps.read.balanceOf([buyer.account.address]);
+      const balanceBefore = await vault.read.balanceOf([buyer.account.address]);
       const revenueBefore = await perps.read.collectedFeesBalance();
       const insuranceBefore = await vault.read.insuranceFundBalance();
 
       await perps.write.createOrder([marketPrice, quantity, TimeInForce.GTC], { account: buyer.account });
 
-      const balanceAfter = await perps.read.balanceOf([buyer.account.address]);
+      const balanceAfter = await vault.read.balanceOf([buyer.account.address]);
       const notionalValue = (marketPrice * quantity) / 10n ** BigInt(config.quantityDecimals);
       const expectedFee = (notionalValue * config.takerFeeBps) / 10000n;
 
@@ -475,7 +475,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       const { contracts, accounts, config } = await networkHelpers.loadFixture(
         deployPerpsWithCollateralFixture,
       );
-      const { perps } = contracts;
+      const { perps, vault } = contracts;
       const { buyer, seller, owner } = accounts;
 
       const marketPrice = await perps.read.getMarketPrice();
@@ -487,11 +487,11 @@ describe("HashPowerPerpsDEX - createOrder", function () {
 
       await perps.write.createOrder([marketPrice, -quantity, TimeInForce.GTC], { account: seller.account });
 
-      const sellerBalanceBefore = await perps.read.balanceOf([seller.account.address]);
+      const sellerBalanceBefore = await vault.read.balanceOf([seller.account.address]);
 
       await perps.write.createOrder([marketPrice, quantity, TimeInForce.GTC], { account: buyer.account });
 
-      const sellerBalanceAfter = await perps.read.balanceOf([seller.account.address]);
+      const sellerBalanceAfter = await vault.read.balanceOf([seller.account.address]);
 
       assert.equal(sellerBalanceBefore, sellerBalanceAfter);
     });
@@ -500,7 +500,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       const { contracts, accounts, config } = await networkHelpers.loadFixture(
         deployPerpsWithCollateralFixture,
       );
-      const { perps } = contracts;
+      const { perps, vault } = contracts;
       const { buyer, seller, owner } = accounts;
 
       const marketPrice = await perps.read.getMarketPrice();
@@ -515,18 +515,18 @@ describe("HashPowerPerpsDEX - createOrder", function () {
         account: seller.account,
       });
 
-      const makerBefore = await perps.read.balanceOf([seller.account.address]);
-      const takerBefore = await perps.read.balanceOf([buyer.account.address]);
+      const makerBefore = await vault.read.balanceOf([seller.account.address]);
+      const takerBefore = await vault.read.balanceOf([buyer.account.address]);
       await perps.write.createOrder([marketPrice, quantity, TimeInForce.GTC], {
         account: buyer.account,
       });
 
       assert.equal(
-        (await perps.read.balanceOf([seller.account.address])) - makerBefore,
+        (await vault.read.balanceOf([seller.account.address])) - makerBefore,
         expectedFee,
       );
       assert.equal(
-        takerBefore - (await perps.read.balanceOf([buyer.account.address])),
+        takerBefore - (await vault.read.balanceOf([buyer.account.address])),
         expectedFee,
       );
       assert.equal(await perps.read.collectedFeesBalance(), 0n);

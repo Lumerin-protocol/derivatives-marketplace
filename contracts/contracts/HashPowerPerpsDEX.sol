@@ -68,13 +68,6 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         collectedFeesBalance = 0;
     }
 
-    // ── Vault integration ───────────────────────────────────────────────────
-
-    /// @notice Returns the user's collateral balance from the vault.
-    function balanceOf(address account) public view returns (uint256) {
-        return vault.balanceOf(account);
-    }
-
     /// @notice Get current market price from oracle
     /// @return price The current price (scaled to collateral token decimals)
     function getMarketPrice() public view returns (uint256) {
@@ -290,7 +283,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         // Over-liquidation guard: a position remains here, so if there is a real IM buffer
         // (`im > mm`) the leftover balance must sit at/under IM.
         (uint256 im, uint256 mm) = portfolioMargin.computePortfolioMargins(_user);
-        if (im > mm && balanceOf(_user) > im) revert OverLiquidation();
+        if (im > mm && vault.balanceOf(_user) > im) revert OverLiquidation();
 
         emit PositionLiquidated(_user, _msgSender(), signedClose, pnl, liqFee);
         _notifyLiquidation(_msgSender(), liqFee);

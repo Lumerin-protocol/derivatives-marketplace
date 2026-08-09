@@ -144,7 +144,7 @@ async function main() {
       accountLabels.map(([, account]) => usdcMock.read.balanceOf([account.account.address])),
     ),
     usdcMock.read.balanceOf([owner.account.address]),
-    perps.read.balanceOf([perps.address]),
+    vault.read.balanceOf([perps.address]),
     Promise.all(
       accountLabels.map(([, account]) => perps.read.getUserOrders([account.account.address])),
     ),

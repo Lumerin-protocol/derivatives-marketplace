@@ -48,16 +48,16 @@ describe("HashPowerPerpsDEX - liquidatePosition", function () {
   it("should pay liquidator fee", async function () {
     const data = await networkHelpers.loadFixture(deployPerpsWithLiquidatablePositionFixture);
     const { contracts, accounts } = data;
-    const { perps } = contracts;
+    const { perps, vault } = contracts;
     const { seller, buyer2 } = accounts;
 
     await data.makeLiquidatable();
 
-    const liquidatorBalanceBefore = await perps.read.balanceOf([buyer2.account.address]);
+    const liquidatorBalanceBefore = await vault.read.balanceOf([buyer2.account.address]);
 
     await perps.write.liquidatePosition([seller.account.address, maxUint256], { account: buyer2.account });
 
-    const liquidatorBalanceAfter = await perps.read.balanceOf([buyer2.account.address]);
+    const liquidatorBalanceAfter = await vault.read.balanceOf([buyer2.account.address]);
 
     assert.ok(liquidatorBalanceAfter >= liquidatorBalanceBefore);
   });
