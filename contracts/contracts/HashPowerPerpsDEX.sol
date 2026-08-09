@@ -185,15 +185,6 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
             }
 
             if (remainingQuantity != 0) {
-                // Validate minimum margin per resting order
-                if (minimumMarginPerOrder > 0) {
-                    uint256 restingValue = _calculateValue(_price, M.abs(remainingQuantity));
-                    uint256 restingMargin = portfolioMargin.linearOrderMargin(restingValue);
-                    if (restingMargin < minimumMarginPerOrder) {
-                        revert OrderMarginTooLow();
-                    }
-                }
-
                 // Validate max orders per participant
                 EnumerableSet.Bytes32Set storage participantOrders = participantOrderIdsIndex[_participant];
                 if (participantOrders.length() >= MAX_ORDERS_PER_PARTICIPANT) {
@@ -244,12 +235,6 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         uint256 oldAbs = M.abs(oldQty);
         uint256 newAbs = M.abs(_newQuantity);
         if (newAbs >= oldAbs) revert InvalidReduceQuantity();
-
-        if (minimumMarginPerOrder > 0) {
-            uint256 restingValue = _calculateValue(order.price, newAbs);
-            uint256 restingMargin = portfolioMargin.linearOrderMargin(restingValue);
-            if (restingMargin < minimumMarginPerOrder) revert OrderMarginTooLow();
-        }
 
         _reduceRestingOrder(_orderId, order, _newQuantity);
     }

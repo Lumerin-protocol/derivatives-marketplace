@@ -188,9 +188,9 @@ liquidatePosition(user, closeQty)
 | Futures | **100** | `MAX_ORDERS_PER_PARTICIPANT = 100` |
 | Options | Unlimited (but max 20 active series) | `maxSeriesPerUser = 20` |
 
-### 8.2 Minimum Order Margin (Perps only)
+### 8.2 Deprecated Minimum Order Margin (Perps only)
 
-`minimumMarginPerOrder` — configurable floor that prevents dust/spam orders. Resting orders whose IM < minimum revert with `OrderMarginTooLow`. Set to 0 to disable.
+`minimumMarginPerOrder`, its setter/event, and `OrderMarginTooLow` remain in the ABI for compatibility, but no order path enforces the value. Portfolio IM from the PME is the canonical collateral requirement.
 
 ### 8.3 Time-in-Force Options
 

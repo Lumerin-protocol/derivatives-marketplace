@@ -83,9 +83,9 @@ The on-chain order book uses a `StructuredLinkedList` for sorted price levels. A
 
 ---
 
-### Option 5: Minimum Margin Per Order (`minimumMarginPerOrder`) :white_check_mark:
+### Option 5: Minimum Margin Per Order (`minimumMarginPerOrder`) — deprecated
 
-**Mechanism:** Enforce a minimum margin (collateral locked) per resting order. The check computes `margin = notional * marginPercent / 100` and rejects if below the threshold.
+**Historical mechanism:** Enforce a minimum margin per resting order and reject orders below the threshold.
 
 **Pros:**
 - Directly expresses "you must lock this much real capital per order"
@@ -96,7 +96,7 @@ The on-chain order book uses a `StructuredLinkedList` for sorted price levels. A
 **Cons:**
 - Slightly more complex validation than raw notional check (one extra multiplication)
 
-**Verdict:** Adopted. Combined with `MAX_PRICE_LEVELS_PER_SIDE`, this provides the best tradeoff of simplicity, maker-friendliness, and spam resistance.
+**Verdict:** Retired from runtime enforcement. A flat per-order floor conflicts with portfolio netting and duplicates the PME's canonical portfolio IM calculation. The storage slot, getter, setter, event, and `OrderMarginTooLow` declaration remain for compatibility only.
 
 ---
 
@@ -123,11 +123,6 @@ The on-chain order book uses a `StructuredLinkedList` for sorted price levels. A
 │                                                      │
 │  2. If remaining qty → resting order:                │
 │     ┌──────────────────────────────────────────┐     │
-│     │  Check: margin ≥ minimumMarginPerOrder   │     │
-│     │  margin = notional × marginPercent / 100 │     │
-│     │  Revert: OrderMarginTooLow()             │     │
-│     └──────────────────────────────────────────┘     │
-│     ┌──────────────────────────────────────────┐     │
 │     │  Check: user orders < MAX_ORDERS (100)   │     │
 │     │  Revert: MaxOrdersPerParticipantReached  │     │
 │     └──────────────────────────────────────────┘     │
@@ -141,9 +136,11 @@ The on-chain order book uses a `StructuredLinkedList` for sorted price levels. A
 └──────────────────────────────────────────────────────┘
 ```
 
-## Spam Cost Analysis
+## Historical Spam Cost Analysis
 
-With `minimumMarginPerOrder = 0.5 USDC` and `marginPercent = 10%`:
+The following figures described the deprecated per-order floor and are not current protocol guarantees.
+
+With the former `minimumMarginPerOrder = 0.5 USDC` and `marginPercent = 10%`:
 
 | Attack | Capital Required | Recoverable? |
 |---|---|---|
@@ -151,14 +148,14 @@ With `minimumMarginPerOrder = 0.5 USDC` and `marginPercent = 10%`:
 | Fill both sides (400 levels) | **200 USDC** locked | Yes, on cancel |
 | Fill both sides + margin overhead | ~**240 USDC** locked | Yes, on cancel |
 
-With `minimumMarginPerOrder = 10 USDC`:
+With the former `minimumMarginPerOrder = 10 USDC`:
 
 | Attack | Capital Required | Recoverable? |
 |---|---|---|
 | Fill 200 bid levels (1 side) | 200 × 10 = **2,000 USDC** locked | Yes, on cancel |
 | Fill both sides (400 levels) | **4,000 USDC** locked | Yes, on cancel |
 
-The admin can tune `minimumMarginPerOrder` based on the observed threat level without changing any contract logic.
+Changing `minimumMarginPerOrder` now updates only the compatibility getter and event; it does not change order acceptance.
 
 ## Key Insight: Why Margin, Not Notional
 
@@ -166,4 +163,4 @@ The admin can tune `minimumMarginPerOrder` based on the observed threat level wi
 minimumMarginPerOrder = minimumOrderValue × marginPercent / 100
 ```
 
-They are mathematically interchangeable at a fixed `marginPercent`. The difference is **resilience to parameter changes**: if the protocol later lowers `marginPercent` from 10% to 5%, a `minimumOrderValue = 100 USDC` drops effective locked capital from 10 USDC to 5 USDC per order. A `minimumMarginPerOrder = 10 USDC` stays at 10 USDC regardless.
+They were mathematically interchangeable at a fixed `marginPercent`. This comparison is retained as historical design context; current collateral adequacy comes from PME portfolio IM.

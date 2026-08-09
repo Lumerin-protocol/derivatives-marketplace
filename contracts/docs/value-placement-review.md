@@ -53,7 +53,7 @@ All fine. No changes needed.
 | `liquidatorShareBps` | `setLiquidatorShareBps` | `LiquidatorShareBpsUpdated` | ✅ Yes |
 | `takerFeeBps` / `makerFeeBps` | `setMatchFee` | `MatchFeeUpdated` | ✅ Yes — only new matches |
 | `fundingRateMaxBps` / `fundingPeriod` | `setFundingParameters` | `FundingParametersUpdated` | ✅ Yes — only future funding accrual |
-| `minimumMarginPerOrder` | `setMinimumMarginPerOrder` | `MinimumMarginPerOrderUpdated` | ✅ Yes — only new resting orders |
+| `minimumMarginPerOrder` | `setMinimumMarginPerOrder` | `MinimumMarginPerOrderUpdated` | Compatibility only — stored and emitted, never enforced |
 | `portfolioMargin` | `setPortfolioMargin` | `PortfolioMarginUpdated` | ⚠️ Instant re-evaluation of all positions |
 | `hook` | `setHook` | `HookUpdated` | ✅ Yes |
 

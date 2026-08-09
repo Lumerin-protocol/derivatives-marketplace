@@ -134,7 +134,7 @@ These can be applied to the current linked-list design to mitigate the worst iss
 
 1. **Add `MAX_PRICE_LEVELS_PER_SIDE`** — cap active bid/ask price levels (200 per side), revert on overflow ✅
 2. **Add `maxFills` parameter to `createOrder`** — let the caller cap matching iterations per tx
-3. **Add `minimumMarginPerOrder`** — enforce a minimum margin (collateral) locked per resting order, making price-level spam uneconomic regardless of leverage ✅
+3. **Use portfolio IM for order collateral** — `minimumMarginPerOrder` is retained only as a compatibility value and is no longer enforced; PME portfolio IM is canonical
 4. **Paginate view functions** — `getUsersWithPositions(offset, limit)`, `getQuantityAtPrice` with iteration cap
 
 ## Recommended Long-Term Architecture

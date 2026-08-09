@@ -132,8 +132,10 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
 
     // ── Risk parameters ───────────────────────────────────────────────────────
 
-    /// @notice Set minimum margin per resting order (in collateral token units)
-    /// @param _minimumMarginPerOrder Minimum margin locked per resting order (0 = no minimum)
+    /// @notice Set the deprecated minimum-margin compatibility value.
+    /// @dev Retained with its event for ABI and storage compatibility. Order placement and
+    ///      reduction do not enforce this value; portfolio IM is the canonical requirement.
+    /// @param _minimumMarginPerOrder Compatibility value reported by the legacy getter.
     function setMinimumMarginPerOrder(uint256 _minimumMarginPerOrder) external onlyOwner {
         minimumMarginPerOrder = _minimumMarginPerOrder;
         emit MinimumMarginPerOrderUpdated(_minimumMarginPerOrder);

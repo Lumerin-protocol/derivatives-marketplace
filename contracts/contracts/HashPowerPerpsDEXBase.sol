@@ -97,7 +97,10 @@ abstract contract HashPowerPerpsDEXBase is
     mapping(address => int256) internal userFundingSnapshot; // Per-user snapshot of cumulativeFundingPerUnit
 
     // Order book limits
-    uint256 public minimumMarginPerOrder; // Minimum margin (collateral) locked per resting order (0 = no minimum)
+    /// @notice Deprecated compatibility value; no order path enforces it.
+    /// @dev Retained forever at its historical slot, with its generated getter, because
+    ///      integrations and existing proxies may still read governance's last configured value.
+    uint256 public minimumMarginPerOrder;
     /// @dev Deprecated/dead legacy cache slots. Retained forever for proxy storage compatibility.
     ///      v2.13+ must never read or write these mappings.
     mapping(address => uint256) internal userBuyOrderValue;
@@ -213,6 +216,7 @@ abstract contract HashPowerPerpsDEXBase is
     event FundingUpdated(int256 fundingRate, int256 cumulativeFundingPerUnit, uint256 timestamp);
     event FundingSettled(address indexed user, int256 amount);
     event FundingParametersUpdated(uint256 maxBps, uint256 period);
+    /// @dev Deprecated compatibility event retained with the legacy setter.
     event MinimumMarginPerOrderUpdated(uint256 newMinimumMarginPerOrder);
     /// @notice Emitted whenever the points hook address changes.
     event HookUpdated(address indexed hook);
@@ -237,7 +241,8 @@ abstract contract HashPowerPerpsDEXBase is
     /// @notice Fee magnitude above `MAX_FEE_BPS`, or a maker+taker sum below zero (which
     ///         would make every match a net outflow from the insurance fund).
     error InvalidFee();
-    error OrderMarginTooLow(); // Order margin is below minimumMarginPerOrder
+    /// @dev Deprecated compatibility declaration. Runtime order paths no longer raise it.
+    error OrderMarginTooLow();
     error MaxPriceLevelsReached(); // Too many active price levels on one side of the book
     error InsuranceFundNotConfigured(); // CollateralVault.insuranceFund not set by vault owner
     /// @notice FOK could not fill entirely, or IOC matched nothing.
