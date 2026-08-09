@@ -253,12 +253,12 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         emit OrderUpdated(_orderId, order.participant, _newQuantity);
     }
 
-    /// @notice Check if a user's position can be liquidated.
-    /// @dev Returns true iff the user has a position AND is below MM. Note: this view does NOT
-    ///      check the orders-must-be-clear rule enforced by `liquidatePosition`. Callers that
-    ///      want the full preflight should also check `getUserOrders(user).length == 0`.
+    /// @notice Check if a user's position or resting orders can be liquidated.
+    /// @dev An account with order delta but no position is still actionable through
+    ///      `liquidateOrder(s)` when it fails portfolio maintenance margin.
     function isLiquidatable(address _user) public view returns (bool) {
-        return positions[_user].netQuantity != 0 && _underwater(_user);
+        if (positions[_user].netQuantity == 0 && !portfolioMargin.hasRestingOrderDelta(_user)) return false;
+        return _underwater(_user);
     }
 
     /// @notice Force-close a single underwater user's position. Permissionless.

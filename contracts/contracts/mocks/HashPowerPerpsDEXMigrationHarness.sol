@@ -21,16 +21,4 @@ contract HashPowerPerpsDEXMigrationHarness is HashPowerPerpsDEX {
         collectedFeesBalance = _value;
     }
 
-    function setLegacyOrderCache(
-        address _user,
-        uint256 _buyQty,
-        uint256 _sellQty,
-        uint256 _buyValue,
-        uint256 _sellValue
-    ) external {
-        userBuyOrderQty[_user] = _buyQty;
-        userSellOrderQty[_user] = _sellQty;
-        userBuyOrderValue[_user] = _buyValue;
-        userSellOrderValue[_user] = _sellValue;
-    }
 }

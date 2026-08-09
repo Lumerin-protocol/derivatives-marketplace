@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
 import {
+  deployPerpsFixture,
   deployPerpsWithCollateralFixture,
   deployPerpsWithOrdersFixture,
   deployPerpsWithPositionsFixture,
@@ -201,6 +202,34 @@ describe("HashPowerPerpsDEX - Margin View Functions", function () {
 
       isLiquidatable = await perps.read.isLiquidatable([seller.account.address]);
       assert.ok(isLiquidatable);
+    });
+
+    it("returns true for an underwater order-only account", async function () {
+      const data = await loadFixture(deployPerpsFixture);
+      const { contracts, accounts, config } = data;
+      const { perps, pme, priceOracle, vault } = contracts;
+      const { buyer } = accounts;
+      const mark = await perps.read.getMarketPrice();
+      const quantity = parseUnits("1", config.quantityDecimals);
+      const bidPrice = mark - config.minimumPriceIncrement;
+      const notional = (bidPrice * quantity) / 10n ** BigInt(config.quantityDecimals);
+      const initialMargin = await pme.read.linearOrderMargin([notional]);
+
+      // A small buffer covers rounding and the engine's strict balance > IM placement check.
+      await vault.write.deposit([initialMargin * 2n], { account: buyer.account });
+      await perps.write.createOrder([bidPrice, quantity, TimeInForce.GTC], {
+        account: buyer.account,
+      });
+      assert.equal((await perps.read.getUserPosition([buyer.account.address])).netQuantity, 0n);
+      assert.equal(await perps.read.hasRestingOrderDelta([buyer.account.address]), true);
+      assert.equal(await perps.read.isLiquidatable([buyer.account.address]), false);
+
+      await priceOracle.write.setPrice([mark / 2n, config.oracle.decimals]);
+      assert.ok(
+        (await vault.read.balanceOf([buyer.account.address])) <
+          (await pme.read.computePortfolioMM([buyer.account.address])),
+      );
+      assert.equal(await perps.read.isLiquidatable([buyer.account.address]), true);
     });
 
     it("should correctly identify liquidatable when balance < portfolio maintenance margin", async function () {

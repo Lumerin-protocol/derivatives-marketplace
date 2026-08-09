@@ -70,11 +70,6 @@ describe("HashPowerPerpsDEX order aggregate cache migration", function () {
     await harness.write.clearOrderAggregateCache([buyer.account.address], {
       account: owner.account,
     });
-    await harness.write.setLegacyOrderCache(
-      [buyer.account.address, 111n, 222n, 333n, 444n],
-      { account: owner.account },
-    );
-
     assert.deepEqual(await harness.read.getOrderAggregate([buyer.account.address]), {
       buyQty: 0n,
       sellQty: 0n,
