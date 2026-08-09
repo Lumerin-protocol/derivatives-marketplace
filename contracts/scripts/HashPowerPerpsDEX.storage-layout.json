@@ -1,0 +1,285 @@
+{
+  "contract": "HashPowerPerpsDEX",
+  "storage": [
+    {
+      "label": "__gap0",
+      "slot": "0",
+      "offset": 0,
+      "type": "address",
+      "bytes": "20",
+      "typeFingerprint": "cd671abedf1338c47fe254f0fb88801a5f56efa709b4a1f58fb35331329cf9e9"
+    },
+    {
+      "label": "priceOracle",
+      "slot": "1",
+      "offset": 0,
+      "type": "contract AggregatorV3Interface",
+      "bytes": "20",
+      "typeFingerprint": "9636d5f33ff220b18a58f526fcd01066923754b8189e0cd978e0b44dfae0eaae"
+    },
+    {
+      "label": "__gap1",
+      "slot": "1",
+      "offset": 20,
+      "type": "uint8",
+      "bytes": "1",
+      "typeFingerprint": "b177e0c4e9ec36309734f94c1f6b7dcf13056125f7e2e3204e7da44bde77666d"
+    },
+    {
+      "label": "__gap2",
+      "slot": "1",
+      "offset": 21,
+      "type": "uint8",
+      "bytes": "1",
+      "typeFingerprint": "b177e0c4e9ec36309734f94c1f6b7dcf13056125f7e2e3204e7da44bde77666d"
+    },
+    {
+      "label": "collectedFeesBalance",
+      "slot": "2",
+      "offset": 0,
+      "type": "uint256",
+      "bytes": "32",
+      "typeFingerprint": "249793a7b5ffa883988c93ab1ed4378cf287ff8ee07baf168561cbaeadc78d0d"
+    },
+    {
+      "label": "__gap4",
+      "slot": "3",
+      "offset": 0,
+      "type": "uint8",
+      "bytes": "1",
+      "typeFingerprint": "b177e0c4e9ec36309734f94c1f6b7dcf13056125f7e2e3204e7da44bde77666d"
+    },
+    {
+      "label": "oracleDecimals",
+      "slot": "3",
+      "offset": 1,
+      "type": "uint8",
+      "bytes": "1",
+      "typeFingerprint": "b177e0c4e9ec36309734f94c1f6b7dcf13056125f7e2e3204e7da44bde77666d"
+    },
+    {
+      "label": "nonce",
+      "slot": "4",
+      "offset": 0,
+      "type": "uint256",
+      "bytes": "32",
+      "typeFingerprint": "249793a7b5ffa883988c93ab1ed4378cf287ff8ee07baf168561cbaeadc78d0d"
+    },
+    {
+      "label": "orders",
+      "slot": "5",
+      "offset": 0,
+      "type": "mapping(bytes32 => struct HashPowerPerpsDEXBase.Order)",
+      "bytes": "32",
+      "typeFingerprint": "3dfa0a77a9a46a9f138f7f943e0684aacaa6cdda46c05ea1489ab4da22777b7e"
+    },
+    {
+      "label": "priceOrdersLongQueue",
+      "slot": "6",
+      "offset": 0,
+      "type": "mapping(uint256 => struct StructuredLinkedList.List)",
+      "bytes": "32",
+      "typeFingerprint": "46d5d57b3e6e42c5d77cbc88ea54bfb9fd4d9e600b6dc92aef9cff4b6d7721d6"
+    },
+    {
+      "label": "priceOrdersShortQueue",
+      "slot": "7",
+      "offset": 0,
+      "type": "mapping(uint256 => struct StructuredLinkedList.List)",
+      "bytes": "32",
+      "typeFingerprint": "46d5d57b3e6e42c5d77cbc88ea54bfb9fd4d9e600b6dc92aef9cff4b6d7721d6"
+    },
+    {
+      "label": "participantOrderIdsIndex",
+      "slot": "8",
+      "offset": 0,
+      "type": "mapping(address => struct EnumerableSet.Bytes32Set)",
+      "bytes": "32",
+      "typeFingerprint": "c3dc240343b828a640733eb91f5d372b3a25dbc59f3d678c75c91f88fa452989"
+    },
+    {
+      "label": "__gap5",
+      "slot": "9",
+      "offset": 0,
+      "type": "mapping(address => uint256)",
+      "bytes": "32",
+      "typeFingerprint": "3e5d73cf9cbcf967571b5ddd2b86dd406c1dd0d3bdf24d407d5ad0e88332005c"
+    },
+    {
+      "label": "activeBidPrices",
+      "slot": "10",
+      "offset": 0,
+      "type": "struct StructuredLinkedList.List",
+      "bytes": "64",
+      "typeFingerprint": "31e60e24fb38faf9b5a40a0b317afcb92d57bbaec4a2cfd28006cb88c30716aa"
+    },
+    {
+      "label": "activeAskPrices",
+      "slot": "12",
+      "offset": 0,
+      "type": "struct StructuredLinkedList.List",
+      "bytes": "64",
+      "typeFingerprint": "31e60e24fb38faf9b5a40a0b317afcb92d57bbaec4a2cfd28006cb88c30716aa"
+    },
+    {
+      "label": "positions",
+      "slot": "14",
+      "offset": 0,
+      "type": "mapping(address => struct HashPowerPerpsDEXBase.Position)",
+      "bytes": "32",
+      "typeFingerprint": "511211b2df4c83a36c10b4fb0d3e98c8b4ad661e024f9261335cb9691b7d7e7e"
+    },
+    {
+      "label": "usersWithPositions",
+      "slot": "15",
+      "offset": 0,
+      "type": "struct EnumerableSet.AddressSet",
+      "bytes": "64",
+      "typeFingerprint": "931d35b56ce21c6c6fc87149f5e79f76bece1f8fae9707348217d217d506ccd5"
+    },
+    {
+      "label": "takerFeeBps",
+      "slot": "17",
+      "offset": 0,
+      "type": "int16",
+      "bytes": "2",
+      "typeFingerprint": "4d83aa9b2d57a0a0a3cee63a57a69f76c20ee20e555d20535406388dac8f09fe"
+    },
+    {
+      "label": "makerFeeBps",
+      "slot": "17",
+      "offset": 2,
+      "type": "int16",
+      "bytes": "2",
+      "typeFingerprint": "4d83aa9b2d57a0a0a3cee63a57a69f76c20ee20e555d20535406388dac8f09fe"
+    },
+    {
+      "label": "cumulativeFundingPerUnit",
+      "slot": "18",
+      "offset": 0,
+      "type": "int256",
+      "bytes": "32",
+      "typeFingerprint": "ee5d3de3831ec02bfe5c5665119c0d31cbd17650d7acaf6e73180f2db9838382"
+    },
+    {
+      "label": "lastFundingUpdateTime",
+      "slot": "19",
+      "offset": 0,
+      "type": "uint256",
+      "bytes": "32",
+      "typeFingerprint": "249793a7b5ffa883988c93ab1ed4378cf287ff8ee07baf168561cbaeadc78d0d"
+    },
+    {
+      "label": "fundingRateMaxBps",
+      "slot": "20",
+      "offset": 0,
+      "type": "uint256",
+      "bytes": "32",
+      "typeFingerprint": "249793a7b5ffa883988c93ab1ed4378cf287ff8ee07baf168561cbaeadc78d0d"
+    },
+    {
+      "label": "fundingPeriod",
+      "slot": "21",
+      "offset": 0,
+      "type": "uint256",
+      "bytes": "32",
+      "typeFingerprint": "249793a7b5ffa883988c93ab1ed4378cf287ff8ee07baf168561cbaeadc78d0d"
+    },
+    {
+      "label": "userFundingSnapshot",
+      "slot": "22",
+      "offset": 0,
+      "type": "mapping(address => int256)",
+      "bytes": "32",
+      "typeFingerprint": "29206fa9b3a162e2c3c27c2a5c864fa4ec679af8720d7abaeef0a3c6745bdd2a"
+    },
+    {
+      "label": "minimumMarginPerOrder",
+      "slot": "23",
+      "offset": 0,
+      "type": "uint256",
+      "bytes": "32",
+      "typeFingerprint": "249793a7b5ffa883988c93ab1ed4378cf287ff8ee07baf168561cbaeadc78d0d"
+    },
+    {
+      "label": "userBuyOrderValue",
+      "slot": "24",
+      "offset": 0,
+      "type": "mapping(address => uint256)",
+      "bytes": "32",
+      "typeFingerprint": "3e5d73cf9cbcf967571b5ddd2b86dd406c1dd0d3bdf24d407d5ad0e88332005c"
+    },
+    {
+      "label": "userSellOrderValue",
+      "slot": "25",
+      "offset": 0,
+      "type": "mapping(address => uint256)",
+      "bytes": "32",
+      "typeFingerprint": "3e5d73cf9cbcf967571b5ddd2b86dd406c1dd0d3bdf24d407d5ad0e88332005c"
+    },
+    {
+      "label": "__gap6",
+      "slot": "26",
+      "offset": 0,
+      "type": "address",
+      "bytes": "20",
+      "typeFingerprint": "cd671abedf1338c47fe254f0fb88801a5f56efa709b4a1f58fb35331329cf9e9"
+    },
+    {
+      "label": "portfolioMargin",
+      "slot": "27",
+      "offset": 0,
+      "type": "contract IPortfolioMarginEngine",
+      "bytes": "20",
+      "typeFingerprint": "7546622c2fd561615c0844751d9152b0598a10217d379cbb34ce60850862ff34"
+    },
+    {
+      "label": "hook",
+      "slot": "28",
+      "offset": 0,
+      "type": "contract IPointsHook",
+      "bytes": "20",
+      "typeFingerprint": "94ee8ca490366ec3136814007ef0688470498ff8a27abb0049c837582db0b9a5"
+    },
+    {
+      "label": "liquidationFeeBps",
+      "slot": "28",
+      "offset": 20,
+      "type": "uint16",
+      "bytes": "2",
+      "typeFingerprint": "6fe3996099eee5e25a677615b3991e4d5f88e53ef13043285a2d8f5352f686dd"
+    },
+    {
+      "label": "liquidatorShareBps",
+      "slot": "28",
+      "offset": 22,
+      "type": "uint16",
+      "bytes": "2",
+      "typeFingerprint": "6fe3996099eee5e25a677615b3991e4d5f88e53ef13043285a2d8f5352f686dd"
+    },
+    {
+      "label": "userBuyOrderQty",
+      "slot": "29",
+      "offset": 0,
+      "type": "mapping(address => uint256)",
+      "bytes": "32",
+      "typeFingerprint": "3e5d73cf9cbcf967571b5ddd2b86dd406c1dd0d3bdf24d407d5ad0e88332005c"
+    },
+    {
+      "label": "userSellOrderQty",
+      "slot": "30",
+      "offset": 0,
+      "type": "mapping(address => uint256)",
+      "bytes": "32",
+      "typeFingerprint": "3e5d73cf9cbcf967571b5ddd2b86dd406c1dd0d3bdf24d407d5ad0e88332005c"
+    },
+    {
+      "label": "userOrderAggregate",
+      "slot": "31",
+      "offset": 0,
+      "type": "mapping(address => struct HashPowerPerpsDEXBase.OrderAggregate)",
+      "bytes": "32",
+      "typeFingerprint": "0662eff707646ab16e15a4fe91c4b166737239e8840c3d46684e04141ea8b418"
+    }
+  ]
+}

@@ -14,6 +14,8 @@
     "test-coverage": "hardhat test --coverage",
     "build": "hardhat compile",
     "compile": "hardhat compile",
+    "storage:check": "hardhat compile && node scripts/check-perps-storage-layout.mjs",
+    "storage:baseline": "hardhat compile && node scripts/check-perps-storage-layout.mjs --write",
     "clean": "rm -rf abi artifacts cache",
     "aderyn": "aderyn",
     "deploy:perps": "hardhat run scripts/deploy-perps.ts",
