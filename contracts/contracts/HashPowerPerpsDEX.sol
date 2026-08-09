@@ -92,9 +92,11 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     ///      portfolio-non-increasing exception. Any non-empty batch must leave
     ///      the account fully above portfolio IM. This avoids an additional
     ///      pre-batch PME traversal.
+    ///      Empty input reverts so simulate-before-write callers do not submit
+    ///      a no-op transaction.
     function createOrders(OrderIntent[] calldata _intents) external {
         uint256 len = _intents.length;
-        if (len == 0) return;
+        if (len == 0) revert EmptyBatch();
         address sender = _msgSender();
         _updateGlobalFunding();
         _settleFunding(sender);

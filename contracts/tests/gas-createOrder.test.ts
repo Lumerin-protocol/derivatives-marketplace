@@ -110,16 +110,6 @@ async function benchmarkBidLadderInsertion(
 }
 
 describe("Gas: createOrder", function () {
-  it("createOrders_empty", async function () {
-    const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
-    const { perps } = contracts;
-    const { buyer, pc } = accounts;
-    const hash = await perps.write.createOrders([[]], { account: buyer.account });
-    const receipt = await pc.waitForTransactionReceipt({ hash });
-    assert.equal(receipt.status, "success");
-    console.log(`  createOrders_empty: ${Number(receipt.gasUsed).toLocaleString()} gas`);
-  });
-
   it("createOrder_restingOnly (no match)", async function () {
     const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
     const { perps } = contracts;

@@ -5,7 +5,7 @@ import { getAddress, parseEventLogs, parseUnits } from "viem";
 import { deployPerpsWithCollateralFixture } from "./fixtures.ts";
 import { TimeInForce } from "../fixtures/timeInForce.ts";
 
-const { networkHelpers } = await network.connect();
+const { networkHelpers, viem } = await network.connect();
 
 type OrderIntent = {
   price: bigint;
@@ -14,24 +14,18 @@ type OrderIntent = {
 };
 
 describe("HashPowerPerpsDEX.createOrders (batch placement)", function () {
-  it("empty intents array is a no-op", async function () {
+  it("rejects an empty intents array before submission", async function () {
     const { contracts, accounts } = await networkHelpers.loadFixture(
       deployPerpsWithCollateralFixture,
     );
     const { perps } = contracts;
-    const { buyer, pc } = accounts;
+    const { buyer } = accounts;
 
-    const tx = await perps.write.createOrders([[]], { account: buyer.account });
-    const receipt = await pc.waitForTransactionReceipt({ hash: tx });
-    assert.equal(receipt.status, "success");
-
-    const created = parseEventLogs({
-      logs: receipt.logs,
-      abi: perps.abi,
-      eventName: "OrderCreated",
-    });
-    assert.equal(created.length, 0);
-    assert.equal((await perps.read.getUserOrders([buyer.account.address])).length, 0);
+    await viem.assertions.revertWithCustomError(
+      perps.write.createOrders([[]], { account: buyer.account }),
+      perps,
+      "EmptyBatch",
+    );
   });
 
   it("places multiple same-side orders in one call", async function () {

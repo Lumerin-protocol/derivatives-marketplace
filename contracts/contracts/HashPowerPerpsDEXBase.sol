@@ -244,6 +244,7 @@ abstract contract HashPowerPerpsDEXBase is
     error InvalidTimeInForce();
     error InvalidReduceQuantity();
     error OrderNotExists();
+    error EmptyBatch();
     error ZeroAddress();
     /// @notice The margin engine aggregates a different vault than this venue settles into.
     error VaultMismatch();
