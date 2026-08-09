@@ -465,18 +465,14 @@ abstract contract HashPowerPerpsDEXBase is
         uint256 makerAbs = M.abs(makerQty);
         uint256 remainingAbs = M.abs(_remainingQty);
         uint256 cancelAmt = makerAbs < remainingAbs ? makerAbs : remainingAbs;
-        bool makerIsBid = makerQty > 0;
-
-        _subtractOrderAggregate(_taker, makerIsBid, makerPrice, makerAbs, makerAbs - cancelAmt);
 
         if (cancelAmt == makerAbs) {
-            _removeOrder(_makerOrderId, _taker, makerPrice, makerIsBid);
+            _removeRestingOrder(_makerOrderId, _taker, makerPrice, makerQty, false);
             emit OrderCancelled(_makerOrderId, _taker);
         } else {
             uint256 reducedMakerAbs = makerAbs - cancelAmt;
             int256 newMakerQty = M.toSigned(makerQty > 0, reducedMakerAbs);
-            _makerOrder.quantity = newMakerQty;
-            emit OrderUpdated(_makerOrderId, _taker, newMakerQty);
+            _reduceRestingOrder(_makerOrderId, _makerOrder, newMakerQty);
         }
 
         return _remainingQty > 0 ? int256(remainingAbs - cancelAmt) : -int256(remainingAbs - cancelAmt);
@@ -520,12 +516,10 @@ abstract contract HashPowerPerpsDEXBase is
         _notifyFill(_pointsHook, makerParticipant, _taker, notionalValue, makerFee, takerFee, makerPrice, _refPrice);
 
         int256 newMakerQty = _reduceQuantity(makerQty, matchAmt);
-        _subtractOrderAggregate(makerParticipant, _remainingQty < 0, makerPrice, M.abs(makerQty), M.abs(newMakerQty));
-        _makerOrder.quantity = newMakerQty;
-
-        emit OrderUpdated(_makerOrderId, makerParticipant, newMakerQty);
         if (newMakerQty == 0) {
-            _removeOrder(_makerOrderId, makerParticipant, makerPrice, _remainingQty < 0);
+            _removeRestingOrder(_makerOrderId, makerParticipant, makerPrice, makerQty, true);
+        } else {
+            _reduceRestingOrder(_makerOrderId, _makerOrder, newMakerQty);
         }
 
         unchecked {
@@ -603,12 +597,40 @@ abstract contract HashPowerPerpsDEXBase is
         userOrderAggregate[_user] = aggregate;
     }
 
-    /// @notice Remove an order from the book (internal)
-    /// @dev Callers are responsible for updating the aggregate before this call.
-    function _removeOrder(bytes32 _orderId, address _participant, uint256 _price, bool _isBid) internal {
-        _priceOrderIds(_price, _isBid).remove(uint256(_orderId));
+    /// @dev Remove one canonical resting order from every per-order accounting structure.
+    ///      Price-ladder cleanup stays with the caller because matching and reset walk a whole
+    ///      level and deliberately remove that level only after its queue traversal finishes.
+    ///      Full fills request their historical zero-size update between aggregate/storage
+    ///      reduction and structural removal; cancellation-style routes emit their own events.
+    function _removeRestingOrder(
+        bytes32 _orderId,
+        address _participant,
+        uint256 _price,
+        int256 _quantity,
+        bool _emitFillUpdate
+    )
+        internal
+    {
+        bool isBid = _quantity > 0;
+        _subtractOrderAggregate(_participant, isBid, _price, M.abs(_quantity), 0);
+        if (_emitFillUpdate) {
+            orders[_orderId].quantity = 0;
+            emit OrderUpdated(_orderId, _participant, 0);
+        }
+        _priceOrderIds(_price, isBid).remove(uint256(_orderId));
         participantOrderIdsIndex[_participant].remove(_orderId);
         delete orders[_orderId];
+    }
+
+    /// @dev Shrink one canonical resting order in place, preserving its queue/FIFO position.
+    function _reduceRestingOrder(bytes32 _orderId, Order storage _order, int256 _newQuantity) internal {
+        int256 oldQuantity = _order.quantity;
+        address participant = _order.participant;
+        _subtractOrderAggregate(
+            participant, oldQuantity > 0, _order.price, M.abs(oldQuantity), M.abs(_newQuantity)
+        );
+        _order.quantity = _newQuantity;
+        emit OrderUpdated(_orderId, participant, _newQuantity);
     }
 
     // ── Internal helpers: position accounting ─────────────────────────────────
@@ -1102,10 +1124,7 @@ abstract contract HashPowerPerpsDEXBase is
             bytes32 orderId = bytes32(orderIdUint);
             Order storage order = orders[orderId];
             address participant = order.participant;
-            _subtractOrderAggregate(participant, _isBid, _price, M.abs(order.quantity), 0);
-            participantOrderIdsIndex[participant].remove(orderId);
-            delete orders[orderId];
-            queue.remove(orderIdUint);
+            _removeRestingOrder(orderId, participant, _price, order.quantity, false);
             orderIdUint = nextOrderIdUint;
         }
     }

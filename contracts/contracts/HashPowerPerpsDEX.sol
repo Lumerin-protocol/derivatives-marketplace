@@ -223,8 +223,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         }
 
         bool isBid = order.quantity > 0;
-        _subtractOrderAggregate(order.participant, isBid, order.price, M.abs(order.quantity), 0);
-        _removeOrder(_orderId, order.participant, order.price, isBid);
+        _removeRestingOrder(_orderId, order.participant, order.price, order.quantity, false);
         _removePriceLevelIfEmpty(_priceOrderIds(order.price, isBid), order.price, isBid);
         emit OrderCancelled(_orderId, order.participant);
     }
@@ -247,10 +246,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
             if (restingMargin < minimumMarginPerOrder) revert OrderMarginTooLow();
         }
 
-        bool isBid = oldQty > 0;
-        _subtractOrderAggregate(order.participant, isBid, order.price, oldAbs, newAbs);
-        order.quantity = _newQuantity;
-        emit OrderUpdated(_orderId, order.participant, _newQuantity);
+        _reduceRestingOrder(_orderId, order, _newQuantity);
     }
 
     /// @notice Check if a user's position or resting orders can be liquidated.
@@ -355,8 +351,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         bool isBid = _order.quantity > 0;
         uint256 orderAbsQty = M.abs(_order.quantity);
         uint256 orderNotional = _calculateValue(_order.price, orderAbsQty);
-        _subtractOrderAggregate(_user, isBid, _order.price, orderAbsQty, 0);
-        _removeOrder(_orderId, _user, _order.price, isBid);
+        _removeRestingOrder(_orderId, _user, _order.price, _order.quantity, false);
         _removePriceLevelIfEmpty(_priceOrderIds(_order.price, isBid), _order.price, isBid);
 
         uint256 liqFee = _chargeLiquidationFee(_user, orderNotional);
