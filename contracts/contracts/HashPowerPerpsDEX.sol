@@ -21,7 +21,6 @@ import { HashPowerPerpsDEXAdmin } from "./HashPowerPerpsDEXAdmin.sol";
 /// @dev on their collateral balance and withdraw later when collateral is added
 contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     using EnumerableSet for EnumerableSet.Bytes32Set;
-    using EnumerableSet for EnumerableSet.AddressSet;
     using StructuredLinkedList for StructuredLinkedList.List;
 
     /// @notice Implementation version, bumped on every deployed change.
@@ -489,11 +488,6 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         uint256 sellMark = _calculateValue(currentPrice, sellQty);
         uint256 sellVal = aggregate.sellValue;
         if (sellMark > sellVal) view_.sellOrderFillLoss = sellMark - sellVal;
-    }
-
-    /// @notice Get all users with positions
-    function getUsersWithPositions() external view returns (address[] memory) {
-        return usersWithPositions.values();
     }
 
     /// @notice Get total unrealized PnL for a user (including pending funding)

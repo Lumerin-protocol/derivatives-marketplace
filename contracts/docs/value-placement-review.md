@@ -70,9 +70,8 @@ All setters now emit events. Previously `setOracle` and `setPortfolioMargin` wer
 
 These are **remnants from before the PME integration**. The contract used to compute margin internally with these percentages. Now all margin is delegated to `portfolioMargin.computePortfolioIM/MM()`. The variables and their events are dead code.
 
-They're emitted from `resetState()` (test-only), which confirms they're treated as config state, but **nothing ever writes them** — no initialize arg, no setter.
-
-**Action**: Replace with `_gap` slots to preserve storage layout, or give them setters and actually use them as fallback/default values. If they stay dead, remove the events from `resetState()`.
+They were replaced with gap slots; participant reset no longer emits unrelated
+configuration events.
 
 ---
 
@@ -109,7 +108,8 @@ All config setters now emit events:
 | `priceOrdersLongQueue` / `priceOrdersShortQueue` | FIFO queues at each price |
 | `participantOrderIdsIndex` | User → order IDs lookup |
 | `activeBidPrices` / `activeAskPrices` | Sorted price ladders |
-| `positions` / `usersWithPositions` | Position state |
+| `positions` | Position state |
+| `usersWithPositions` | Dead legacy enumeration slot retained only for proxy layout compatibility |
 
 All fine.
 

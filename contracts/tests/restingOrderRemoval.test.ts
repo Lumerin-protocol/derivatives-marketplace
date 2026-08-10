@@ -259,7 +259,9 @@ describe("HashPowerPerpsDEX resting-order removal invariants", function () {
       account: buyer.account,
     });
     const orderIds = await perps.read.getUserOrders([buyer.account.address]);
-    await perps.write.resetState({ account: owner.account });
+    await perps.write.resetParticipantState([[buyer.account.address]], {
+      account: owner.account,
+    });
 
     await assertUserOrderState(perps, buyer.account.address, [], [...orderIds]);
     await assertPriceLevel(perps, bidPrice, true, 0n);

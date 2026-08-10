@@ -83,7 +83,9 @@ abstract contract HashPowerPerpsDEXBase is
 
     // Position mappings - net position per user
     mapping(address => Position) internal positions; // Net position per user
-    EnumerableSet.AddressSet internal usersWithPositions; // Users with active positions
+    /// @dev Dead legacy enumeration slot. Retained untouched for upgrade storage compatibility;
+    ///      never read, written, reused, or cleared.
+    EnumerableSet.AddressSet internal usersWithPositions;
 
     // Reserve and fees
     int16 public takerFeeBps; // Taker fee in basis points (e.g., 5 = 0.05%)
@@ -758,7 +760,6 @@ abstract contract HashPowerPerpsDEXBase is
         if (position.netQuantity == 0) {
             position.netQuantity = _quantity;
             position.aggregatedEntryPrice = _tradePrice;
-            usersWithPositions.add(_user);
             userFundingSnapshot[_user] = cumulativeFundingPerUnit;
             return;
         }
@@ -798,7 +799,6 @@ abstract contract HashPowerPerpsDEXBase is
         } else if (position.netQuantity + _quantity == 0) {
             position.netQuantity = 0;
             position.aggregatedEntryPrice = 0;
-            usersWithPositions.remove(_user);
         } else {
             position.netQuantity += _quantity;
         }
@@ -849,7 +849,6 @@ abstract contract HashPowerPerpsDEXBase is
         uint256 liqFee = _chargeLiquidationFee(_user, closedNotional);
 
         delete positions[_user];
-        usersWithPositions.remove(_user);
 
         emit PositionLiquidated(_user, _msgSender(), closedQuantity, pnl, liqFee);
         _notifyLiquidation(_msgSender(), liqFee);
@@ -1159,17 +1158,26 @@ abstract contract HashPowerPerpsDEXBase is
 
     // ── Internal helpers: admin ───────────────────────────────────────────────
 
-    /// @notice Clear all orders at a single price level and remove them from participant indexes
-    function _clearPriceLevelOrders(uint256 _price, bool _isBid) internal {
-        StructuredLinkedList.List storage queue = _priceOrderIds(_price, _isBid);
-        (, uint256 orderIdUint) = queue.getNextNode(0);
-        while (orderIdUint != 0) {
-            (, uint256 nextOrderIdUint) = queue.getNextNode(orderIdUint);
-            bytes32 orderId = bytes32(orderIdUint);
+    /// @dev Clear one explicitly supplied participant without touching global funding or
+    ///      the monotonic order nonce. Duplicate participants are safe because every cleanup
+    ///      operation is idempotent once the participant has no remaining state.
+    function _resetParticipantState(address _participant) internal {
+        bytes32[] memory orderIds = participantOrderIdsIndex[_participant].values();
+        uint256 len = orderIds.length;
+        for (uint256 i = 0; i < len; i++) {
+            bytes32 orderId = orderIds[i];
             Order storage order = orders[orderId];
-            address participant = order.participant;
-            _removeRestingOrder(orderId, participant, _price, order.quantity, false);
-            orderIdUint = nextOrderIdUint;
+            uint256 price = order.price;
+            int256 quantity = order.quantity;
+            bool isBid = quantity > 0;
+            StructuredLinkedList.List storage queue = _priceOrderIds(price, isBid);
+            _removeRestingOrder(orderId, _participant, price, quantity, false);
+            _removePriceLevelIfEmpty(queue, price, isBid);
         }
+
+        delete userOrderAggregate[_participant];
+        delete positions[_participant];
+        delete userFundingSnapshot[_participant];
     }
+
 }

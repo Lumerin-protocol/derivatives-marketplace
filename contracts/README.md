@@ -160,6 +160,26 @@ preceding 180 days and confirms candidates against `getUserOrders`. Set
 `ORDER_CACHE_WRITE_BATCH_SIZE` batches (default 25) and verifies all four fields
 against a canonical order scan.
 
+#### Explicit reset and migration participants
+
+The contract does not enumerate position holders on chain. The legacy
+`usersWithPositions` storage slot remains dead and untouched solely for proxy
+layout compatibility.
+
+Testnet resets require an explicit comma-separated participant list:
+
+```sh
+PERPS_ADDRESS=0x... RESET_PARTICIPANTS=0x...,0x... pnpm reset:perps
+```
+
+The script deduplicates addresses and calls `resetParticipantState(address[])` in
+`RESET_BATCH_SIZE` batches (default 25). Only supplied accounts have their
+orders, position, and funding snapshot cleared; collateral, global funding, and
+the monotonic order nonce are preserved. Operators must build a complete list
+from authoritative configuration or indexed event history. Any future net-entry
+position migration must likewise accept explicit participant arrays and must not
+read the dead enumeration slot.
+
 ### Funding Fees
 
 Funding fees keep the perpetual price anchored to the spot price by charging/rewarding position holders based on the deviation between the **mark price** (order book mid-price) and the **index price** (oracle). When mark > index, longs pay shorts (and vice versa). Funding accrues continuously (per-second) and settles lazily through the reserve pool when users interact.

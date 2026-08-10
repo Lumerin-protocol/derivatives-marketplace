@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
-import { getAddress, maxUint256, parseEventLogs } from "viem";
+import { maxUint256, parseEventLogs } from "viem";
 import {
   deployPerpsWithPositionsFixture,
   deployPerpsWithLiquidatablePositionFixture,
@@ -62,7 +62,7 @@ describe("HashPowerPerpsDEX - liquidatePosition", function () {
     assert.ok(liquidatorBalanceAfter >= liquidatorBalanceBefore);
   });
 
-  it("should clear position after liquidation", async function () {
+  it("should leave the liquidated position empty", async function () {
     const data = await networkHelpers.loadFixture(deployPerpsWithLiquidatablePositionFixture);
     const { contracts, accounts } = data;
     const { perps } = contracts;
@@ -70,13 +70,12 @@ describe("HashPowerPerpsDEX - liquidatePosition", function () {
 
     await data.makeLiquidatable();
 
-    const usersBefore = await perps.read.getUsersWithPositions();
-    assert.ok(usersBefore.map((u: string) => getAddress(u)).includes(getAddress(seller.account.address)));
-
     await perps.write.liquidatePosition([seller.account.address, maxUint256], { account: buyer2.account });
 
-    const usersAfter = await perps.read.getUsersWithPositions();
-    assert.ok(!usersAfter.map((u: string) => getAddress(u)).includes(getAddress(seller.account.address)));
+    assert.deepEqual(await perps.read.getUserPosition([seller.account.address]), {
+      netQuantity: 0n,
+      aggregatedEntryPrice: 0n,
+    });
   });
 
   it("should emit PositionLiquidated event", async function () {

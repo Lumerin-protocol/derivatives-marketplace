@@ -1,8 +1,6 @@
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
-import { StructuredLinkedList } from "solidity-linked-list/contracts/StructuredLinkedList.sol";
 import { AggregatorV3Interface } from "./interfaces/AggregatorV3Interface.sol";
 import { IPortfolioMarginEngine } from "collateral-margin/contracts/contracts/interfaces/IPortfolioMarginEngine.sol";
 import { IPointsHook } from "collateral-margin/contracts/contracts/interfaces/IPointsHook.sol";
@@ -25,9 +23,6 @@ import { HashPowerPerpsDEXBase } from "./HashPowerPerpsDEXBase.sol";
 ///      needed, declare it in {HashPowerPerpsDEXBase} at the end alongside the existing
 ///      gap slots.
 abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
-    using EnumerableSet for EnumerableSet.AddressSet;
-    using StructuredLinkedList for StructuredLinkedList.List;
-
     /// @notice Authorize upgrade (only owner)
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
 
@@ -181,42 +176,14 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
 
     // ── Testnet maintenance ───────────────────────────────────────────────────
 
-    /// @notice Reset all trading state (orders, positions, funding, nonce)
-    /// @dev Intended for testnet use to wipe state without redeploying. ERC20 balances are not touched.
-    function resetState() external onlyOwner {
-        // Clear all bid orders and price levels
-        (, uint256 price) = activeBidPrices.getNextNode(0);
-        while (price != 0) {
-            (, uint256 nextPrice) = activeBidPrices.getNextNode(price);
-            _clearPriceLevelOrders(price, true);
-            activeBidPrices.remove(price);
-            price = nextPrice;
+    /// @notice Clear orders, position, and funding snapshot for explicit participants.
+    /// @dev Intended for testnet resets and migrations. The caller must supply the complete
+    ///      participant set; the contract deliberately performs no global enumeration.
+    ///      Global funding, configuration, collateral balances, and the order nonce are untouched.
+    function resetParticipantState(address[] calldata _participants) external onlyOwner {
+        uint256 len = _participants.length;
+        for (uint256 i = 0; i < len; i++) {
+            _resetParticipantState(_participants[i]);
         }
-
-        // Clear all ask orders and price levels
-        (, price) = activeAskPrices.getNextNode(0);
-        while (price != 0) {
-            (, uint256 nextPrice) = activeAskPrices.getNextNode(price);
-            _clearPriceLevelOrders(price, false);
-            activeAskPrices.remove(price);
-            price = nextPrice;
-        }
-
-        // Clear all positions and per-user funding snapshots
-        address[] memory users = usersWithPositions.values();
-        for (uint256 i = 0; i < users.length; i++) {
-            delete userFundingSnapshot[users[i]];
-            delete positions[users[i]];
-            usersWithPositions.remove(users[i]);
-        }
-
-        cumulativeFundingPerUnit = 0;
-        lastFundingUpdateTime = 0;
-        // nonce = 0;
-        emit LiquidationFeeBpsUpdated(liquidationFeeBps);
-        emit LiquidatorShareBpsUpdated(liquidatorShareBps);
-        emit MatchFeeUpdated(takerFeeBps, makerFeeBps);
-        emit MinimumMarginPerOrderUpdated(minimumMarginPerOrder);
-        emit FundingParametersUpdated(fundingRateMaxBps, fundingPeriod);
     }
 }

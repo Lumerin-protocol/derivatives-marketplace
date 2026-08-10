@@ -257,7 +257,9 @@ describe("HashPowerPerpsDEX order aggregate cache migration", function () {
       [price + config.minimumPriceIncrement, -qty, TimeInForce.GTC],
       { account: buyer.account },
     );
-    await perps.write.resetState({ account: owner.account });
+    await perps.write.resetParticipantState([[buyer.account.address]], {
+      account: owner.account,
+    });
 
     assert.deepEqual(await perps.read.getOrderAggregate([buyer.account.address]), {
       buyQty: 0n,

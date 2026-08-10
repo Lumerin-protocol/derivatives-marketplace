@@ -10,9 +10,8 @@
 
 `_matchWithOppositeOrders` walks price levels; `_matchOrdersAtPrice` walks the FIFO queue at each level. A wide limit order can traverse the entire book. 100 levels × 50 orders = 5,000 iterations at ~5-10K gas each = 25-50M gas, exceeding block limits.
 
-### Bottleneck 3: Unbounded View Functions
+### Bottleneck 3: Unbounded View Function
 
-- `getUsersWithPositions()` — returns all users, no pagination
 - `getQuantityAtPrice()` — iterates all orders at a price level
 
 ### Bottleneck 4: Price Level Pollution / DoS
@@ -135,7 +134,7 @@ These can be applied to the current linked-list design to mitigate the worst iss
 1. **Add `MAX_PRICE_LEVELS_PER_SIDE`** — cap active bid/ask price levels (200 per side), revert on overflow ✅
 2. **Add `maxFills` parameter to `createOrder`** — let the caller cap matching iterations per tx
 3. **Use portfolio IM for order collateral** — `minimumMarginPerOrder` is retained only as a compatibility value and is no longer enforced; PME portfolio IM is canonical
-4. **Paginate view functions** — `getUsersWithPositions(offset, limit)`, `getQuantityAtPrice` with iteration cap
+4. **Bound depth views** — add an iteration cap to `getQuantityAtPrice`
 
 ## Recommended Long-Term Architecture
 
