@@ -70,7 +70,8 @@ describe("HashPowerPerpsDEX.resetState", function () {
     );
     const receipt = await (await viem.getPublicClient()).waitForTransactionReceipt({ hash });
     const events = parseEventLogs({ abi: perps.abi, logs: receipt.logs });
-    assert.equal(events.some((event) => event.eventName === "MatchFeeUpdated"), false);
+    assert.equal(events.some((event) => event.eventName === "MakerFeeBpsUpdated"), false);
+    assert.equal(events.some((event) => event.eventName === "TakerFeeBpsUpdated"), false);
 
     await perps.write.resetState([[buyer.account.address]], {
       account: owner.account,

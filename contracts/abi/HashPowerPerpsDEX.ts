@@ -49,11 +49,6 @@ export const HashPowerPerpsDEXAbi = [
   },
   {
     "inputs": [],
-    "name": "InsufficientCollateral",
-    "type": "error"
-  },
-  {
-    "inputs": [],
     "name": "InsufficientMarginBalance",
     "type": "error"
   },
@@ -65,11 +60,6 @@ export const HashPowerPerpsDEXAbi = [
   {
     "inputs": [],
     "name": "InsuranceFundNotConfigured",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "InvalidCollateralDecimals",
     "type": "error"
   },
   {
@@ -218,6 +208,11 @@ export const HashPowerPerpsDEXAbi = [
       }
     ],
     "name": "UUPSUnsupportedProxiableUUID",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "UnsupportedTokenDecimals",
     "type": "error"
   },
   {
@@ -391,25 +386,6 @@ export const HashPowerPerpsDEXAbi = [
       }
     ],
     "name": "MakerFeeBpsUpdated",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": false,
-        "internalType": "int16",
-        "name": "newTakerFeeBps",
-        "type": "int16"
-      },
-      {
-        "indexed": false,
-        "internalType": "int16",
-        "name": "newMakerFeeBps",
-        "type": "int16"
-      }
-    ],
-    "name": "MatchFeeUpdated",
     "type": "event"
   },
   {

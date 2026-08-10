@@ -27,7 +27,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @dev Lives here rather than in {HashPowerPerpsDEXBase} so that a diff to
     ///      this file and the version it ships under stay in the same place,
     ///      mirroring {Futures}.
-    string public constant VERSION = "4.0.0";
+    string public constant VERSION = "4.2.0";
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ICollateralVault _vault) HashPowerPerpsDEXBase(_vault) { }
@@ -36,7 +36,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @param _priceOracle The Chainlink-style price oracle
     /// @param _vault Must match the immutable constructor vault. The argument is retained
     ///        to preserve the historical initializer signature.
-    function initialize(AggregatorV3Interface _priceOracle, ICollateralVault _vault) external initializer {
+    function initialize(AggregatorV3Interface _priceOracle, ICollateralVault _vault) public initializer {
         _validateVault(_vault);
         __Ownable_init(_msgSender());
         __UUPSUpgradeable_init();
@@ -87,7 +87,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
             maxAllowedIm = portfolioMargin.computePortfolioIM(sender);
         }
         _createOrder(sender, _price, _quantity, _tif);
-        _ensureInitialMargin(sender, maxAllowedIm);
+        _ensureNoCollateralDeficit(sender, maxAllowedIm);
     }
 
     /// @notice Batched placement with per-leg time-in-force — IM check once at the end.
@@ -108,7 +108,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
             _validateOrderIntent(intent.price, intent.quantity, intent.timeInForce);
             _createOrder(sender, intent.price, intent.quantity, intent.timeInForce);
         }
-        _ensureInitialMargin(sender, 0);
+        _ensureNoCollateralDeficit(sender, 0);
     }
 
     /// @notice Cancel, reduce-in-place, then place orders — IM check once at the end.
@@ -139,7 +139,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
             _validateOrderIntent(intent.price, intent.quantity, intent.timeInForce);
             _createOrder(sender, intent.price, intent.quantity, intent.timeInForce);
         }
-        if (createLen != 0) _ensureInitialMargin(sender, 0);
+        if (createLen != 0) _ensureNoCollateralDeficit(sender, 0);
     }
 
     /// @notice Shrink a resting order owned by the caller without losing FIFO priority.
@@ -232,6 +232,17 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         _reduceRestingOrder(_orderId, order, _newQuantity);
     }
 
+    /// @notice Whether the participant has margin-relevant resting-order delta.
+    /// @dev Part of the ILinearMarket surface read by the portfolio margin engine. The
+    ///      liquidatability predicate itself lives on the engine
+    ///      ({IPortfolioMarginEngine-isLiquidatable}) — it is a property of the portfolio,
+    ///      not of any single venue. Combine it with this view and the position views to
+    ///      tell whether this venue holds anything actionable.
+    function hasRestingOrderDelta(address _user) external view returns (bool) {
+        OrderAggregate storage aggregate = userOrderAggregate[_user];
+        return aggregate.buyQty != 0 || aggregate.sellQty != 0;
+    }
+
     /// @notice Force-close a single underwater user's position. Permissionless.
     /// @dev Strict orders-first invariant: reverts with `OrdersStillOpen` if the user has any
     ///      open orders anywhere in the portfolio, not merely on this book. The keeper must
@@ -264,6 +275,8 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
 
         // Full close: delete the position and settle the whole PnL (bad-debt path). No IM buffer
         // guard — the keeper deliberately deleveraged the entire position (deep underwater).
+        // Single-position venue: a full close leaves no residual risk here, unlike Futures
+        // where a full close of one expiry can still leave other legs above IM.
         if (closeAbs == absNet) {
             _doLiquidatePosition(_user, currentPrice);
             return;
@@ -275,13 +288,18 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         uint256 closedNotional = _calculateValue(currentPrice, closeAbs);
         uint256 liqFee = _chargeLiquidationFee(_user, closedNotional);
 
-        // Over-liquidation guard: a position remains here, so if there is a real IM buffer
-        // (`im > mm`) the leftover balance must sit at/under IM.
-        (uint256 im, uint256 mm) = portfolioMargin.computePortfolioMargins(_user);
-        if (im > mm && vault.balanceOf(_user) > im) revert OverLiquidation();
+        _revertIfOverLiquidated(_user);
 
         emit PositionLiquidated(_user, _msgSender(), signedClose, pnl, liqFee);
         _notifyLiquidation(_msgSender(), liqFee);
+    }
+
+    /// @dev Over-liquidation guard: leftover balance must sit at/under IM when a real IM>MM
+    ///      buffer remains. Shared shape with Futures; called only on the partial-close path
+    ///      here because a full close is a complete venue exit.
+    function _revertIfOverLiquidated(address _user) internal view {
+        (uint256 im, uint256 mm) = portfolioMargin.computePortfolioMargins(_user);
+        if (im > mm && vault.balanceOf(_user) > im) revert OverLiquidation();
     }
 
     /// @notice Force-cancel a single resting order owned by an underwater user. Permissionless.
@@ -340,7 +358,10 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         _notifyLiquidation(_msgSender(), liqFee);
     }
 
-    /// @notice Simulate an order: how much would match and at what average price (view, no state change).
+    /// @notice Simulate a limit order: filled qty, VWAP, and remainder (view, no state change).
+    /// @dev Skips own resting liquidity (matches on-match STP net-out). Self-trade is judged
+    ///      against the caller, so simulating for another account requires setting the
+    ///      `eth_call` `from` field to that account.
     /// @param _price Limit price (same as createOrder)
     /// @param _quantity Order quantity (positive = buy, negative = sell)
     /// @return filledQuantity Signed quantity that would be matched (same sign as _quantity)
@@ -369,18 +390,19 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
 
             while (orderIdUint != 0 && remaining != 0) {
                 Order storage makerOrder = orders[bytes32(orderIdUint)];
-                // STP: self-cross nets out, not a fill
-                if (makerOrder.participant == _msgSender()) {
-                    uint256 selfAmt = M.min(M.abs(makerOrder.quantity), M.abs(remaining));
-                    remaining -= _toSignedQuantity(selfAmt, remaining);
-                    (, orderIdUint) = orderQueue.getNextNode(orderIdUint);
-                    continue;
-                }
-                uint256 matchAmt = M.min(M.abs(makerOrder.quantity), M.abs(remaining));
-                if (matchAmt > 0) {
-                    totalNotional += _calculateValue(makerOrder.price, matchAmt);
-                    totalFilledAbs += matchAmt;
-                    remaining -= _toSignedQuantity(matchAmt, remaining);
+                // STP: own resting size would net out, not fill.
+                if (makerOrder.participant != _msgSender() && makerOrder.quantity != 0) {
+                    uint256 matchAmt = M.min(M.abs(makerOrder.quantity), M.abs(remaining));
+                    if (matchAmt > 0) {
+                        // `currentPrice` equals `makerOrder.price` at this level; use the
+                        // ladder cursor so the fill source matches Futures.
+                        totalNotional += _calculateValue(currentPrice, matchAmt);
+                        totalFilledAbs += matchAmt;
+                        remaining -= _toSignedQuantity(matchAmt, remaining);
+                    }
+                } else if (makerOrder.participant == _msgSender() && makerOrder.quantity != 0) {
+                    uint256 cancelAmt = M.min(M.abs(makerOrder.quantity), M.abs(remaining));
+                    remaining -= _toSignedQuantity(cancelAmt, remaining);
                 }
                 (, orderIdUint) = orderQueue.getNextNode(orderIdUint);
             }
@@ -481,7 +503,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         return pnl;
     }
 
-    /// @notice Get order book depth (active price levels)
+    /// @notice Active bid/ask price levels (bids high→low, asks low→high).
     /// @param _maxLevels Maximum number of price levels to return per side
     /// @return bids Array of bid prices (highest first)
     /// @return asks Array of ask prices (lowest first)
@@ -490,30 +512,11 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         view
         returns (uint256[] memory bids, uint256[] memory asks)
     {
-        uint256 bidCount = M.min(activeBidPrices.sizeOf(), _maxLevels);
-        uint256 askCount = M.min(activeAskPrices.sizeOf(), _maxLevels);
-
-        bids = new uint256[](bidCount);
-        asks = new uint256[](askCount);
-
-        // Get bid prices
-        (, uint256 current) = activeBidPrices.getNextNode(0);
-        for (uint256 i = 0; i < bidCount && current != 0; i++) {
-            bids[i] = current;
-            (, current) = activeBidPrices.getNextNode(current);
-        }
-
-        // Get ask prices
-        (, current) = activeAskPrices.getNextNode(0);
-        for (uint256 i = 0; i < askCount && current != 0; i++) {
-            asks[i] = current;
-            (, current) = activeAskPrices.getNextNode(current);
-        }
-
-        return (bids, asks);
+        bids = _activePricesSlice(activeBidPrices, _maxLevels);
+        asks = _activePricesSlice(activeAskPrices, _maxLevels);
     }
 
-    /// @notice Get total quantity at a specific price level
+    /// @notice Sum of resting abs quantity at one (price, side).
     /// @param _price The price level
     /// @param _isBid True for bid side, false for ask side
     /// @return The total absolute quantity at this price level
@@ -521,24 +524,19 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         StructuredLinkedList.List storage orderQueue = _priceOrderIds(_price, _isBid);
 
         uint256 total = 0;
+        uint256 size = orderQueue.sizeOf();
+        if (size == 0) return 0;
+
         (, uint256 orderId) = orderQueue.getNextNode(0);
-        while (orderId != 0) {
-            Order storage order = orders[bytes32(orderId)];
-            total += M.abs(order.quantity);
+        for (uint256 i = 0; i < size && orderId != 0; i++) {
+            total += M.abs(orders[bytes32(orderId)].quantity);
             (, orderId) = orderQueue.getNextNode(orderId);
         }
-
         return total;
     }
 
     /// @notice Cached resting-order quantities and notionals per side for a user.
     function getOrderAggregate(address _user) external view returns (OrderAggregate memory aggregate_) {
         return userOrderAggregate[_user];
-    }
-
-    /// @notice Whether the participant has margin-relevant resting-order delta.
-    function hasRestingOrderDelta(address _user) external view returns (bool) {
-        OrderAggregate storage aggregate = userOrderAggregate[_user];
-        return aggregate.buyQty != 0 || aggregate.sellQty != 0;
     }
 }

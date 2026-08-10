@@ -200,7 +200,6 @@ abstract contract HashPowerPerpsDEXBase is
         uint256 makerEntryPriceAfter,
         uint256 takerEntryPriceAfter
     );
-    event MatchFeeUpdated(int16 newTakerFeeBps, int16 newMakerFeeBps);
     event MakerFeeBpsUpdated(int16 newMakerFeeBps);
     event TakerFeeBpsUpdated(int16 newTakerFeeBps);
     event LiquidationFeeBpsUpdated(uint16 newLiquidationFeeBps);
@@ -227,7 +226,6 @@ abstract contract HashPowerPerpsDEXBase is
     error InvalidPrice();
     error InvalidQty();
     error InsufficientMarginBalance();
-    error InsufficientCollateral(); // The user wants to remove more collateral than they have
     error OracleStale();
     error InvalidOracle();
     error ValueOutOfRange(int256 min, int256 max);
@@ -241,7 +239,7 @@ abstract contract HashPowerPerpsDEXBase is
     error InsufficientReservePool(); // The reserve pool does not have enough collateral to cover user profit
     error InvalidFundingParameters();
     /// @notice Fee magnitude above `MAX_FEE_BPS`, or a maker+taker sum below zero (which
-    ///         would make every match a net outflow from the insurance fund).
+    ///         would make every match a net outflow from the fee pot).
     error InvalidFee();
     /// @dev Deprecated compatibility declaration. Runtime order paths no longer raise it.
     error OrderMarginTooLow();
@@ -260,15 +258,15 @@ abstract contract HashPowerPerpsDEXBase is
     ///      or the call reverted. Which dependency is bad is implied by the setter that reverted.
     error InvalidDependency();
     /// @notice Perps prices, values, and ticks are denominated in six-decimal collateral.
-    error InvalidCollateralDecimals();
+    error UnsupportedTokenDecimals();
 
     /// @param _vault The shared collateral vault. Its `collateralToken()` becomes the underlying ERC20.
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ICollateralVault _vault) {
-        if (address(_vault) == address(0)) revert InsufficientCollateral();
+        if (address(_vault) == address(0)) revert ZeroAddress();
         vault = _vault;
         if (IERC20Metadata(address(_vault.collateralToken())).decimals() != QUANTITY_DECIMALS) {
-            revert InvalidCollateralDecimals();
+            revert UnsupportedTokenDecimals();
         }
         _disableInitializers();
     }
@@ -278,8 +276,8 @@ abstract contract HashPowerPerpsDEXBase is
     /// @dev Validates a proposed (maker, taker) fee pair. Both bounds matter:
     ///      `MAX_FEE_BPS` keeps the unreserved fee small relative to the MM floor, and the
     ///      non-negative sum keeps a match from being a net outflow — without it a maker
-    ///      rebate exceeding the taker fee drains the insurance fund once per trade,
-    ///      unbounded in volume.
+    ///      rebate exceeding the taker fee drains the fee pot once per trade, unbounded in
+    ///      volume.
     function _validateFees(int16 _makerFeeBps, int16 _takerFeeBps) internal pure {
         if (_makerFeeBps > MAX_FEE_BPS || _makerFeeBps < -MAX_FEE_BPS) revert InvalidFee();
         if (_takerFeeBps > MAX_FEE_BPS || _takerFeeBps < -MAX_FEE_BPS) revert InvalidFee();
@@ -362,9 +360,10 @@ abstract contract HashPowerPerpsDEXBase is
     ///      block a fill — the hook simply applies no bonus (1x) when the reference is 0.
     function _refPriceForPoints() internal view returns (uint256) {
         (, int256 answer,, uint256 updatedAt,) = priceOracle.latestRoundData();
-        if (_oracleRoundStatus(answer, updatedAt) != 0) return 0;
-        uint256 price = M.scaleDecimals(uint256(answer), oracleDecimals, QUANTITY_DECIMALS);
-        return M.roundToNearest(price, minimumPriceIncrement);
+        // Soft path: never revert on a bad round — points just drop the bonus.
+        if (answer <= 0 || updatedAt == 0 || updatedAt > block.timestamp) return 0;
+        if (block.timestamp - updatedAt > MAX_ORACLE_STALENESS) return 0;
+        return _getMarketPrice(uint256(answer));
     }
 
     /// @dev Notify the points hook of a liquidation. Skipped when no hook is configured. Not
@@ -378,8 +377,8 @@ abstract contract HashPowerPerpsDEXBase is
     // ── Internal helpers: collateral movement ─────────────────────────────────
 
     /// @dev Move collateral between two accounts via the vault.
-    function _move(address _from, address _to, uint256 _amount) internal {
-        vault.internalTransfer(_from, _to, _amount);
+    function _internalTransfer(address from, address to, uint256 amount) internal {
+        vault.internalTransfer(from, to, amount);
     }
 
     /// @dev Shared reserve / fee ledger: vault `INSURANCE_FUND_ADDR` receipt account.
@@ -391,30 +390,47 @@ abstract contract HashPowerPerpsDEXBase is
 
     // ── Internal helpers: pricing ─────────────────────────────────────────────
 
-    /// @return status 0 when usable, 1 when stale, and 2 when invalid.
-    function _oracleRoundStatus(int256 answer, uint256 updatedAt) internal view returns (uint256 status) {
-        if (answer <= 0 || updatedAt == 0 || updatedAt > block.timestamp) return 2;
-        if (block.timestamp - updatedAt > MAX_ORACLE_STALENESS) return 1;
-    }
-
+    /// @dev Hard path for mark price / admin probes. Reverts `InvalidOracle` or
+    ///      `OracleStale`; returns when the round is usable. Soft callers that must
+    ///      not revert (points ref) check the same predicates and return 0 instead.
     function _validateOracleRound(int256 answer, uint256 updatedAt) internal view {
-        uint256 status = _oracleRoundStatus(answer, updatedAt);
-        if (status == 1) revert OracleStale();
-        if (status != 0) revert InvalidOracle();
+        if (answer <= 0 || updatedAt == 0 || updatedAt > block.timestamp) revert InvalidOracle();
+        if (block.timestamp - updatedAt > MAX_ORACLE_STALENESS) revert OracleStale();
     }
 
-    /// @dev Body of {getMarketPrice}: current oracle price scaled to collateral decimals.
-    function _marketPrice() internal view returns (uint256) {
+    /// @dev Raw oracle answer after hard validation (mirrors Futures `_getPrice`).
+    function _getPrice() internal view returns (uint256) {
         (, int256 answer,, uint256 updatedAt,) = priceOracle.latestRoundData();
         _validateOracleRound(answer, updatedAt);
+        return uint256(answer);
+    }
 
-        // Convert oracle price to collateral token decimals (oracle already quotes 1 PH/s/day)
-        uint256 price = M.scaleDecimals(uint256(answer), oracleDecimals, QUANTITY_DECIMALS);
+    /// @dev Scale a raw hashprice answer to venue price units and round to the tick
+    ///      (mirrors Futures `_getMarketPrice`).
+    function _getMarketPrice(uint256 _hashpriceUsd) internal view returns (uint256) {
+        uint256 scaled = M.scaleDecimals(_hashpriceUsd, oracleDecimals, QUANTITY_DECIMALS);
+        return M.roundToNearest(scaled, minimumPriceIncrement);
+    }
 
-        // Round to nearest minimumPriceIncrement
-        price = M.roundToNearest(price, minimumPriceIncrement);
+    /// @dev Body of {getMarketPrice}: hard-validated oracle price in venue units.
+    function _marketPrice() internal view returns (uint256) {
+        return _getMarketPrice(_getPrice());
+    }
 
-        return price;
+    function _activePricesSlice(StructuredLinkedList.List storage priceList, uint256 _maxLevels)
+        internal
+        view
+        returns (uint256[] memory)
+    {
+        uint256 total = priceList.sizeOf();
+        uint256 count = M.min(total, _maxLevels);
+        uint256[] memory out = new uint256[](count);
+        (, uint256 current) = priceList.getNextNode(0);
+        for (uint256 i = 0; i < count && current != 0; i++) {
+            out[i] = current;
+            (, current) = priceList.getNextNode(current);
+        }
+        return out;
     }
 
     // ── Internal helpers: order placement / matching ──────────────────────────
@@ -855,7 +871,7 @@ abstract contract HashPowerPerpsDEXBase is
         int256 entryValue = position.netEntryValue;
         int256 pnl = _signedValue(_currentPrice, position.netQuantity) - entryValue;
 
-        _transferRealizedPnl(_user, pnl);
+        _transferPnl(_insuranceFundAccount(), _user, pnl);
 
         int256 closedQuantity = position.netQuantity;
         uint256 closedNotional = _calculateValue(_currentPrice, M.abs(closedQuantity));
@@ -878,22 +894,38 @@ abstract contract HashPowerPerpsDEXBase is
         returns (int256 pnl)
     {
         pnl = _signedValue(_price, _quantity) - _entryValue;
-        _transferRealizedPnl(_user, pnl);
+        _transferPnl(_insuranceFundAccount(), _user, pnl);
     }
 
-    /// @dev Settle realized PnL against the insurance account without blocking position
-    ///      reduction. The payer contributes everything available and every shortfall is
-    ///      surfaced immediately as bad debt; no deferred claim is created.
-    function _transferRealizedPnl(address _user, int256 _pnl) internal {
+    /// @dev Settle signed PnL from `_from` to `_to` without blocking position reduction.
+    ///      The payer contributes everything available and every shortfall is surfaced
+    ///      immediately as bad debt; no deferred claim is created. Callers pass
+    ///      `(insuranceFund, user, pnl)` so positive PnL credits the user.
+    function _transferPnl(address _from, address _to, int256 _pnl) internal {
         if (_pnl == 0) return;
+        address payer;
+        address receiver;
+        uint256 amount;
+        if (_pnl > 0) {
+            payer = _from;
+            receiver = _to;
+            amount = uint256(_pnl);
+        } else {
+            payer = _to;
+            receiver = _from;
+            amount = uint256(-_pnl);
+        }
 
-        address fund = _insuranceFundAccount();
-        address payer = _pnl > 0 ? fund : _user;
-        address receiver = _pnl > 0 ? _user : fund;
-        uint256 owed = M.abs(_pnl);
-        uint256 paid = M.min(owed, vault.balanceOf(payer));
-        if (paid != 0) _move(payer, receiver, paid);
-        if (paid < owed) emit BadDebt(payer, owed - paid);
+        uint256 available = vault.balanceOf(payer);
+        if (available >= amount) {
+            _internalTransfer(payer, receiver, amount);
+            return;
+        }
+
+        if (available > 0) {
+            _internalTransfer(payer, receiver, available);
+        }
+        emit BadDebt(payer, amount - available);
     }
 
     /// @notice Charge a liquidation fee on the closed notional value, split between
@@ -912,7 +944,7 @@ abstract contract HashPowerPerpsDEXBase is
         if (computedFee == 0) return 0;
 
         uint256 userBal = vault.balanceOf(_user);
-        totalFee = computedFee < userBal ? computedFee : userBal;
+        totalFee = M.min(computedFee, userBal);
         if (totalFee == 0) return 0;
 
         address liquidator = _msgSender();
@@ -920,10 +952,10 @@ abstract contract HashPowerPerpsDEXBase is
         uint256 liquidatorShare = totalFee * uint256(liqShareBps) / BPS;
         uint256 exchangeShare = totalFee - liquidatorShare;
 
-        if (liquidatorShare != 0) _move(_user, liquidator, liquidatorShare);
+        if (liquidatorShare != 0) _internalTransfer(_user, liquidator, liquidatorShare);
         if (exchangeShare != 0) {
             collectedFeesBalance += exchangeShare;
-            _move(_user, address(this), exchangeShare);
+            _internalTransfer(_user, address(this), exchangeShare);
         }
     }
 
@@ -936,9 +968,9 @@ abstract contract HashPowerPerpsDEXBase is
         return _signedValue(_currentPrice, _position.netQuantity) - _position.netEntryValue;
     }
 
-    /// @notice Ensure user meets initial margin requirement.
-    ///         Delegates to the cross-product PortfolioMarginEngine.
-    function _ensureInitialMargin(address _user, uint256 _maxAllowedIm) internal view {
+    /// @notice Ensure the account is not short of portfolio IM (or, when `_maxAllowedIm` is
+    ///         set, that IM did not increase past that ceiling). Delegates to the PME.
+    function _ensureNoCollateralDeficit(address _user, uint256 _maxAllowedIm) internal view {
         uint256 required = portfolioMargin.computePortfolioIM(_user);
         if (vault.balanceOf(_user) < required && required > _maxAllowedIm) {
             revert InsufficientMarginBalance();
@@ -953,8 +985,8 @@ abstract contract HashPowerPerpsDEXBase is
 
     function _validateOrderIntent(uint256 _price, int256 _quantity, TimeInForce _tif) internal pure {
         _validateTIF(_tif);
-        _validateQty(_quantity);
         _validatePrice(_price);
+        _validateQty(_quantity);
     }
 
     function _isLocallyReducing(address _participant, int256 _quantity) internal view returns (bool) {
@@ -1009,41 +1041,45 @@ abstract contract HashPowerPerpsDEXBase is
         return bestAsk;
     }
 
-    /// @notice Transfer a pre-calculated fee between participant and reserve pool
-    /// @param _participant Address of the participant
-    /// @param _fee Signed fee amount (positive = participant pays, negative = rebate)
-    /// @dev Both directions clamp, matching {_settleFunding} and {_chargeLiquidationFee}.
-    ///      The hazard is an ordering one inside the fill, not keeper latency:
-    ///      {_executeMatch} calls {_createPosition}, which settles the maker's funding —
-    ///      clamping to balance and emitting `BadDebt` — and only then charges the maker
-    ///      fee against whatever settlement left behind. An unclamped debit would let a
-    ///      maker whose balance the same transaction just drained revert a stranger's
-    ///      taker order. Coverage of the fee itself rests on the MM floor (`mmSpotShock`
-    ///      on the full resting notional against a fee bounded by `MAX_FEE_BPS`), so this
-    ///      clamp only bites for an account already below MM, where it costs the
-    ///      insurance fund a few bps rather than blocking the book.
+    /// @dev Move a signed trading fee between a participant and the fee pot
+    ///      (`collectedFeesBalance`, held on this contract's vault account).
+    ///
+    ///      Both directions clamp, matching {_transferPnl} and {_chargeLiquidationFee}. The
+    ///      hazard is an ordering one inside the fill, not keeper latency: {_executeMatch}
+    ///      calls {_createPosition}, which settles the maker's funding — clamping to balance
+    ///      and emitting `BadDebt` — and only then charges the maker fee against whatever
+    ///      settlement left behind. An unclamped debit would let a maker whose balance the
+    ///      same transaction just drained revert a stranger's taker order. Coverage of the
+    ///      fee itself rests on the MM floor (`mmSpotShock` on the full resting notional
+    ///      against a fee bounded by `MAX_FEE_BPS`), so the clamp only bites for an account
+    ///      already below MM, where it costs the fee pot a few bps rather than blocking the
+    ///      book.
+    ///
+    ///      A rebate is capped at the pot, so rebates can only ever pay out fees already
+    ///      collected — `makerFeeBps + takerFeeBps >= 0` keeps a single match from being a
+    ///      net outflow, and this keeps a run of them from overdrawing the pot.
     function _transferFee(address _participant, int256 _fee) internal {
         if (_fee == 0) return;
-        if (_fee >= 0) {
+
+        if (_fee > 0) {
             uint256 owed = uint256(_fee);
             uint256 available = vault.balanceOf(_participant);
-            uint256 paid = owed < available ? owed : available;
+            uint256 paid = M.min(owed, available);
             if (paid > 0) {
                 collectedFeesBalance += paid;
-                _move(_participant, address(this), paid);
+                _internalTransfer(_participant, address(this), paid);
             }
             if (paid < owed) {
                 emit BadDebt(_participant, owed - paid);
             }
-        } else {
-            uint256 rebate = uint256(-_fee);
-            uint256 payout = rebate < collectedFeesBalance ? rebate : collectedFeesBalance;
-            uint256 revenueBalance = vault.balanceOf(address(this));
-            if (payout > revenueBalance) payout = revenueBalance;
-            if (payout > 0) {
-                collectedFeesBalance -= payout;
-                _move(address(this), _participant, payout);
-            }
+            return;
+        }
+
+        uint256 rebate = M.min(uint256(-_fee), collectedFeesBalance);
+        rebate = M.min(rebate, vault.balanceOf(address(this)));
+        if (rebate > 0) {
+            collectedFeesBalance -= rebate;
+            _internalTransfer(address(this), _participant, rebate);
         }
     }
 
@@ -1134,10 +1170,10 @@ abstract contract HashPowerPerpsDEXBase is
             uint256 owed = uint256(pendingFunding);
             uint256 userBalance = vault.balanceOf(_user);
             if (userBalance >= owed) {
-                _move(_user, _insuranceFundAccount(), owed);
+                _internalTransfer(_user, _insuranceFundAccount(), owed);
             } else {
                 if (userBalance > 0) {
-                    _move(_user, _insuranceFundAccount(), userBalance);
+                    _internalTransfer(_user, _insuranceFundAccount(), userBalance);
                 }
                 emit BadDebt(_user, owed - userBalance);
             }
@@ -1146,7 +1182,7 @@ abstract contract HashPowerPerpsDEXBase is
             uint256 reserveBalance = vault.balanceOf(_insuranceFundAccount());
             uint256 payout = owed < reserveBalance ? owed : reserveBalance;
             if (payout > 0) {
-                _move(_insuranceFundAccount(), _user, payout);
+                _internalTransfer(_insuranceFundAccount(), _user, payout);
             }
         }
 

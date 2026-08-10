@@ -123,7 +123,7 @@ describe("HashPowerPerpsDEX - getMarketPrice", function () {
     const eighteenDecimalVault = await deployVault(18);
     await assert.rejects(
       viem.deployContract("HashPowerPerpsDEX", [eighteenDecimalVault.address]),
-      /InvalidCollateralDecimals/,
+      /UnsupportedTokenDecimals/,
     );
   });
 

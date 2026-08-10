@@ -85,7 +85,7 @@
   },
   {
     "inputs": [],
-    "name": "InsufficientCollateral",
+    "name": "UnsupportedTokenDecimals",
     "type": "error"
   },
   {
@@ -230,11 +230,6 @@
       }
     ],
     "name": "ERC20InvalidSender",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "InvalidCollateralDecimals",
     "type": "error"
   },
   {
