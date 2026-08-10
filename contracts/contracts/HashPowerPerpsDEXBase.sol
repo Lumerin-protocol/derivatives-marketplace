@@ -1172,7 +1172,7 @@ abstract contract HashPowerPerpsDEXBase is
     /// @dev Clear one explicitly supplied participant without touching global funding or
     ///      the monotonic order nonce. Duplicate participants are safe because every cleanup
     ///      operation is idempotent once the participant has no remaining state.
-    function _resetParticipantState(address _participant) internal {
+    function _resetStateForParticipant(address _participant) internal {
         // Historical orders can predate the aggregate cache. Rebuild before subtracting
         // each order so an atomic upgrade reset cannot underflow on legacy state.
         _rebuildOrderAggregateCache(_participant);

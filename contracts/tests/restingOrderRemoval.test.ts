@@ -241,7 +241,7 @@ describe("HashPowerPerpsDEX resting-order removal invariants", function () {
     await assertPriceLevel(perps, restingPrice, false, 0n);
   });
 
-  it("routes reset cleanup through the same full-removal invariants", async function () {
+  it("routes resetState cleanup through the same full-removal invariants", async function () {
     const { contracts, accounts, config } = await networkHelpers.loadFixture(
       deployPerpsWithCollateralFixture,
     );
@@ -259,7 +259,7 @@ describe("HashPowerPerpsDEX resting-order removal invariants", function () {
       account: buyer.account,
     });
     const orderIds = await perps.read.getUserOrders([buyer.account.address]);
-    await perps.write.resetParticipantState([[buyer.account.address]], {
+    await perps.write.resetState([[buyer.account.address]], {
       account: owner.account,
     });
 

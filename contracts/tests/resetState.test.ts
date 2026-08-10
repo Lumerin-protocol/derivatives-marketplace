@@ -10,7 +10,7 @@ import {
 
 const { viem, networkHelpers } = await network.connect();
 
-describe("HashPowerPerpsDEX.resetParticipantState", function () {
+describe("HashPowerPerpsDEX.resetState", function () {
   it("clears only explicitly supplied participants", async function () {
     const { contracts, accounts, config } = await networkHelpers.loadFixture(
       deployPerpsWithPositionsFixture,
@@ -32,7 +32,7 @@ describe("HashPowerPerpsDEX.resetParticipantState", function () {
     const sellerOrderIds = await perps.read.getUserOrders([seller.account.address]);
     const buyerOrderIds = await perps.read.getUserOrders([buyer.account.address]);
 
-    await perps.write.resetParticipantState([[seller.account.address]], {
+    await perps.write.resetState([[seller.account.address]], {
       account: owner.account,
     });
 
@@ -64,7 +64,7 @@ describe("HashPowerPerpsDEX.resetParticipantState", function () {
     });
     const [oldOrderId] = await perps.read.getUserOrders([buyer.account.address]);
 
-    const hash = await perps.write.resetParticipantState(
+    const hash = await perps.write.resetState(
       [[buyer.account.address, buyer.account.address]],
       { account: owner.account },
     );
@@ -72,7 +72,7 @@ describe("HashPowerPerpsDEX.resetParticipantState", function () {
     const events = parseEventLogs({ abi: perps.abi, logs: receipt.logs });
     assert.equal(events.some((event) => event.eventName === "MatchFeeUpdated"), false);
 
-    await perps.write.resetParticipantState([[buyer.account.address]], {
+    await perps.write.resetState([[buyer.account.address]], {
       account: owner.account,
     });
     await perps.write.createOrder([price, 1n, TimeInForce.GTC], {
@@ -90,7 +90,7 @@ describe("HashPowerPerpsDEX.resetParticipantState", function () {
     const { buyer } = accounts;
 
     await viem.assertions.revertWithCustomError(
-      perps.write.resetParticipantState([[buyer.account.address]], {
+      perps.write.resetState([[buyer.account.address]], {
         account: buyer.account,
       }),
       perps,

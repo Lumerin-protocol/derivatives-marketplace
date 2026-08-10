@@ -66,7 +66,7 @@ async function installHarness(
   return viem.getContractAt("HashPowerPerpsDEXMigrationHarness", perps.address);
 }
 
-describe("HashPowerPerpsDEX exact entry-value upgrade reset", function () {
+describe("HashPowerPerpsDEX exact entry-value upgrade-and-reset", function () {
   it("atomically clears complete legacy long, short, flat, order, and funding state", async function () {
     const data = await networkHelpers.loadFixture(
       deployPerpsWithCollateralFixture,
@@ -124,7 +124,7 @@ describe("HashPowerPerpsDEX exact entry-value upgrade reset", function () {
     ] as const;
     const resetData = encodeFunctionData({
       abi: implementation.abi,
-      functionName: "resetParticipantState",
+      functionName: "resetState",
       args: [participants],
     });
     await harness.write.upgradeToAndCall([implementation.address, resetData], {
@@ -256,7 +256,7 @@ describe("HashPowerPerpsDEX exact entry-value upgrade reset", function () {
     assert.equal(await perps.read.getAverageEntryPrice([buyer.account.address]), 0n);
   });
 
-  it("reset clears a canonical exact-entry position", async function () {
+  it("resetState clears a canonical exact-entry position", async function () {
     const data = await networkHelpers.loadFixture(
       deployPerpsWithCollateralFixture,
     );
@@ -274,7 +274,7 @@ describe("HashPowerPerpsDEX exact entry-value upgrade reset", function () {
       { account: buyer.account },
     );
 
-    await perps.write.resetParticipantState([[buyer.account.address]], {
+    await perps.write.resetState([[buyer.account.address]], {
       account: owner.account,
     });
     assert.deepEqual(await perps.read.getUserPosition([buyer.account.address]), {

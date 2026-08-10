@@ -310,7 +310,7 @@ async function main() {
 
   const initData = encodeFunctionData({
     abi: newImpl.abi,
-    functionName: "resetParticipantState",
+    functionName: "resetState",
     args: [participants],
   });
   const upgradeArgs = [newImpl.address, initData] as const;
@@ -330,7 +330,7 @@ async function main() {
   const upgradeSimulation = await perps.simulate.upgradeToAndCall(upgradeArgs);
   logInfo("atomic upgrade", {
     "New implementation": addrUrl(pc, newImpl.address),
-    Call: `resetParticipantState(${participants.length} participants)`,
+    Call: `resetState(${participants.length} participants)`,
     "Estimated gas": estimatedGas,
     "Block gas limit": latestBlock.gasLimit,
   });

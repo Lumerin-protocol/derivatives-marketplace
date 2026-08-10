@@ -45,7 +45,7 @@ function readResetBatchSize(): number {
  * Testnet migration helper: wipe the old perps venue and detach dead venues from
  * the shared collateral vault.
  *
- * 1. Calls `resetParticipantState(address[])` in batches for the explicit,
+ * 1. Calls `resetState(address[])` in batches for the explicit,
  *    operator-supplied participant list.
  * 2. Optionally revokes the old perps (and, if `OLD_FUTURES_ADDRESS` is set, the
  *    old futures) as authorized callers on the vault so the retired contracts can
@@ -89,10 +89,10 @@ async function main() {
   // ── 1. Wipe perps state ───────────────────────────────────────────────────
   for (let offset = 0; offset < participants.length; offset += resetBatchSize) {
     const batch = participants.slice(offset, offset + resetBatchSize);
-    const resetRes = await perps.simulate.resetParticipantState([batch]);
+    const resetRes = await perps.simulate.resetState([batch]);
     const resetReceipt = await writeAndWait(deployer, resetRes);
     logStep(
-      `resetParticipantState ${offset + 1}-${offset + batch.length}`,
+      `resetState ${offset + 1}-${offset + batch.length}`,
       txUrl(pc, resetReceipt.transactionHash),
     );
   }

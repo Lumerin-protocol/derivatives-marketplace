@@ -1604,7 +1604,7 @@ export const HashPowerPerpsDEXAbi = [
         "type": "address[]"
       }
     ],
-    "name": "resetParticipantState",
+    "name": "resetState",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"

@@ -240,7 +240,7 @@ describe("HashPowerPerpsDEX order aggregate cache migration", function () {
     await assertCacheMatchesScan(perps, seller.account.address, config.quantityDecimals);
   });
 
-  it("clears both aggregate sides during reset", async function () {
+  it("clears both aggregate sides during resetState", async function () {
     const { contracts, accounts, config } = await networkHelpers.loadFixture(
       deployPerpsWithCollateralFixture,
     );
@@ -257,7 +257,7 @@ describe("HashPowerPerpsDEX order aggregate cache migration", function () {
       [price + config.minimumPriceIncrement, -qty, TimeInForce.GTC],
       { account: buyer.account },
     );
-    await perps.write.resetParticipantState([[buyer.account.address]], {
+    await perps.write.resetState([[buyer.account.address]], {
       account: owner.account,
     });
 

@@ -180,10 +180,10 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
     /// @dev Intended for testnet resets and migrations. The caller must supply the complete
     ///      participant set; the contract deliberately performs no global enumeration.
     ///      Global funding, configuration, collateral balances, and the order nonce are untouched.
-    function resetParticipantState(address[] calldata _participants) external onlyOwner {
+    function resetState(address[] calldata _participants) external onlyOwner {
         uint256 len = _participants.length;
         for (uint256 i = 0; i < len; i++) {
-            _resetParticipantState(_participants[i]);
+            _resetStateForParticipant(_participants[i]);
         }
     }
 }

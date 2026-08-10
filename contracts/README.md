@@ -172,7 +172,7 @@ Testnet resets require an explicit comma-separated participant list:
 PERPS_ADDRESS=0x... RESET_PARTICIPANTS=0x...,0x... pnpm reset:perps
 ```
 
-The script deduplicates addresses and calls `resetParticipantState(address[])` in
+The script deduplicates addresses and calls `resetState(address[])` in
 `RESET_BATCH_SIZE` batches (default 25). Only supplied accounts have their
 orders, position, and funding snapshot cleared; collateral, global funding, and
 the monotonic order nonce are preserved. Operators must build a complete list
