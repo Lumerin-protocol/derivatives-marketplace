@@ -19,7 +19,7 @@ import { txUrl, addrUrl } from "../lib/explorer.ts";
 import { logTitle, logInfo, logStep, logSuccess, logPrompt } from "../lib/log.ts";
 
 const REQUIRED_CURRENT_INIT_VERSION = 3n;
-const TARGET_CODE_VERSION = "3.0.0";
+const TARGET_CODE_VERSION = "6.5.0";
 const UPGRADE_CONFIRMATIONS = 5;
 const DEFAULT_EVENT_CHUNK_SIZE = 50_000n;
 const DEFAULT_MAX_PARTICIPANTS = 10;

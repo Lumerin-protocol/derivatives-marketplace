@@ -114,6 +114,20 @@ describe("HashPowerPerpsDEX - Admin Functions", function () {
       const liquidationFeeBps = await perps.read.liquidationFeeBps();
       assert.equal(liquidationFeeBps, 0);
     });
+
+    it("accepts the inclusive BPS range and rejects above it", async function () {
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
+      const { perps } = contracts;
+      const { owner } = accounts;
+
+      await perps.write.setLiquidationFeeBps([10_000], { account: owner.account });
+      assert.equal(await perps.read.liquidationFeeBps(), 10_000);
+      await viem.assertions.revertWithCustomError(
+        perps.write.setLiquidationFeeBps([10_001], { account: owner.account }),
+        perps,
+        "ValueOutOfRange",
+      );
+    });
   });
 
   describe("setLiquidatorShareBps", function () {

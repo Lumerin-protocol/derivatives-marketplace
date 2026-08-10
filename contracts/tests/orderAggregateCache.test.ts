@@ -147,7 +147,7 @@ describe("HashPowerPerpsDEX order aggregate cache migration", function () {
       perps.address,
     );
     await harness.write.setLegacyRevenueSlot([123_456n], { account: owner.account });
-    assert.equal(await harness.read.collectedFeesBalance(), 123_456n);
+    assert.equal(await harness.read.legacyRevenueSlot(), 123_456n);
 
     const fixedImpl = await viem.deployContract("HashPowerPerpsDEX", [vault.address]);
     const migrationData = encodeFunctionData({
@@ -159,7 +159,14 @@ describe("HashPowerPerpsDEX order aggregate cache migration", function () {
     });
 
     const upgraded = await viem.getContractAt("HashPowerPerpsDEX", perps.address);
+    // Live fee-pot view is the vault balance (empty here); the gapped slot was zeroed.
     assert.equal(await upgraded.read.collectedFeesBalance(), 0n);
+    const publicClient = await viem.getPublicClient();
+    const legacySlot = await publicClient.getStorageAt({
+      address: perps.address,
+      slot: "0x2",
+    });
+    assert.equal(BigInt(legacySlot ?? "0x0"), 0n);
     await assert.rejects(
       () => upgraded.write.initializeV3({ account: owner.account }),
       /InvalidInitialization/,

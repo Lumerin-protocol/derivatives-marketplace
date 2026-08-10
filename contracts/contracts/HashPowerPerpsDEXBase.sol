@@ -62,10 +62,7 @@ abstract contract HashPowerPerpsDEXBase is
     uint8 private __gap1;
     /// @dev Dead — former maintenanceMarginPercent. Margin is now delegated to PortfolioMarginEngine.
     uint8 private __gap2;
-    /// @notice Trading fees and the exchange share of liquidation penalties.
-    /// @dev Reuses the former flat `liquidationFee` slot. `initializeV3` must zero
-    ///      the legacy value atomically with the upgrade before revenue accounting starts.
-    uint256 public collectedFeesBalance;
+    uint256 internal __gap3;
     uint8 private __gap4;
     uint8 internal oracleDecimals;
     uint256 private nonce; // Nonce for order IDs
@@ -282,6 +279,11 @@ abstract contract HashPowerPerpsDEXBase is
         if (_makerFeeBps > MAX_FEE_BPS || _makerFeeBps < -MAX_FEE_BPS) revert InvalidFee();
         if (_takerFeeBps > MAX_FEE_BPS || _takerFeeBps < -MAX_FEE_BPS) revert InvalidFee();
         if (int256(_makerFeeBps) + int256(_takerFeeBps) < 0) revert InvalidFee();
+    }
+
+    /// @dev Inclusive `[0, BPS]` bound for liquidation fee / share knobs (100% of notional).
+    function _validateBPS(uint16 _bps) internal pure {
+        if (_bps > BPS) revert ValueOutOfRange(0, int256(BPS));
     }
 
     // ── Dependency probes ─────────────────────────────────────────────────────
@@ -954,7 +956,6 @@ abstract contract HashPowerPerpsDEXBase is
 
         if (liquidatorShare != 0) _internalTransfer(_user, liquidator, liquidatorShare);
         if (exchangeShare != 0) {
-            collectedFeesBalance += exchangeShare;
             _internalTransfer(_user, address(this), exchangeShare);
         }
     }
@@ -1041,8 +1042,13 @@ abstract contract HashPowerPerpsDEXBase is
         return bestAsk;
     }
 
+    /// @notice Fee pot size: the venue's vault balance (match + liquidation exchange share).
+    function collectedFeesBalance() public view returns (uint256) {
+        return vault.balanceOf(address(this));
+    }
+
     /// @dev Move a signed trading fee between a participant and the fee pot
-    ///      (`collectedFeesBalance`, held on this contract's vault account).
+    ///      (this contract's vault account — see {collectedFeesBalance}).
     ///
     ///      Both directions clamp, matching {_transferPnl} and {_chargeLiquidationFee}. The
     ///      hazard is an ordering one inside the fill, not keeper latency: {_executeMatch}
@@ -1066,7 +1072,6 @@ abstract contract HashPowerPerpsDEXBase is
             uint256 available = vault.balanceOf(_participant);
             uint256 paid = M.min(owed, available);
             if (paid > 0) {
-                collectedFeesBalance += paid;
                 _internalTransfer(_participant, address(this), paid);
             }
             if (paid < owed) {
@@ -1075,10 +1080,8 @@ abstract contract HashPowerPerpsDEXBase is
             return;
         }
 
-        uint256 rebate = M.min(uint256(-_fee), collectedFeesBalance);
-        rebate = M.min(rebate, vault.balanceOf(address(this)));
+        uint256 rebate = M.min(uint256(-_fee), vault.balanceOf(address(this)));
         if (rebate > 0) {
-            collectedFeesBalance -= rebate;
             _internalTransfer(address(this), _participant, rebate);
         }
     }

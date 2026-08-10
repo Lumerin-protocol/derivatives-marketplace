@@ -104,15 +104,16 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
     }
 
     /// @notice Withdraw accrued trading and liquidation revenue to the venue owner.
+    /// @dev Drains the venue's vault account (the fee pot). No separate accumulator.
     function withdrawCollectedFees() external onlyOwner {
-        uint256 amount = collectedFeesBalance;
-        collectedFeesBalance = 0;
-        vault.withdrawTo(owner(), amount);
+        vault.withdrawTo(owner(), vault.balanceOf(address(this)));
     }
 
     /// @notice Set the liquidation fee in basis points on the liquidated notional.
     /// @param _bps Fee in bps (e.g., 50 = 0.5% of the closed position or cancelled order value).
+    ///         Capped at `BPS` (100% of notional); same bound as {setLiquidatorShareBps}.
     function setLiquidationFeeBps(uint16 _bps) external onlyOwner {
+        _validateBPS(_bps);
         liquidationFeeBps = _bps;
         emit LiquidationFeeBpsUpdated(_bps);
     }
@@ -120,7 +121,7 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
     /// @notice Set the liquidator's share of the liquidation fee in basis points.
     /// @param _bps Share in bps (e.g., 5000 = 50% to liquidator, remainder to venue revenue).
     function setLiquidatorShareBps(uint16 _bps) external onlyOwner {
-        if (_bps > BPS) revert ValueOutOfRange(0, int256(BPS));
+        _validateBPS(_bps);
         liquidatorShareBps = _bps;
         emit LiquidatorShareBpsUpdated(_bps);
     }

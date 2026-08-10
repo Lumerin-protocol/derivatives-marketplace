@@ -27,7 +27,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @dev Lives here rather than in {HashPowerPerpsDEXBase} so that a diff to
     ///      this file and the version it ships under stay in the same place,
     ///      mirroring {Futures}.
-    string public constant VERSION = "4.2.0";
+    string public constant VERSION = "6.5.0";
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ICollateralVault _vault) HashPowerPerpsDEXBase(_vault) { }
@@ -64,7 +64,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @notice One-shot migration that clears the reused legacy flat-liquidation-fee slot.
     /// @dev Invoke atomically through `upgradeToAndCall` before any v2.15 fee path executes.
     function initializeV3() external reinitializer(3) onlyOwner {
-        collectedFeesBalance = 0;
+        __gap3 = 0;
     }
 
     /// @notice Get current market price from oracle

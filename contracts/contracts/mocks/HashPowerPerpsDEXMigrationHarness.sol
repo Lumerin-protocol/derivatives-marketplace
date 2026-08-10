@@ -18,7 +18,12 @@ contract HashPowerPerpsDEXMigrationHarness is HashPowerPerpsDEX {
 
     /// @dev Simulates a non-zero legacy flat-liquidation-fee value in the reused slot.
     function setLegacyRevenueSlot(uint256 _value) external {
-        collectedFeesBalance = _value;
+        __gap3 = _value;
+    }
+
+    /// @dev Read `__gap3` (not the live fee-pot view).
+    function legacyRevenueSlot() external view returns (uint256) {
+        return __gap3;
     }
 
     /// @dev Recreates the legacy `(int256 netQuantity, uint256 aggregatedEntryPrice)`

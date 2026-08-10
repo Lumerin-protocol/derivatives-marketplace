@@ -34,7 +34,7 @@
       "typeFingerprint": "b177e0c4e9ec36309734f94c1f6b7dcf13056125f7e2e3204e7da44bde77666d"
     },
     {
-      "label": "collectedFeesBalance",
+      "label": "__gap3",
       "slot": "2",
       "offset": 0,
       "type": "uint256",
