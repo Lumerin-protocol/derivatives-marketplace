@@ -54,6 +54,8 @@ abstract contract HashPowerPerpsDEXBase is
 
     // Immutables (set in constructor, derived from vault)
     ICollateralVault public immutable vault;
+    /// @dev Collateral token decimals (must be 6). Distinct from QUANTITY_DECIMALS.
+    uint8 internal immutable collateralDecimals;
 
     // State variables
     address private __gap0;
@@ -233,7 +235,6 @@ abstract contract HashPowerPerpsDEXBase is
     /// @notice Partial liquidation left balance above IM while a real IM>MM buffer remains.
     error OverLiquidation();
     error OrderNotBelongToUser(); // liquidateOrder called with an id not owned by the specified user
-    error InsufficientReservePool(); // The reserve pool does not have enough collateral to cover user profit
     error InvalidFundingParameters();
     /// @notice Fee magnitude above `MAX_FEE_BPS`, or a maker+taker sum below zero (which
     ///         would make every match a net outflow from the fee pot).
@@ -262,9 +263,8 @@ abstract contract HashPowerPerpsDEXBase is
     constructor(ICollateralVault _vault) {
         if (address(_vault) == address(0)) revert ZeroAddress();
         vault = _vault;
-        if (IERC20Metadata(address(_vault.collateralToken())).decimals() != QUANTITY_DECIMALS) {
-            revert UnsupportedTokenDecimals();
-        }
+        collateralDecimals = IERC20Metadata(address(_vault.collateralToken())).decimals();
+        if (collateralDecimals != 6) revert UnsupportedTokenDecimals();
         _disableInitializers();
     }
 
@@ -356,16 +356,27 @@ abstract contract HashPowerPerpsDEXBase is
         _hook.onFill(_maker, _taker, _notional, _makerFee, takerFeeAbs, _makerPrice, _refPrice);
     }
 
+    /// @dev True when a Chainlink-shaped round is usable for hard mark-price paths.
+    function _isUsableOracleRound(int256 answer, uint256 updatedAt) internal view returns (bool) {
+        if (answer <= 0 || updatedAt == 0 || updatedAt > block.timestamp) return false;
+        if (block.timestamp - updatedAt > MAX_ORACLE_STALENESS) return false;
+        return true;
+    }
+
+    /// @dev Soft oracle → venue price. Returns 0 when the round is unusable (never reverts).
+    ///      Used by points bonus and funding accrual so a stale feed cannot brick cancels.
+    function _softMarketPrice() internal view returns (uint256) {
+        (, int256 answer,, uint256 updatedAt,) = priceOracle.latestRoundData();
+        if (!_isUsableOracleRound(answer, updatedAt)) return 0;
+        return _getMarketPrice(uint256(answer));
+    }
+
     /// @dev Oracle reference price for the points price-improvement multiplier, in the same
     ///      units as an order's price. Unlike `getMarketPrice()`, this returns 0 instead of
     ///      reverting when the oracle is stale or non-positive, so a points-side read can never
     ///      block a fill — the hook simply applies no bonus (1x) when the reference is 0.
     function _refPriceForPoints() internal view returns (uint256) {
-        (, int256 answer,, uint256 updatedAt,) = priceOracle.latestRoundData();
-        // Soft path: never revert on a bad round — points just drop the bonus.
-        if (answer <= 0 || updatedAt == 0 || updatedAt > block.timestamp) return 0;
-        if (block.timestamp - updatedAt > MAX_ORACLE_STALENESS) return 0;
-        return _getMarketPrice(uint256(answer));
+        return _softMarketPrice();
     }
 
     /// @dev Notify the points hook of a liquidation. Skipped when no hook is configured. Not
@@ -410,7 +421,7 @@ abstract contract HashPowerPerpsDEXBase is
     /// @dev Scale a raw hashprice answer to venue price units and round to the tick
     ///      (mirrors Futures `_getMarketPrice`).
     function _getMarketPrice(uint256 _hashpriceUsd) internal view returns (uint256) {
-        uint256 scaled = M.scaleDecimals(_hashpriceUsd, oracleDecimals, QUANTITY_DECIMALS);
+        uint256 scaled = M.scaleDecimals(_hashpriceUsd, oracleDecimals, collateralDecimals);
         return M.roundToNearest(scaled, minimumPriceIncrement);
     }
 
@@ -531,7 +542,7 @@ abstract contract HashPowerPerpsDEXBase is
         uint256 cancelAmt = makerAbs < remainingAbs ? makerAbs : remainingAbs;
 
         if (cancelAmt == makerAbs) {
-            _removeRestingOrder(_makerOrderId, _taker, makerPrice, makerQty, false);
+            _removeRestingOrder(_makerOrderId, _taker, makerPrice, makerQty);
             emit OrderCancelled(_makerOrderId, _taker);
         } else {
             uint256 reducedMakerAbs = makerAbs - cancelAmt;
@@ -565,10 +576,12 @@ abstract contract HashPowerPerpsDEXBase is
         int256 takerFee = int256(notionalValue) * int256(takerFeeBps) / int256(BPS);
         int256 makerFee = int256(notionalValue) * int256(makerFeeBps) / int256(BPS);
 
-        _createPosition(_makerOrderId, makerParticipant, _taker, makerPrice, takerQty, takerFee, makerFee);
+        _createPosition(makerParticipant, _taker, makerPrice, takerQty);
 
         // Collect the positive side first so a same-match rebate can use revenue
         // earned by that match instead of depending on a pre-funded fee pot.
+        // Fee BadDebt (if any) is emitted here, before OrderUpdated / OrderMatched —
+        // same log order as Futures.
         if (makerFee < 0) {
             _transferFee(_taker, takerFee);
             _transferFee(makerParticipant, makerFee);
@@ -581,10 +594,27 @@ abstract contract HashPowerPerpsDEXBase is
 
         int256 newMakerQty = _reduceQuantity(makerQty, matchAmt);
         if (newMakerQty == 0) {
-            _removeRestingOrder(_makerOrderId, makerParticipant, makerPrice, makerQty, true);
+            _removeRestingOrder(_makerOrderId, makerParticipant, makerPrice, makerQty);
+            emit OrderUpdated(_makerOrderId, makerParticipant, 0);
         } else {
             _reduceRestingOrder(_makerOrderId, _makerOrder, newMakerQty);
         }
+
+        Position storage makerPos = positions[makerParticipant];
+        Position storage takerPos = positions[_taker];
+        _emitOrderMatched(
+            _makerOrderId,
+            makerParticipant,
+            _taker,
+            makerPrice,
+            takerQty,
+            makerFee,
+            takerFee,
+            makerPos.netQuantity,
+            takerPos.netQuantity,
+            _averageEntryPrice(makerPos),
+            _averageEntryPrice(takerPos)
+        );
 
         unchecked {
             return _remainingQty - takerQty;
@@ -664,23 +694,12 @@ abstract contract HashPowerPerpsDEXBase is
     /// @dev Remove one canonical resting order from every per-order accounting structure.
     ///      Price-ladder cleanup stays with the caller because matching and reset walk a whole
     ///      level and deliberately remove that level only after its queue traversal finishes.
-    ///      Full fills request their historical zero-size update between aggregate/storage
-    ///      reduction and structural removal; cancellation-style routes emit their own events.
-    function _removeRestingOrder(
-        bytes32 _orderId,
-        address _participant,
-        uint256 _price,
-        int256 _quantity,
-        bool _emitFillUpdate
-    )
+    ///      Callers emit `OrderUpdated` / `OrderCancelled` themselves (matches Futures).
+    function _removeRestingOrder(bytes32 _orderId, address _participant, uint256 _price, int256 _quantity)
         internal
     {
         bool isBid = _quantity > 0;
         _subtractOrderAggregate(_participant, isBid, _price, M.abs(_quantity), 0);
-        if (_emitFillUpdate) {
-            orders[_orderId].quantity = 0;
-            emit OrderUpdated(_orderId, _participant, 0);
-        }
         _priceOrderIds(_price, isBid).remove(uint256(_orderId));
         participantOrderIdsIndex[_participant].remove(_orderId);
         delete orders[_orderId];
@@ -701,45 +720,15 @@ abstract contract HashPowerPerpsDEXBase is
 
     /// @notice Update net positions when orders match
     /// @param taker Address of the taker whose funding was already settled before the matching loop
-    function _createPosition(
-        bytes32 matchedOrderId,
-        address makerParticipant,
-        address taker,
-        uint256 _price,
-        int256 _takerQty,
-        int256 _takerFee,
-        int256 _makerFee
-    ) internal {
-        // Determine buyer and seller based on taker quantity sign
-        // Positive = taker is buying, negative = taker is selling
-        (address buyer, address seller) = _takerQty > 0 ? (taker, makerParticipant) : (makerParticipant, taker);
-
-        // Use absolute quantity for position updates
-        // Buyer always gets positive (long), seller always gets negative (short)
-        int256 absQty = int256(M.abs(_takerQty));
-
-        // Skip funding settlement for the taker — already settled once before the loop.
-        if (buyer != taker) _settleFunding(buyer);
-        _updateUserPosition(buyer, absQty, _price);
-
-        if (seller != taker) _settleFunding(seller);
-        _updateUserPosition(seller, -absQty, _price);
-
-        Position storage makerPos = positions[makerParticipant];
-        Position storage takerPos = positions[taker];
-        _emitOrderMatched(
-            matchedOrderId,
-            makerParticipant,
-            taker,
-            _price,
-            _takerQty,
-            _makerFee,
-            _takerFee,
-            makerPos.netQuantity,
-            takerPos.netQuantity,
-            _averageEntryPrice(makerPos),
-            _averageEntryPrice(takerPos)
-        );
+    /// @dev Settles maker then taker so insurance-fund shortfall allocation is role-deterministic
+    ///      (matches Futures). `OrderMatched` is emitted by {_executeMatch} after fees/updates.
+    function _createPosition(address makerParticipant, address taker, uint256 _price, int256 _takerQty)
+        internal
+    {
+        // Maker takes the opposite of the taker fill. Skip taker funding — settled once pre-loop.
+        if (makerParticipant != taker) _settleFunding(makerParticipant);
+        _updateUserPosition(makerParticipant, -_takerQty, _price);
+        _updateUserPosition(taker, _takerQty, _price);
     }
 
     function _emitOrderMatched(
@@ -868,21 +857,22 @@ abstract contract HashPowerPerpsDEXBase is
     /// @dev Closes the user's position and settles PnL against the insurance fund. Caller must
     ///      have verified all predicates. Charges a liquidation fee on the closed notional
     ///      (computed as `currentPrice * |closedQuantity| / 10^QUANTITY_DECIMALS`).
-    function _doLiquidatePosition(address _user, uint256 _currentPrice) internal {
+    ///      Does NOT emit — caller runs the over-liquidation guard, then emits/notifies.
+    function _doLiquidatePosition(address _user, uint256 _currentPrice)
+        internal
+        returns (int256 pnl, int256 closedQuantity, uint256 liqFee)
+    {
         Position memory position = positions[_user];
         int256 entryValue = position.netEntryValue;
-        int256 pnl = _signedValue(_currentPrice, position.netQuantity) - entryValue;
+        closedQuantity = position.netQuantity;
+        pnl = _signedValue(_currentPrice, closedQuantity) - entryValue;
 
         _transferPnl(_insuranceFundAccount(), _user, pnl);
 
-        int256 closedQuantity = position.netQuantity;
         uint256 closedNotional = _calculateValue(_currentPrice, M.abs(closedQuantity));
-        uint256 liqFee = _chargeLiquidationFee(_user, closedNotional);
+        liqFee = _chargeLiquidationFee(_user, closedNotional);
 
         delete positions[_user];
-
-        emit PositionLiquidated(_user, _msgSender(), closedQuantity, pnl, liqFee);
-        _notifyLiquidation(_msgSender(), liqFee);
     }
 
     /// @notice Settle a reduced portion of a position (when offsetting)
@@ -1107,7 +1097,10 @@ abstract contract HashPowerPerpsDEXBase is
         if (bestBid == 0 || bestAsk == 0) return currentCumFunding;
 
         uint256 markPrice = (bestBid + bestAsk) / 2;
-        uint256 indexPrice = _indexPrice == 0 ? _marketPrice() : _indexPrice;
+        // Soft-load index when the caller did not supply one. A stale/unusable oracle must
+        // not revert funding views or cancel/reduce paths — skip accrual instead.
+        uint256 indexPrice = _indexPrice == 0 ? _softMarketPrice() : _indexPrice;
+        if (indexPrice == 0) return currentCumFunding;
 
         // fundingRate (scaled by 10^FUNDING_DECIMALS) = (mark - index) * 10^FUNDING_DECIMALS / index
         int256 priceDiff = int256(markPrice) - int256(indexPrice);
@@ -1126,11 +1119,24 @@ abstract contract HashPowerPerpsDEXBase is
     }
 
     /// @notice Update the global cumulative funding rate (writes state)
-    /// @dev Called before any position-affecting operation.
+    /// @dev Called before position-affecting ops and cancel/reduce paths. When the book is
+    ///      two-sided but the oracle round is unusable, skip entirely (do not advance
+    ///      `lastFundingUpdateTime`) so a later live update can catch up the elapsed window.
     function _updateGlobalFunding() internal {
         if (lastFundingUpdateTime == 0 || fundingPeriod == 0) return;
 
-        int256 newCumFunding = _getCurrentCumulativeFunding(0);
+        // Accrual needs a mid and an index. Empty book → no accrual but still bump the
+        // timestamp (existing policy). Unusable oracle → abort without bumping so cancels
+        // stay ungated and funding is not permanently dropped for the stale window.
+        uint256 bestBid = _bestBidPrice();
+        uint256 bestAsk = _bestAskPrice();
+        uint256 indexPrice;
+        if (bestBid != 0 && bestAsk != 0) {
+            indexPrice = _softMarketPrice();
+            if (indexPrice == 0) return;
+        }
+
+        int256 newCumFunding = _getCurrentCumulativeFunding(indexPrice);
 
         if (newCumFunding != cumulativeFundingPerUnit) {
             // Derive the effective rate for the event
@@ -1224,7 +1230,7 @@ abstract contract HashPowerPerpsDEXBase is
             int256 quantity = order.quantity;
             bool isBid = quantity > 0;
             StructuredLinkedList.List storage queue = _priceOrderIds(price, isBid);
-            _removeRestingOrder(orderId, _participant, price, quantity, false);
+            _removeRestingOrder(orderId, _participant, price, quantity);
             _removePriceLevelIfEmpty(queue, price, isBid);
         }
 

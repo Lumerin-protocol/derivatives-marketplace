@@ -14,7 +14,6 @@ import {
   OrderUpdated,
   OrderMatched,
   PositionLiquidated,
-  MatchFeeUpdated,
   MakerFeeBpsUpdated,
   TakerFeeBpsUpdated,
   LiquidationFeeBpsUpdated,
@@ -1175,18 +1174,6 @@ export function handleBadDebt(event: BadDebt): void {
 }
 
 // ============ Config Event Handlers ============
-
-export function handleMatchFeeUpdated(event: MatchFeeUpdated): void {
-  log.info("Match fee updated: taker {} maker {}", [
-    event.params.newTakerFeeBps.toString(),
-    event.params.newMakerFeeBps.toString(),
-  ]);
-  const perps = getOrCreatePerps();
-  perps.takerFeeBps = event.params.newTakerFeeBps;
-  perps.makerFeeBps = event.params.newMakerFeeBps;
-  perps.lastUpdatedAt = event.block.timestamp;
-  perps.save();
-}
 
 export function handleMakerFeeBpsUpdated(event: MakerFeeBpsUpdated): void {
   log.info("Maker fee bps updated: {}", [

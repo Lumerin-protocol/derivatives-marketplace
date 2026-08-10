@@ -79,9 +79,9 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @param _tif Order lifetime / fill policy
     function createOrder(uint256 _price, int256 _quantity, TimeInForce _tif) external {
         address sender = _msgSender();
+        _validateOrderIntent(_price, _quantity, _tif);
         _updateGlobalFunding();
         _settleFunding(sender);
-        _validateOrderIntent(_price, _quantity, _tif);
         uint256 maxAllowedIm;
         if (_isLocallyReducing(sender, _quantity)) {
             maxAllowedIm = portfolioMargin.computePortfolioIM(sender);
@@ -101,11 +101,14 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         uint256 len = _intents.length;
         if (len == 0) revert EmptyBatch();
         address sender = _msgSender();
-        _updateGlobalFunding();
-        _settleFunding(sender);
         for (uint256 i = 0; i < len; i++) {
             OrderIntent calldata intent = _intents[i];
             _validateOrderIntent(intent.price, intent.quantity, intent.timeInForce);
+        }
+        _updateGlobalFunding();
+        _settleFunding(sender);
+        for (uint256 j = 0; j < len; j++) {
+            OrderIntent calldata intent = _intents[j];
             _createOrder(sender, intent.price, intent.quantity, intent.timeInForce);
         }
         _ensureNoCollateralDeficit(sender, 0);
@@ -123,8 +126,12 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         OrderIntent[] calldata _intents
     ) external {
         address sender = _msgSender();
-        _updateGlobalFunding();
         uint256 createLen = _intents.length;
+        for (uint256 v = 0; v < createLen; v++) {
+            OrderIntent calldata intent = _intents[v];
+            _validateOrderIntent(intent.price, intent.quantity, intent.timeInForce);
+        }
+        _updateGlobalFunding();
         if (createLen != 0) _settleFunding(sender);
         uint256 cancelLen = _cancelIds.length;
         for (uint256 i = 0; i < cancelLen; i++) {
@@ -136,7 +143,6 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         }
         for (uint256 j = 0; j < createLen; j++) {
             OrderIntent calldata intent = _intents[j];
-            _validateOrderIntent(intent.price, intent.quantity, intent.timeInForce);
             _createOrder(sender, intent.price, intent.quantity, intent.timeInForce);
         }
         if (createLen != 0) _ensureNoCollateralDeficit(sender, 0);
@@ -212,7 +218,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         if (order.quantity == 0) revert OrderNotExists();
 
         bool isBid = order.quantity > 0;
-        _removeRestingOrder(_orderId, order.participant, order.price, order.quantity, false);
+        _removeRestingOrder(_orderId, order.participant, order.price, order.quantity);
         _removePriceLevelIfEmpty(_priceOrderIds(order.price, isBid), order.price, isBid);
         emit OrderCancelled(_orderId, order.participant);
     }
@@ -254,31 +260,32 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     ///        so the account lands at/under IM is the keeper's off-chain responsibility — an
     ///        oversize partial reverts `OverLiquidation`.
     function liquidatePosition(address _user, uint256 _closeQty) external {
-        _updateGlobalFunding();
-        _settleFunding(_user);
-
-        // Precondition order mirrors Futures so both venues revert identically on the
-        // same bad input: orders-first, then health, then argument validity, then state.
+        // Funding-independent checks first (cheap). `_underwater` runs after funding settle
+        // because settlement changes vault balances that feed the portfolio MM predicate.
         // Portfolio-wide, not just this book: a position here can be the only thing
-        // offsetting resting orders at another venue, and closing it would strand that
-        // leg and raise the requirement. See `IPortfolioMarginEngine.hasRestingOrderDelta`.
+        // offsetting resting orders at another venue. See `IPortfolioMarginEngine.hasRestingOrderDelta`.
         if (portfolioMargin.hasRestingOrderDelta(_user)) revert OrdersStillOpen();
-        if (!_underwater(_user)) revert NotLiquidatable();
         if (_closeQty == 0) revert InvalidQty();
 
         Position memory position = positions[_user];
         if (position.netQuantity == 0) revert NotLiquidatable();
 
+        _updateGlobalFunding();
+        _settleFunding(_user);
+        if (!_underwater(_user)) revert NotLiquidatable();
+
         uint256 absNet = M.abs(position.netQuantity);
         uint256 closeAbs = _closeQty < absNet ? _closeQty : absNet;
         uint256 currentPrice = getMarketPrice();
 
-        // Full close: delete the position and settle the whole PnL (bad-debt path). No IM buffer
-        // guard — the keeper deliberately deleveraged the entire position (deep underwater).
-        // Single-position venue: a full close leaves no residual risk here, unlike Futures
-        // where a full close of one expiry can still leave other legs above IM.
+        // Full close still runs the portfolio OverLiquidation guard: residual risk can remain
+        // on other venues (Futures / options) sharing this PME. Guard before emit/notify so
+        // an oversize close does not pay log/hook gas on the revert path.
         if (closeAbs == absNet) {
-            _doLiquidatePosition(_user, currentPrice);
+            (int256 pnl, int256 closedQuantity, uint256 liqFee) = _doLiquidatePosition(_user, currentPrice);
+            _revertIfOverLiquidated(_user);
+            emit PositionLiquidated(_user, _msgSender(), closedQuantity, pnl, liqFee);
+            _notifyLiquidation(_msgSender(), liqFee);
             return;
         }
 
@@ -295,8 +302,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     }
 
     /// @dev Over-liquidation guard: leftover balance must sit at/under IM when a real IM>MM
-    ///      buffer remains. Shared shape with Futures; called only on the partial-close path
-    ///      here because a full close is a complete venue exit.
+    ///      buffer remains. Runs after full and partial closes (vacuous when IM == MM == 0).
     function _revertIfOverLiquidated(address _user) internal view {
         (uint256 im, uint256 mm) = portfolioMargin.computePortfolioMargins(_user);
         if (im > mm && vault.balanceOf(_user) > im) revert OverLiquidation();
@@ -304,13 +310,12 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
 
     /// @notice Force-cancel a single resting order owned by an underwater user. Permissionless.
     function liquidateOrder(address _user, bytes32 _orderId) external {
-        _updateGlobalFunding();
-
-        if (!_underwater(_user)) revert NotLiquidatable();
-
         Order memory order = orders[_orderId];
         if (order.participant != _user) revert OrderNotBelongToUser();
         if (order.quantity == 0) revert OrderNotExists();
+
+        _updateGlobalFunding();
+        if (!_underwater(_user)) revert NotLiquidatable();
 
         _doLiquidateOrder(_user, _orderId, order);
     }
@@ -348,7 +353,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         bool isBid = _order.quantity > 0;
         uint256 orderAbsQty = M.abs(_order.quantity);
         uint256 orderNotional = _calculateValue(_order.price, orderAbsQty);
-        _removeRestingOrder(_orderId, _user, _order.price, _order.quantity, false);
+        _removeRestingOrder(_orderId, _user, _order.price, _order.quantity);
         _removePriceLevelIfEmpty(_priceOrderIds(_order.price, isBid), _order.price, isBid);
 
         uint256 liqFee = _chargeLiquidationFee(_user, orderNotional);

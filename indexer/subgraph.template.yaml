@@ -54,10 +54,6 @@ dataSources:
         - event: BadDebt(indexed address,uint256)
           handler: handleBadDebt
         # Config events
-        # MatchFeeUpdated is only emitted by resetState; the individual setters
-        # emit the per-side events below.
-        - event: MatchFeeUpdated(int16,int16)
-          handler: handleMatchFeeUpdated
         - event: MakerFeeBpsUpdated(int16)
           handler: handleMakerFeeBpsUpdated
         - event: TakerFeeBpsUpdated(int16)

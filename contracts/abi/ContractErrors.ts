@@ -154,11 +154,6 @@ export const contractErrors = [
     "type": "error"
   },
   {
-    "inputs": [],
-    "name": "InsufficientReservePool",
-    "type": "error"
-  },
-  {
     "inputs": [
       {
         "internalType": "address",

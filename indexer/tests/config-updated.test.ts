@@ -2,7 +2,6 @@ import { describe, test, beforeEach, clearStore } from "matchstick-as/assembly/i
 import { Address, BigInt, ethereum } from "@graphprotocol/graph-ts";
 import { newTypedMockEventWithParams } from "matchstick-as/assembly/defaults";
 import {
-  handleMatchFeeUpdated,
   handleMakerFeeBpsUpdated,
   handleTakerFeeBpsUpdated,
   handleLiquidationFeeBpsUpdated,
@@ -13,7 +12,6 @@ import {
   handleMinimumMarginPerOrderUpdated,
 } from "../src/perps";
 import {
-  MatchFeeUpdated,
   MakerFeeBpsUpdated,
   TakerFeeBpsUpdated,
   LiquidationFeeBpsUpdated,
@@ -35,18 +33,6 @@ describe("config update handlers", () => {
     clearStore();
     setupDataSourceMock();
     setupPerps();
-  });
-
-  test("handleMatchFeeUpdated sets takerFeeBps and makerFeeBps", () => {
-    const event = newTypedMockEventWithParams<MatchFeeUpdated>([
-      paramI32("newTakerFeeBps", 30),
-      paramI32("newMakerFeeBps", -10),
-    ]);
-    handleMatchFeeUpdated(event);
-
-    assert.fieldEquals("Perps", "0", "takerFeeBps", "30");
-    assert.fieldEquals("Perps", "0", "makerFeeBps", "-10");
-    assert.fieldEquals("Perps", "0", "lastUpdatedAt", event.block.timestamp.toString());
   });
 
   test("handleMakerFeeBpsUpdated sets makerFeeBps", () => {

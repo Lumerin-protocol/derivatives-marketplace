@@ -54,11 +54,6 @@ export const HashPowerPerpsDEXAbi = [
   },
   {
     "inputs": [],
-    "name": "InsufficientReservePool",
-    "type": "error"
-  },
-  {
-    "inputs": [],
     "name": "InsuranceFundNotConfigured",
     "type": "error"
   },
