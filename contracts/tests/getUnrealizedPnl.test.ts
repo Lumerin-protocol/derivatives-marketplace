@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
 import { parseUnits } from "viem";
+import { getAverageEntryPrice } from "./lib/viewHelpers.ts";
 import {
   deployPerpsWithCollateralFixture,
   deployPerpsWithPositionsFixture,
@@ -103,7 +104,7 @@ describe("HashPowerPerpsDEX - getUnrealizedPnl", function () {
     const { buyer } = accounts;
 
     const position = await perps.read.getUserPosition([buyer.account.address]);
-    const entryPrice = await perps.read.getAverageEntryPrice([buyer.account.address]);
+    const entryPrice = await getAverageEntryPrice(perps, buyer.account.address);
     const quantity = position.netQuantity;
 
     const priceDiff = parseUnits("1000", 6);

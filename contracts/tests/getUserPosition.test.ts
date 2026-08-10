@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import { network } from "hardhat";
 import { deployPerpsWithCollateralFixture, deployPerpsWithPositionsFixture } from "./fixtures.ts";
 import { TimeInForce } from "../fixtures/timeInForce.ts";
+import {
+  getAverageEntryPrice,
+} from "./lib/viewHelpers.ts";
 
 const { networkHelpers } = await network.getOrCreate();
 
@@ -15,7 +18,7 @@ describe("HashPowerPerpsDEX - getUserPosition", function () {
     const position = await perps.read.getUserPosition([buyer.account.address]);
     assert.equal(position.netQuantity, 0n);
     assert.equal(position.netEntryValue, 0n);
-    assert.equal(await perps.read.getAverageEntryPrice([buyer.account.address]), 0n);
+    assert.equal(await getAverageEntryPrice(perps, buyer.account.address), 0n);
   });
 
   it("should return correct position for long", async function () {
@@ -26,7 +29,7 @@ describe("HashPowerPerpsDEX - getUserPosition", function () {
     const position = await perps.read.getUserPosition([buyer.account.address]);
     assert.ok(position.netQuantity > 0n);
     assert.equal(position.netEntryValue, config.marketPrice);
-    assert.equal(await perps.read.getAverageEntryPrice([buyer.account.address]), config.marketPrice);
+    assert.equal(await getAverageEntryPrice(perps, buyer.account.address), config.marketPrice);
   });
 
   it("should return correct position for short", async function () {
@@ -37,7 +40,7 @@ describe("HashPowerPerpsDEX - getUserPosition", function () {
     const position = await perps.read.getUserPosition([seller.account.address]);
     assert.ok(position.netQuantity < 0n);
     assert.equal(position.netEntryValue, -config.marketPrice);
-    assert.equal(await perps.read.getAverageEntryPrice([seller.account.address]), config.marketPrice);
+    assert.equal(await getAverageEntryPrice(perps, seller.account.address), config.marketPrice);
   });
 
   it("should update derived average entry price on adding to position", async function () {
@@ -47,7 +50,7 @@ describe("HashPowerPerpsDEX - getUserPosition", function () {
     const tick = config.minimumPriceIncrement;
 
     const positionBefore = await perps.read.getUserPosition([buyer.account.address]);
-    const averageBefore = await perps.read.getAverageEntryPrice([buyer.account.address]);
+    const averageBefore = await getAverageEntryPrice(perps, buyer.account.address);
 
     const newPrice = config.marketPrice + tick;
 
@@ -55,7 +58,7 @@ describe("HashPowerPerpsDEX - getUserPosition", function () {
     await perps.write.createOrder([newPrice, BigInt(config.qty), TimeInForce.GTC], { account: buyer.account });
 
     const positionAfter = await perps.read.getUserPosition([buyer.account.address]);
-    const averageAfter = await perps.read.getAverageEntryPrice([buyer.account.address]);
+    const averageAfter = await getAverageEntryPrice(perps, buyer.account.address);
 
     assert.ok(positionAfter.netQuantity > positionBefore.netQuantity);
     assert.ok(positionAfter.netEntryValue > positionBefore.netEntryValue);
@@ -74,7 +77,7 @@ describe("HashPowerPerpsDEX - getUserPosition", function () {
     const buyerPosition = await perps.read.getUserPosition([buyer.account.address]);
     assert.equal(buyerPosition.netQuantity, 0n);
     assert.equal(buyerPosition.netEntryValue, 0n, "closed position clears exact entry value");
-    assert.equal(await perps.read.getAverageEntryPrice([buyer.account.address]), 0n);
+    assert.equal(await getAverageEntryPrice(perps, buyer.account.address), 0n);
   });
 
   it("should overwrite entry price when new position opened after full close", async function () {
@@ -83,7 +86,7 @@ describe("HashPowerPerpsDEX - getUserPosition", function () {
     const { seller, buyer } = accounts;
     const tick = config.minimumPriceIncrement;
 
-    const entryBeforeClose = await perps.read.getAverageEntryPrice([buyer.account.address]);
+    const entryBeforeClose = await getAverageEntryPrice(perps, buyer.account.address);
     assert.equal(entryBeforeClose, config.marketPrice);
 
     await perps.write.createOrder([config.marketPrice, BigInt(config.qty), TimeInForce.GTC], { account: seller.account });
@@ -99,6 +102,6 @@ describe("HashPowerPerpsDEX - getUserPosition", function () {
 
     const afterReopen = await perps.read.getUserPosition([buyer.account.address]);
     assert.equal(afterReopen.netQuantity, BigInt(config.qty));
-    assert.equal(await perps.read.getAverageEntryPrice([buyer.account.address]), newPrice);
+    assert.equal(await getAverageEntryPrice(perps, buyer.account.address), newPrice);
   });
 });

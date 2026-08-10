@@ -995,14 +995,14 @@ abstract contract HashPowerPerpsDEXBase is
         PriceLadderLib.removeIfEmpty(orderQueue, priceList, _price);
     }
 
-    /// @dev Body of {getBestBidPrice}: best (highest) bid, or 0 if empty.
+    /// @dev Best (highest) bid, or 0 if empty.
     function _bestBidPrice() internal view returns (uint256) {
         if (activeBidPrices.sizeOf() == 0) return 0;
         (, uint256 bestBid) = activeBidPrices.getNextNode(0);
         return bestBid;
     }
 
-    /// @dev Body of {getBestAskPrice}: best (lowest) ask, or 0 if empty.
+    /// @dev Best (lowest) ask, or 0 if empty.
     function _bestAskPrice() internal view returns (uint256) {
         if (activeAskPrices.sizeOf() == 0) return 0;
         (, uint256 bestAsk) = activeAskPrices.getNextNode(0);

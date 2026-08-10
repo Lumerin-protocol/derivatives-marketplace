@@ -343,16 +343,6 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         _notifyLiquidation(_msgSender(), liqFee);
     }
 
-    /// @notice Get the best bid price (highest)
-    function getBestBidPrice() public view returns (uint256) {
-        return _bestBidPrice();
-    }
-
-    /// @notice Get the best ask price (lowest)
-    function getBestAskPrice() public view returns (uint256) {
-        return _bestAskPrice();
-    }
-
     /// @notice Simulate an order: how much would match and at what average price (view, no state change).
     /// @param _price Limit price (same as createOrder)
     /// @param _quantity Order quantity (positive = buy, negative = sell)
@@ -440,17 +430,6 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @notice Get the user's exact signed position aggregate.
     function getUserPosition(address _user) external view returns (Position memory) {
         return positions[_user];
-    }
-
-    /// @notice Get the absolute average entry price derived from the exact entry value.
-    function getAverageEntryPrice(address _user) external view returns (uint256) {
-        return _averageEntryPrice(positions[_user]);
-    }
-
-    /// @notice Net linear delta of the user's position, signed and scaled to the
-    ///         six-decimal collateral used by ILinearMarket.
-    function getNetPositionDelta(address _user) external view returns (int256) {
-        return positions[_user].netQuantity;
     }
 
     /// @notice ILinearMarket: all per-user margin inputs in a single call

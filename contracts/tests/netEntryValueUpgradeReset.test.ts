@@ -11,6 +11,9 @@ import {
 } from "viem";
 import { TimeInForce } from "../fixtures/timeInForce.ts";
 import { deployPerpsWithCollateralFixture } from "./fixtures.ts";
+import {
+  getAverageEntryPrice,
+} from "./lib/viewHelpers.ts";
 
 const { viem, networkHelpers } = await network.connect();
 const SCALE = 1_000_000n;
@@ -236,7 +239,7 @@ describe("HashPowerPerpsDEX exact entry-value upgrade-and-reset", function () {
       netEntryValue: expectedEntry,
     });
     assert.equal(
-      await perps.read.getAverageEntryPrice([buyer.account.address]),
+      await getAverageEntryPrice(perps, buyer.account.address),
       derivedAverage(expectedEntry, expectedQty),
     );
 
@@ -253,7 +256,7 @@ describe("HashPowerPerpsDEX exact entry-value upgrade-and-reset", function () {
       netQuantity: 0n,
       netEntryValue: 0n,
     });
-    assert.equal(await perps.read.getAverageEntryPrice([buyer.account.address]), 0n);
+    assert.equal(await getAverageEntryPrice(perps, buyer.account.address), 0n);
   });
 
   it("resetState clears a canonical exact-entry position", async function () {

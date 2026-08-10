@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import { network } from "hardhat";
 import { parseUnits, parseEventLogs } from "viem";
 import { deployPerpsWithCollateralFixture } from "./fixtures.ts";
+import {
+  getBestAskPrice,
+} from "./lib/viewHelpers.ts";
 
 const { viem, networkHelpers } = await network.connect();
 
@@ -38,7 +41,7 @@ describe("HashPowerPerpsDEX - createOrder time-in-force", () => {
 
     assert.equal((await perps.read.getUserOrders([buyer.account.address])).length, 0);
     assert.equal(await perps.read.getQuantityAtPrice([price, true]), 0n);
-    assert.equal(await perps.read.getBestAskPrice(), 0n);
+    assert.equal(await getBestAskPrice(perps), 0n);
   });
 
 

@@ -135,13 +135,10 @@ async function main() {
   ];
   const maxLevels = 10n;
 
-  const [[bids, asks], positions, averageEntries, balances, ownerBal, reserve, userOrderIds] = await Promise.all([
+  const [[bids, asks], positions, balances, ownerBal, reserve, userOrderIds] = await Promise.all([
     perps.read.getOrderBookPrices([maxLevels]),
     Promise.all(
       accountLabels.map(([, account]) => perps.read.getUserPosition([account.account.address])),
-    ),
-    Promise.all(
-      accountLabels.map(([, account]) => perps.read.getAverageEntryPrice([account.account.address])),
     ),
     Promise.all(
       accountLabels.map(([, account]) => usdcMock.read.balanceOf([account.account.address])),
@@ -152,6 +149,12 @@ async function main() {
       accountLabels.map(([, account]) => perps.read.getUserOrders([account.account.address])),
     ),
   ]);
+  const averageEntries = positions.map((position) => {
+    if (position.netQuantity === 0n) return 0n;
+    const absQty = position.netQuantity < 0n ? -position.netQuantity : position.netQuantity;
+    const absEntry = position.netEntryValue < 0n ? -position.netEntryValue : position.netEntryValue;
+    return (absEntry * 1_000_000n) / absQty;
+  });
 
   const userOrders = await Promise.all(
     userOrderIds.map((orderIds: readonly Hex[]) =>

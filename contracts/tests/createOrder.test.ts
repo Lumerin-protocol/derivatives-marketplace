@@ -8,6 +8,9 @@ import {
   deployPerpsWithLiquidatablePositionFixture,
 } from "./fixtures.ts";
 import { TimeInForce } from "../fixtures/timeInForce.ts";
+import {
+  getAverageEntryPrice,
+} from "./lib/viewHelpers.ts";
 
 const { viem, networkHelpers } = await network.connect();
 
@@ -130,7 +133,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
 
       const position = await perps.read.getUserPosition([buyer2.account.address]);
       assert.equal(position.netQuantity, qty);
-      assert.equal(await perps.read.getAverageEntryPrice([buyer2.account.address]), marketPrice + tick);
+      assert.equal(await getAverageEntryPrice(perps, buyer2.account.address), marketPrice + tick);
       assert.equal(orderMatchedEvent.args.taker, getAddress(buyer2.account.address));
     });
 
@@ -149,7 +152,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
 
       const position = await perps.read.getUserPosition([buyer2.account.address]);
       assert.equal(position.netQuantity, -qty);
-      assert.equal(await perps.read.getAverageEntryPrice([buyer2.account.address]), marketPrice - tick);
+      assert.equal(await getAverageEntryPrice(perps, buyer2.account.address), marketPrice - tick);
     });
 
     it("should partially match and leave remaining as resting order", async function () {
