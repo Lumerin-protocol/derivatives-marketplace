@@ -243,10 +243,11 @@ describe("Level 1 Perps Integration", () => {
         deployPerpsIntegrationFixture,
       );
 
+      // setUserPosition takes an entry *price* per unit (the mock derives netEntryValue).
       await perpsMock.write.setUserPosition([
         traders.trader1.account.address,
         2_000_000n,
-        100000_000_000n,
+        50000_000_000n,
       ]);
 
       const [qty, entry] = await engine.read.getPerpPosition([traders.trader1.account.address]);
@@ -327,12 +328,10 @@ describe("Level 1 Perps Integration", () => {
         -1_000_000n,
         52000_000_000n,
       ]);
-      await perpsMock.write.setBalance([traders.trader1.account.address, 20_000_000_000n]);
       await perpsMock.write.setUnrealizedPnl([traders.trader1.account.address, 1_500_000_000n]);
       // Resting asks on top of an existing short: the sell leg takes the account to
       // net short 2 lots, so the orders genuinely cost margin.
       await perpsMock.write.setOrderDeltas([traders.trader1.account.address, 0n, 1_000_000n]);
-      await perpsMock.write.setMaintenanceMargin([traders.trader1.account.address, 3_000_000_000n]);
 
       const gas = await (await viem.getPublicClient()).estimateGas({
         account: traders.trader1.account,
@@ -370,10 +369,12 @@ describe("Level 1 Perps Integration", () => {
         -5_000_000n,
         50000_000_000n,
       ]);
-      await perpsMock.write.setMaintenanceMargin([traders.trader1.account.address, 8_000_000_000n]);
+      // The flag is the portfolio margin engine's predicate (balance < portfolio MM):
+      // a perp loss deeper than the trader's whole 50k vault balance drives MM past it.
+      await perpsMock.write.setUnrealizedPnl([traders.trader1.account.address, -60_000_000_000n]);
 
       const p = await engine.read.getPortfolioOverview([traders.trader1.account.address]);
-      assert.equal(p.perpIsLiquidatable, true, "perps should be flagged as liquidatable");
+      assert.equal(p.perpIsLiquidatable, true, "underwater perp leg should flag liquidation risk");
     });
   });
 

@@ -75,7 +75,7 @@ Users deposit an ERC-20 collateral token (e.g. USDC) into the contract, which mi
 Margin is **not** computed by this contract. Both tiers come from the `PortfolioMarginEngine`, which nets exposure across every product settling into the same `CollateralVault` (perps, futures, options):
 
 - **Initial margin** — `portfolioMargin.computePortfolioIM(user)`. Required to place orders (non-reduce-only) and to withdraw.
-- **Maintenance margin** — `portfolioMargin.computePortfolioMM(user)`. Below this the account is liquidatable; `isLiquidatable` and every `liquidate*` entry point compare the vault balance against it.
+- **Maintenance margin** — `portfolioMargin.computePortfolioMM(user)`. Below this the account is liquidatable; the engine's `isLiquidatable(user)` view and every `liquidate*` entry point compare the vault balance against it.
 
 #### What the DEX contributes
 

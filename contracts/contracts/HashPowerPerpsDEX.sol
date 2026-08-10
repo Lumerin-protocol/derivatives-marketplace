@@ -27,7 +27,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @dev Lives here rather than in {HashPowerPerpsDEXBase} so that a diff to
     ///      this file and the version it ships under stay in the same place,
     ///      mirroring {Futures}.
-    string public constant VERSION = "3.0.0";
+    string public constant VERSION = "4.0.0";
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ICollateralVault _vault) HashPowerPerpsDEXBase(_vault) { }
@@ -209,6 +209,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         if (order.participant != _participant) {
             revert OrderNotBelongToSender();
         }
+        if (order.quantity == 0) revert OrderNotExists();
 
         bool isBid = order.quantity > 0;
         _removeRestingOrder(_orderId, order.participant, order.price, order.quantity, false);
@@ -231,14 +232,6 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         _reduceRestingOrder(_orderId, order, _newQuantity);
     }
 
-    /// @notice Check if a user's position or resting orders can be liquidated.
-    /// @dev An account with order delta but no position is still actionable through
-    ///      `liquidateOrder(s)` when it fails portfolio maintenance margin.
-    function isLiquidatable(address _user) public view returns (bool) {
-        if (positions[_user].netQuantity == 0 && !portfolioMargin.hasRestingOrderDelta(_user)) return false;
-        return _underwater(_user);
-    }
-
     /// @notice Force-close a single underwater user's position. Permissionless.
     /// @dev Strict orders-first invariant: reverts with `OrdersStillOpen` if the user has any
     ///      open orders anywhere in the portfolio, not merely on this book. The keeper must
@@ -253,14 +246,17 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         _updateGlobalFunding();
         _settleFunding(_user);
 
-        Position memory position = positions[_user];
-        if (position.netQuantity == 0) revert NotLiquidatable();
-        if (!_underwater(_user)) revert NotLiquidatable();
+        // Precondition order mirrors Futures so both venues revert identically on the
+        // same bad input: orders-first, then health, then argument validity, then state.
         // Portfolio-wide, not just this book: a position here can be the only thing
         // offsetting resting orders at another venue, and closing it would strand that
         // leg and raise the requirement. See `IPortfolioMarginEngine.hasRestingOrderDelta`.
         if (portfolioMargin.hasRestingOrderDelta(_user)) revert OrdersStillOpen();
+        if (!_underwater(_user)) revert NotLiquidatable();
         if (_closeQty == 0) revert InvalidQty();
+
+        Position memory position = positions[_user];
+        if (position.netQuantity == 0) revert NotLiquidatable();
 
         uint256 absNet = M.abs(position.netQuantity);
         uint256 closeAbs = _closeQty < absNet ? _closeQty : absNet;
@@ -296,6 +292,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
 
         Order memory order = orders[_orderId];
         if (order.participant != _user) revert OrderNotBelongToUser();
+        if (order.quantity == 0) revert OrderNotExists();
 
         _doLiquidateOrder(_user, _orderId, order);
     }

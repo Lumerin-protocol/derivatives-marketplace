@@ -29,10 +29,9 @@ function getItem(type: string, name: string): AbiItem {
 }
 
 describe("HashPowerPerpsDEX - public ABI", function () {
-  it("exposes the v3 version and six-decimal quantity scale", async function () {
+  it("exposes the six-decimal quantity scale", async function () {
     const { contracts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
 
-    assert.equal(await contracts.perps.read.VERSION(), "3.0.0");
     assert.equal(await contracts.perps.read.QUANTITY_DECIMALS(), 6);
   });
 

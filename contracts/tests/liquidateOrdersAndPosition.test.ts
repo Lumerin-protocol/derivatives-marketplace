@@ -277,7 +277,7 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition", function () {
     it("stops early once user becomes healthy mid-batch", async function () {
       const data = await networkHelpers.loadFixture(deployUnderwaterWithOrdersFixture);
       const { contracts, accounts } = data;
-      const { perps, priceOracle } = contracts;
+      const { perps, pme, priceOracle } = contracts;
       const { seller, buyer2 } = accounts;
 
       // Barely underwater so cancelling resting shorts can flip healthy mid-batch.
@@ -286,7 +286,7 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition", function () {
       const bump = initialPrice + tick * 30n;
       await priceOracle.write.setPrice([bump, data.config.oracle.decimals]);
 
-      const underwater = await perps.read.isLiquidatable([seller.account.address]);
+      const underwater = await pme.read.isLiquidatable([seller.account.address]);
       if (!underwater) {
         await data.makeUnderwater();
       }

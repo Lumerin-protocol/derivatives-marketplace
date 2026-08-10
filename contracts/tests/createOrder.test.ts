@@ -322,7 +322,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       const maintenanceMargin = await pme.read.computePortfolioMM([seller.account.address]);
       assert.ok(balance > maintenanceMargin, "balance should be above maintenance margin");
       assert.ok(
-        !(await perps.read.isLiquidatable([seller.account.address])),
+        !(await pme.read.isLiquidatable([seller.account.address])),
         "seller should not be liquidatable",
       );
 
@@ -353,7 +353,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       const maintenanceMargin = await pme.read.computePortfolioMM([seller.account.address]);
       assert.ok(balance > maintenanceMargin, "balance should be above maintenance margin");
       assert.ok(
-        !(await perps.read.isLiquidatable([seller.account.address])),
+        !(await pme.read.isLiquidatable([seller.account.address])),
         "seller should not be liquidatable before closing order",
       );
 
@@ -363,7 +363,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
 
       // The resting closing order should NOT push the user into liquidation
       assert.ok(
-        !(await perps.read.isLiquidatable([seller.account.address])),
+        !(await pme.read.isLiquidatable([seller.account.address])),
         "seller should not be liquidatable after placing reduce-only closing order",
       );
     });
@@ -384,7 +384,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       const maintenanceMargin = await pme.read.computePortfolioMM([seller.account.address]);
       assert.ok(balance > maintenanceMargin, "balance should be above maintenance margin");
       assert.ok(
-        !(await perps.read.isLiquidatable([seller.account.address])),
+        !(await pme.read.isLiquidatable([seller.account.address])),
         "seller should not be liquidatable",
       );
 
@@ -412,7 +412,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       const maintenanceMargin = await pme.read.computePortfolioMM([seller.account.address]);
       assert.ok(balance > maintenanceMargin, "balance should be above maintenance margin");
       assert.ok(
-        !(await perps.read.isLiquidatable([seller.account.address])),
+        !(await pme.read.isLiquidatable([seller.account.address])),
         "seller should not be liquidatable",
       );
 

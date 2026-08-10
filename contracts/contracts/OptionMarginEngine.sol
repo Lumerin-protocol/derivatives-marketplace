@@ -493,6 +493,11 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
         ///      attributable to a single venue when the engine took over netting order
         ///      delta across products. Zero when portfolioMargin is not linked.
         uint256 perpOrderMargin; // token decimals
+        /// @dev Portfolio-wide, like `perpOrderMargin`: sourced from
+        ///      `IPortfolioMarginEngine.isLiquidatable` (balance < portfolio MM), since
+        ///      liquidatability is a property of the portfolio, not the perps venue.
+        ///      The field name is retained for ABI/consumer compatibility. Zero (false)
+        ///      when portfolioMargin is not linked.
         bool perpIsLiquidatable;
         // Cross-product requirement — the only figure margin calls are made against
         uint256 portfolioIM; // token decimals
@@ -514,12 +519,12 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
         if (address(portfolioMargin) != address(0)) {
             (p.portfolioIM, p.portfolioMM) = portfolioMargin.computePortfolioMargins(user);
             p.perpOrderMargin = portfolioMargin.orderMarginOf(user);
+            p.perpIsLiquidatable = portfolioMargin.isLiquidatable(user);
         }
 
         if (address(perpsDex) != address(0)) {
             p.perpNetQuantity = perpsDex.getUserPosition(user).netQuantity;
             p.perpUnrealizedPnl = perpsDex.getUnrealizedPnl(user);
-            p.perpIsLiquidatable = perpsDex.isLiquidatable(user);
         }
     }
 

@@ -426,7 +426,7 @@ describe("HashPowerPerpsDEX - Funding Fees", function () {
 
     it("should settle funding before liquidation", async function () {
       const { contracts, accounts, config, utils } = await networkHelpers.loadFixture(deployPerpsFixture);
-      const { perps, priceOracle, vault } = contracts;
+      const { perps, pme, priceOracle, vault } = contracts;
       const { seller, buyer, buyer2, owner } = accounts;
 
       await perps.write.setFundingParameters([100n, 86400n], { account: owner.account });
@@ -451,7 +451,7 @@ describe("HashPowerPerpsDEX - Funding Fees", function () {
       const newPrice = initialPrice * 2n;
       await priceOracle.write.setPrice([newPrice, config.oracle.decimals]);
 
-      const isLiquidatable = await perps.read.isLiquidatable([seller.account.address]);
+      const isLiquidatable = await pme.read.isLiquidatable([seller.account.address]);
       assert.ok(isLiquidatable);
 
       // Strict orders-first invariant: must cancel resting orders before the position can be liquidated.

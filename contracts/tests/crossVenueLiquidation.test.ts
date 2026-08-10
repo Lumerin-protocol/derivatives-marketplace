@@ -112,7 +112,7 @@ describe("HashPowerPerpsDEX - cross-venue liquidation", function () {
       "local book is empty — the local gate cannot catch this",
     );
     assert.ok(
-      await perps.read.isLiquidatable([sellerAddr]),
+      await pme.read.isLiquidatable([sellerAddr]),
       "order delta alone puts the account under MM",
     );
 

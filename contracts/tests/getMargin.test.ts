@@ -170,37 +170,37 @@ describe("HashPowerPerpsDEX - Margin View Functions", function () {
     });
   });
 
-  describe("isLiquidatable", function () {
+  describe("isLiquidatable (portfolio margin engine)", function () {
     it("should return false for user with no position", async function () {
       const { contracts, accounts } = await loadFixture(deployPerpsWithCollateralFixture);
-      const { perps } = contracts;
+      const { pme } = contracts;
       const { buyer } = accounts;
 
-      const isLiquidatable = await perps.read.isLiquidatable([buyer.account.address]);
+      const isLiquidatable = await pme.read.isLiquidatable([buyer.account.address]);
       assert.ok(!isLiquidatable);
     });
 
     it("should return false for healthy position", async function () {
       const { contracts, accounts } = await loadFixture(deployPerpsWithPositionsFixture);
-      const { perps } = contracts;
+      const { pme } = contracts;
       const { buyer } = accounts;
 
-      const isLiquidatable = await perps.read.isLiquidatable([buyer.account.address]);
+      const isLiquidatable = await pme.read.isLiquidatable([buyer.account.address]);
       assert.ok(!isLiquidatable);
     });
 
     it("should return true for underwater position", async function () {
       const data = await loadFixture(deployPerpsWithLiquidatablePositionFixture);
       const { contracts, accounts } = data;
-      const { perps } = contracts;
+      const { pme } = contracts;
       const { seller } = accounts;
 
-      let isLiquidatable = await perps.read.isLiquidatable([seller.account.address]);
+      let isLiquidatable = await pme.read.isLiquidatable([seller.account.address]);
       assert.ok(!isLiquidatable);
 
       await data.makeLiquidatable();
 
-      isLiquidatable = await perps.read.isLiquidatable([seller.account.address]);
+      isLiquidatable = await pme.read.isLiquidatable([seller.account.address]);
       assert.ok(isLiquidatable);
     });
 
@@ -222,14 +222,14 @@ describe("HashPowerPerpsDEX - Margin View Functions", function () {
       });
       assert.equal((await perps.read.getUserPosition([buyer.account.address])).netQuantity, 0n);
       assert.equal(await perps.read.hasRestingOrderDelta([buyer.account.address]), true);
-      assert.equal(await perps.read.isLiquidatable([buyer.account.address]), false);
+      assert.equal(await pme.read.isLiquidatable([buyer.account.address]), false);
 
       await priceOracle.write.setPrice([mark / 2n, config.oracle.decimals]);
       assert.ok(
         (await vault.read.balanceOf([buyer.account.address])) <
           (await pme.read.computePortfolioMM([buyer.account.address])),
       );
-      assert.equal(await perps.read.isLiquidatable([buyer.account.address]), true);
+      assert.equal(await pme.read.isLiquidatable([buyer.account.address]), true);
     });
 
     it("should correctly identify liquidatable when balance < portfolio maintenance margin", async function () {
@@ -244,7 +244,7 @@ describe("HashPowerPerpsDEX - Margin View Functions", function () {
       const maintenanceMargin = await pme.read.computePortfolioMM([seller.account.address]);
 
       assert.ok(balance < maintenanceMargin);
-      assert.ok(await perps.read.isLiquidatable([seller.account.address]));
+      assert.ok(await pme.read.isLiquidatable([seller.account.address]));
     });
   });
 });

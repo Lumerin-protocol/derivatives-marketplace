@@ -64,10 +64,10 @@ describe("HashPowerPerpsDEX - liquidatePosition(user, closeQty) partial close", 
   it("reverts NotLiquidatable when the user is healthy (MM trigger)", async function () {
     const data = await networkHelpers.loadFixture(partialPerpsFixture);
     const { contracts, accounts, config } = data;
-    const { perps } = contracts;
+    const { perps, pme } = contracts;
     const { seller, buyer2 } = accounts;
 
-    assert.ok(!(await perps.read.isLiquidatable([seller.account.address])));
+    assert.ok(!(await pme.read.isLiquidatable([seller.account.address])));
 
     await viem.assertions.revertWithCustomError(
       perps.write.liquidatePosition([seller.account.address, config.qty], {
@@ -107,7 +107,7 @@ describe("HashPowerPerpsDEX - liquidatePosition(user, closeQty) partial close", 
     const { seller, buyer2 } = accounts;
 
     await data.pump(13n, 10n); // +30%
-    assert.ok(await perps.read.isLiquidatable([seller.account.address]));
+    assert.ok(await pme.read.isLiquidatable([seller.account.address]));
 
     const closeQty = parseUnits("30", config.quantityDecimals);
     await perps.write.liquidatePosition([seller.account.address, closeQty], {

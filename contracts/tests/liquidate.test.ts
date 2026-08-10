@@ -12,10 +12,10 @@ const { viem, networkHelpers } = await network.connect();
 describe("HashPowerPerpsDEX - liquidatePosition", function () {
   it("should revert when position is healthy", async function () {
     const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsWithPositionsFixture);
-    const { perps } = contracts;
+    const { perps, pme } = contracts;
     const { seller, buyer2 } = accounts;
 
-    const isLiquidatable = await perps.read.isLiquidatable([seller.account.address]);
+    const isLiquidatable = await pme.read.isLiquidatable([seller.account.address]);
     assert.ok(!isLiquidatable);
 
     await viem.assertions.revertWithCustomError(
@@ -28,7 +28,7 @@ describe("HashPowerPerpsDEX - liquidatePosition", function () {
   it("should liquidate underwater position successfully", async function () {
     const data = await networkHelpers.loadFixture(deployPerpsWithLiquidatablePositionFixture);
     const { contracts, accounts } = data;
-    const { perps } = contracts;
+    const { perps, pme } = contracts;
     const { seller, buyer2 } = accounts;
 
     const positionBefore = await perps.read.getUserPosition([seller.account.address]);
@@ -36,7 +36,7 @@ describe("HashPowerPerpsDEX - liquidatePosition", function () {
 
     await data.makeLiquidatable();
 
-    const isLiquidatable = await perps.read.isLiquidatable([seller.account.address]);
+    const isLiquidatable = await pme.read.isLiquidatable([seller.account.address]);
     assert.ok(isLiquidatable);
 
     await perps.write.liquidatePosition([seller.account.address, maxUint256], { account: buyer2.account });
