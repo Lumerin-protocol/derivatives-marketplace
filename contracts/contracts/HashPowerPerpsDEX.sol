@@ -437,9 +437,14 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         return participantOrderIdsIndex[_user].values();
     }
 
-    /// @notice Get user's net position
+    /// @notice Get the user's exact signed position aggregate.
     function getUserPosition(address _user) external view returns (Position memory) {
         return positions[_user];
+    }
+
+    /// @notice Get the absolute average entry price derived from the exact entry value.
+    function getAverageEntryPrice(address _user) external view returns (uint256) {
+        return _averageEntryPrice(positions[_user]);
     }
 
     /// @notice Net linear delta of the user's position, signed and scaled to the

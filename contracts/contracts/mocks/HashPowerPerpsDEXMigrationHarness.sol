@@ -21,4 +21,18 @@ contract HashPowerPerpsDEXMigrationHarness is HashPowerPerpsDEX {
         collectedFeesBalance = _value;
     }
 
+    /// @dev Recreates the legacy `(int256 netQuantity, uint256 aggregatedEntryPrice)`
+    ///      bytes in the canonical position slots before an atomic upgrade-and-reset.
+    function setLegacyPosition(address _user, int256 _netQuantity, uint256 _legacyAverage) external {
+        Position storage position = positions[_user];
+        position.netQuantity = _netQuantity;
+        assembly {
+            sstore(add(position.slot, 1), _legacyAverage)
+        }
+    }
+
+    function setFundingSnapshot(address _user, int256 _snapshot) external {
+        userFundingSnapshot[_user] = _snapshot;
+    }
+
 }

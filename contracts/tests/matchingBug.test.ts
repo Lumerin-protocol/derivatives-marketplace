@@ -142,7 +142,7 @@ describe("HashPowerPerpsDEX - Self-Trade Prevention", function () {
     const posB = await perps.read.getUserPosition([userB.account.address]);
     assert.equal(posA.netQuantity, qty4);
     assert.equal(posB.netQuantity, -qty4);
-    assert.equal(posA.aggregatedEntryPrice, price);
+    assert.equal(await perps.read.getAverageEntryPrice([userA.account.address]), price);
   });
 
   it("matching bug: should correctly update quantity and perform matching correctly", async function () {
@@ -166,8 +166,8 @@ describe("HashPowerPerpsDEX - Self-Trade Prevention", function () {
 
     assert.equal(positionA.netQuantity, -qty);
     assert.equal(positionB.netQuantity, qty);
-    assert.equal(positionA.aggregatedEntryPrice, price + tick);
-    assert.equal(positionB.aggregatedEntryPrice, price + tick);
+    assert.equal(await perps.read.getAverageEntryPrice([userA.account.address]), price + tick);
+    assert.equal(await perps.read.getAverageEntryPrice([userB.account.address]), price + tick);
     assert.equal(ordersA.length, 1);
     assert.equal(quantityAtPrice, qty);
     assert.equal(orderBook[1][0], price);

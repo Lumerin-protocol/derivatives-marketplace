@@ -16,6 +16,7 @@ import { IOptionsEnginePortfolioView } from "collateral-margin/contracts/contrac
 import { IPortfolioMarginEngine } from "collateral-margin/contracts/contracts/interfaces/IPortfolioMarginEngine.sol";
 import { Black76Lib } from "./libs/Black76Lib.sol";
 import { FixedPointMathLib } from "./libs/FixedPointMathLib.sol";
+import { MathLib as M } from "./libs/MathLib.sol";
 
 /// @title OptionMarginEngine — Collateral, positions, IV, and margin
 /// @notice Holds user collateral, tracks option positions per series,
@@ -516,8 +517,7 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
         }
 
         if (address(perpsDex) != address(0)) {
-            HashPowerPerpsDEX.Position memory pos = perpsDex.getUserPosition(user);
-            p.perpNetQuantity = pos.netQuantity;
+            p.perpNetQuantity = perpsDex.getUserPosition(user).netQuantity;
             p.perpUnrealizedPnl = perpsDex.getUnrealizedPnl(user);
             p.perpIsLiquidatable = perpsDex.isLiquidatable(user);
         }
@@ -526,8 +526,13 @@ contract OptionMarginEngine is Initializable, UUPSUpgradeable, OwnableUpgradeabl
     /// @notice Read a user's perp position (convenience wrapper).
     function getPerpPosition(address user) external view returns (int256 netQuantity, uint256 avgEntryPrice) {
         if (address(perpsDex) == address(0)) return (0, 0);
-        HashPowerPerpsDEX.Position memory pos = perpsDex.getUserPosition(user);
-        return (pos.netQuantity, pos.aggregatedEntryPrice);
+        HashPowerPerpsDEX.Position memory position = perpsDex.getUserPosition(user);
+        netQuantity = position.netQuantity;
+        if (netQuantity == 0) return (0, 0);
+        return (
+            netQuantity,
+            (M.abs(position.netEntryValue) * 1e6) / M.abs(netQuantity)
+        );
     }
 
     /// @notice Read a user's perp collateral balance from the vault.

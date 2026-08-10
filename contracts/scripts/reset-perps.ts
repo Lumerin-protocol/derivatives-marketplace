@@ -101,7 +101,7 @@ async function main() {
       perps.read.getUserOrders([participant]),
       perps.read.getUserPosition([participant]),
     ]);
-    if (orderIds.length !== 0 || position.netQuantity !== 0n || position.aggregatedEntryPrice !== 0n) {
+    if (orderIds.length !== 0 || position.netQuantity !== 0n || position.netEntryValue !== 0n) {
       throw new Error(`Participant reset verification failed for ${participant}`);
     }
   }

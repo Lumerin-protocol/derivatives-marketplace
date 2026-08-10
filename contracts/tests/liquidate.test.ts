@@ -74,7 +74,7 @@ describe("HashPowerPerpsDEX - liquidatePosition", function () {
 
     assert.deepEqual(await perps.read.getUserPosition([seller.account.address]), {
       netQuantity: 0n,
-      aggregatedEntryPrice: 0n,
+      netEntryValue: 0n,
     });
   });
 

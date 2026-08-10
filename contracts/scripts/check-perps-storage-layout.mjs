@@ -28,12 +28,30 @@ function canonicalType(typeId, types) {
   if (type.value) canonical.value = canonicalType(type.value, types);
   if (type.base) canonical.base = canonicalType(type.base, types);
   if (type.members) {
-    canonical.members = type.members.map((member) => ({
-      label: member.label,
-      slot: member.slot,
-      offset: member.offset,
-      type: canonicalType(member.type, types),
-    }));
+    canonical.members = type.members.map((member) => {
+      let memberType = canonicalType(member.type, types);
+      let label = member.label;
+      // The exact-entry reset intentionally reinterprets only Position's second
+      // full-width slot from uint256 average price to int256 signed entry value.
+      // Normalize that one semantic change for the historical fingerprint;
+      // slot, offset, width, encoding, and every other member remain strict.
+      if (
+        member.label === "netEntryValue" &&
+        member.slot === "1" &&
+        member.offset === 0 &&
+        memberType.label === "int256" &&
+        memberType.numberOfBytes === "32"
+      ) {
+        label = "aggregatedEntryPrice";
+        memberType = { ...memberType, label: "uint256" };
+      }
+      return {
+        label,
+        slot: member.slot,
+        offset: member.offset,
+        type: memberType,
+      };
+    });
   }
   return canonical;
 }

@@ -103,7 +103,7 @@ describe("HashPowerPerpsDEX - getUnrealizedPnl", function () {
     const { buyer } = accounts;
 
     const position = await perps.read.getUserPosition([buyer.account.address]);
-    const entryPrice = position.aggregatedEntryPrice;
+    const entryPrice = await perps.read.getAverageEntryPrice([buyer.account.address]);
     const quantity = position.netQuantity;
 
     const priceDiff = parseUnits("1000", 6);

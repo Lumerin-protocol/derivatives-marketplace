@@ -246,7 +246,7 @@ describe("Level 1 Perps Integration", () => {
       await perpsMock.write.setUserPosition([
         traders.trader1.account.address,
         2_000_000n,
-        50000_000_000n,
+        100000_000_000n,
       ]);
 
       const [qty, entry] = await engine.read.getPerpPosition([traders.trader1.account.address]);

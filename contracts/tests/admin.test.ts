@@ -335,6 +335,18 @@ describe("HashPowerPerpsDEX - Admin Functions", function () {
   });
 
   describe("contract size (fixed compile-time constant)", function () {
+    it("keeps the implementation runtime within the EIP-170 limit", async function () {
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
+      const implementation = await viem.deployContract("HashPowerPerpsDEX", [
+        contracts.vault.address,
+      ]);
+      const code = await accounts.pc.getCode({ address: implementation.address });
+      assert.ok(code);
+      const runtimeSize = (code.length - 2) / 2;
+      console.log(`  HashPowerPerpsDEX runtime: ${runtimeSize.toLocaleString()} B`);
+      assert.ok(runtimeSize <= 24_576, `runtime ${runtimeSize} B exceeds EIP-170`);
+    });
+
     it("exposes CONTRACT_SIZE_HPS_DAY = 1e15 (1 PH/s/day)", async function () {
       const { contracts } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { perps } = contracts;

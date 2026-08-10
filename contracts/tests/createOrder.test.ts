@@ -130,7 +130,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
 
       const position = await perps.read.getUserPosition([buyer2.account.address]);
       assert.equal(position.netQuantity, qty);
-      assert.equal(position.aggregatedEntryPrice, marketPrice + tick);
+      assert.equal(await perps.read.getAverageEntryPrice([buyer2.account.address]), marketPrice + tick);
       assert.equal(orderMatchedEvent.args.taker, getAddress(buyer2.account.address));
     });
 
@@ -149,7 +149,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
 
       const position = await perps.read.getUserPosition([buyer2.account.address]);
       assert.equal(position.netQuantity, -qty);
-      assert.equal(position.aggregatedEntryPrice, marketPrice - tick);
+      assert.equal(await perps.read.getAverageEntryPrice([buyer2.account.address]), marketPrice - tick);
     });
 
     it("should partially match and leave remaining as resting order", async function () {

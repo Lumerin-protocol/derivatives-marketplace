@@ -39,7 +39,7 @@ describe("HashPowerPerpsDEX.resetParticipantState", function () {
     assert.deepEqual(await perps.read.getUserOrders([seller.account.address]), []);
     assert.deepEqual(await perps.read.getUserPosition([seller.account.address]), {
       netQuantity: 0n,
-      aggregatedEntryPrice: 0n,
+      netEntryValue: 0n,
     });
     assert.equal(await perps.read.getPendingFunding([seller.account.address]), 0n);
     assert.deepEqual(await perps.read.getUserOrders([buyer.account.address]), buyerOrderIds);

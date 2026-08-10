@@ -156,7 +156,7 @@ abstract contract HashPowerPerpsDEXBase is
     /// @notice Represents a user's net position
     struct Position {
         int256 netQuantity; // Net position quantity (positive = long, negative = short)
-        uint256 aggregatedEntryPrice; // Weighted average entry price
+        int256 netEntryValue; // Exact signed entry value in collateral units
     }
 
     /// @notice Order lifetime / fill policy. GTD is not supported.
@@ -719,8 +719,8 @@ abstract contract HashPowerPerpsDEXBase is
             _takerFee,
             makerPos.netQuantity,
             takerPos.netQuantity,
-            makerPos.aggregatedEntryPrice,
-            takerPos.aggregatedEntryPrice
+            _averageEntryPrice(makerPos),
+            _averageEntryPrice(takerPos)
         );
     }
 
@@ -752,63 +752,74 @@ abstract contract HashPowerPerpsDEXBase is
         );
     }
 
-    /// @notice Update a user's net position with aggregated entry price
+    function _averageEntryPrice(Position memory _position) internal pure returns (uint256) {
+        if (_position.netQuantity == 0) return 0;
+        return (M.abs(_position.netEntryValue) * (10 ** QUANTITY_DECIMALS)) / M.abs(_position.netQuantity);
+    }
+
+    function _signedValue(uint256 _price, int256 _quantity) internal pure returns (int256) {
+        return (_quantity * int256(_price)) / int256(10 ** QUANTITY_DECIMALS);
+    }
+
+    /// @notice Update a user's net position with exact signed entry value
     function _updateUserPosition(address _user, int256 _quantity, uint256 _tradePrice) internal {
         Position storage position = positions[_user];
+        int256 entryValue = position.netEntryValue;
+        int256 tradeValue = _signedValue(_tradePrice, _quantity);
 
         // If no existing position, initialize it
         if (position.netQuantity == 0) {
             position.netQuantity = _quantity;
-            position.aggregatedEntryPrice = _tradePrice;
+            position.netEntryValue = tradeValue;
             userFundingSnapshot[_user] = cumulativeFundingPerUnit;
             return;
         }
 
-        // Same direction - add to position with weighted average entry price
+        // Same direction - add exact signed entry values.
         if (M.isSameSign(position.netQuantity, _quantity)) {
-            uint256 oldValue = M.abs(position.netQuantity) * position.aggregatedEntryPrice;
-            uint256 newValue = M.abs(_quantity) * _tradePrice;
-            int256 newNet = position.netQuantity + _quantity;
-            position.aggregatedEntryPrice = (oldValue + newValue) / M.abs(newNet);
-            position.netQuantity = newNet;
+            position.netQuantity += _quantity;
+            position.netEntryValue = entryValue + tradeValue;
             return;
         }
 
         // Opposite direction: settle the reduced part, then open remainder (if any)
-        _settleOpposite(_user, _quantity, _tradePrice);
+        _settleOpposite(_user, _quantity, _tradePrice, entryValue);
     }
 
     /// @notice Handle opposite-direction trade (partial/full close or flip)
-    function _settleOpposite(address _user, int256 _quantity, uint256 _tradePrice) internal {
+    function _settleOpposite(address _user, int256 _quantity, uint256 _tradePrice, int256 _entryValue) internal {
         Position storage position = positions[_user];
         uint256 absQuantity = M.abs(_quantity);
         uint256 oldAbsQuantity = M.abs(position.netQuantity);
         uint256 settledAbs = absQuantity < oldAbsQuantity ? absQuantity : oldAbsQuantity;
-        _settleReducedPosition(
-            _user,
-            int256(_tradePrice) - int256(position.aggregatedEntryPrice),
-            _toSignedQuantity(settledAbs, position.netQuantity)
-        );
+        int256 signedSettled = _toSignedQuantity(settledAbs, position.netQuantity);
+        int256 remainingEntryValue;
+        if (settledAbs < oldAbsQuantity) {
+            remainingEntryValue =
+                (_entryValue * int256(oldAbsQuantity - settledAbs)) / int256(oldAbsQuantity);
+        }
+        _settleReducedPosition(_user, _tradePrice, signedSettled, _entryValue - remainingEntryValue);
 
         if (absQuantity > oldAbsQuantity) {
             // Flip: close old position and open opposite
             int256 openQty = _toSignedQuantity(absQuantity - oldAbsQuantity, _quantity);
             position.netQuantity = openQty;
-            position.aggregatedEntryPrice = _tradePrice;
+            position.netEntryValue = _signedValue(_tradePrice, openQty);
             userFundingSnapshot[_user] = cumulativeFundingPerUnit;
         } else if (position.netQuantity + _quantity == 0) {
             position.netQuantity = 0;
-            position.aggregatedEntryPrice = 0;
+            position.netEntryValue = 0;
         } else {
             position.netQuantity += _quantity;
+            position.netEntryValue = remainingEntryValue;
         }
     }
 
     // ── Internal helpers: margin / liquidation ────────────────────────────────
 
     /// @dev Closes `_closeAbs` (< |netQuantity|) of a verified-underwater user's position at the
-    ///      mark, realizes PnL on the closed slice via {_settleReducedPosition}, and reduces
-    ///      `netQuantity` toward zero (entry price unchanged). Does NOT pay the fee and does NOT
+    ///      mark, realizes PnL on the closed slice via {_settleReducedPosition}, and scales
+    ///      the exact entry value with `netQuantity`. Does NOT pay the fee and does NOT
     ///      emit — the caller applies the incentive gate and emits `PositionLiquidated`.
     ///      Returns the realized `pnl` on the closed slice and the SIGNED closed quantity (same
     ///      sign as the position). Callers MUST have already checked the underwater / orders-clear
@@ -822,16 +833,18 @@ abstract contract HashPowerPerpsDEXBase is
         internal
         returns (int256 pnl, int256 signedClose)
     {
-        int256 priceDiff = int256(_currentPrice) - int256(_position.aggregatedEntryPrice);
-
         bool isLong = _position.netQuantity > 0;
         signedClose = M.toSigned(isLong, _closeAbs);
+        int256 entryValue = _position.netEntryValue;
+        uint256 absNet = M.abs(_position.netQuantity);
+        int256 remainingEntryValue = (entryValue * int256(absNet - _closeAbs)) / int256(absNet);
 
-        pnl = _settleReducedPosition(_user, priceDiff, signedClose);
+        pnl = _settleReducedPosition(_user, _currentPrice, signedClose, entryValue - remainingEntryValue);
 
-        // Reduce magnitude toward zero; aggregatedEntryPrice is unchanged by a reducing close.
         // signedClose has the position's sign, so subtracting it moves netQuantity toward zero.
-        positions[_user].netQuantity = _position.netQuantity - signedClose;
+        Position storage position = positions[_user];
+        position.netQuantity = _position.netQuantity - signedClose;
+        position.netEntryValue = remainingEntryValue;
     }
 
     /// @dev Closes the user's position and settles PnL against the insurance fund. Caller must
@@ -839,8 +852,8 @@ abstract contract HashPowerPerpsDEXBase is
     ///      (computed as `currentPrice * |closedQuantity| / 10^QUANTITY_DECIMALS`).
     function _doLiquidatePosition(address _user, uint256 _currentPrice) internal {
         Position memory position = positions[_user];
-
-        int256 pnl = _calculatePositionPnl(position, _currentPrice);
+        int256 entryValue = position.netEntryValue;
+        int256 pnl = _signedValue(_currentPrice, position.netQuantity) - entryValue;
 
         _transferRealizedPnl(_user, pnl);
 
@@ -856,15 +869,15 @@ abstract contract HashPowerPerpsDEXBase is
 
     /// @notice Settle a reduced portion of a position (when offsetting)
     /// @param _user User address
-    /// @param _priceDiff Price difference (tradePrice - entryPrice)
+    /// @param _price Execution/mark price in collateral units
     /// @param _quantity Quantity being closed (positive = long, negative = short)
+    /// @param _entryValue Signed entry value allocated to the closed quantity
     /// @return pnl The PnL realized from reducing this position
-    function _settleReducedPosition(address _user, int256 _priceDiff, int256 _quantity) internal returns (int256 pnl) {
-        // Calculate PnL: priceDiff * quantity / QUANTITY_DECIMALS
-        // Long (positive qty): profit when price goes up (positive priceDiff)
-        // Short (negative qty): profit when price goes down (negative priceDiff)
-        pnl = (_priceDiff * _quantity) / int256(10 ** QUANTITY_DECIMALS);
-
+    function _settleReducedPosition(address _user, uint256 _price, int256 _quantity, int256 _entryValue)
+        internal
+        returns (int256 pnl)
+    {
+        pnl = _signedValue(_price, _quantity) - _entryValue;
         _transferRealizedPnl(_user, pnl);
     }
 
@@ -920,9 +933,7 @@ abstract contract HashPowerPerpsDEXBase is
     /// @return pnl The unrealized PnL (positive = profit, negative = loss)
     function _calculatePositionPnl(Position memory _position, uint256 _currentPrice) internal pure returns (int256) {
         if (_position.netQuantity == 0) return 0;
-        int256 priceDiff = int256(_currentPrice) - int256(_position.aggregatedEntryPrice);
-        // PnL = priceDiff * quantity / QUANTITY_DECIMALS (sign of quantity handles long/short)
-        return (priceDiff * _position.netQuantity) / int256(10 ** QUANTITY_DECIMALS);
+        return _signedValue(_currentPrice, _position.netQuantity) - _position.netEntryValue;
     }
 
     /// @notice Ensure user meets initial margin requirement.
@@ -1162,6 +1173,9 @@ abstract contract HashPowerPerpsDEXBase is
     ///      the monotonic order nonce. Duplicate participants are safe because every cleanup
     ///      operation is idempotent once the participant has no remaining state.
     function _resetParticipantState(address _participant) internal {
+        // Historical orders can predate the aggregate cache. Rebuild before subtracting
+        // each order so an atomic upgrade reset cannot underflow on legacy state.
+        _rebuildOrderAggregateCache(_participant);
         bytes32[] memory orderIds = participantOrderIdsIndex[_participant].values();
         uint256 len = orderIds.length;
         for (uint256 i = 0; i < len; i++) {

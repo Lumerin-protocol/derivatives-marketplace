@@ -138,7 +138,7 @@ describe("HashPowerPerpsDEX - OrderMatched event", function () {
     await perps.write.createOrder([marketPrice + tick, qty, TimeInForce.GTC], { account: buyer2.account });
     const positionOpen = await perps.read.getUserPosition([buyer2.account.address]);
     assert.equal(positionOpen.netQuantity, qty);
-    assert.ok(positionOpen.aggregatedEntryPrice > 0n);
+    assert.ok(positionOpen.netEntryValue > 0n);
 
     // buyer2 fully closes: sell 1 unit (match against a resting buy)
     await perps.write.createOrder([marketPrice - tick, qty, TimeInForce.GTC], { account: seller.account });
