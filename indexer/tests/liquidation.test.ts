@@ -47,7 +47,7 @@ function openLongPosition(
 function createPositionLiquidatedEvent(
   user: Address,
   liquidator: Address,
-  positionSize: BigInt,
+  closedQuantity: BigInt,
   pnl: BigInt,
   liquidatorFee: BigInt,
   logIndex: i32 = 1,
@@ -55,7 +55,7 @@ function createPositionLiquidatedEvent(
   const event = newTypedMockEventWithParams<PositionLiquidated>([
     paramAddr("user", user),
     paramAddr("liquidator", liquidator),
-    paramInt("positionSize", positionSize),
+    paramInt("closedQuantity", closedQuantity),
     paramInt("pnl", pnl),
     paramUint("liquidatorFee", liquidatorFee),
   ]);

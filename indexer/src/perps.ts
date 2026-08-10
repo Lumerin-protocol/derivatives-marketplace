@@ -961,10 +961,10 @@ function handleNonFlip(
 }
 
 export function handlePositionLiquidated(event: PositionLiquidated): void {
-  log.info("Position liquidated: user {} liquidator {} size {} pnl {} fee {}", [
+  log.info("Position liquidated: user {} liquidator {} closed {} pnl {} fee {}", [
     event.params.user.toHexString(),
     event.params.liquidator.toHexString(),
-    event.params.positionSize.toString(),
+    event.params.closedQuantity.toString(),
     event.params.pnl.toString(),
     event.params.liquidatorFee.toString(),
   ]);
@@ -978,7 +978,7 @@ export function handlePositionLiquidated(event: PositionLiquidated): void {
   const quantityScale = BigInt.fromI32(10).pow(u8(perps.quantityDecimals));
 
   const zero = BigInt.zero();
-  const positionSize = event.params.positionSize; // signed closed position
+  const closedQuantity = event.params.closedQuantity; // signed closed quantity
   const pnl = event.params.pnl;
   const liquidatorFee = event.params.liquidatorFee;
 
@@ -988,27 +988,27 @@ export function handlePositionLiquidated(event: PositionLiquidated): void {
   const closingSessionId = user.currentPositionSessionId;
 
   // Derive the forced exit price from the realized PnL the event reports:
-  //   pnl = (exit - entry) * positionSize / scale
-  //   => exit = entry + pnl * scale / positionSize
+  //   pnl = (exit - entry) * closedQuantity / scale
+  //   => exit = entry + pnl * scale / closedQuantity
   let exitPrice = entryPrice;
-  if (!positionSize.equals(zero)) {
-    exitPrice = entryPrice.plus(pnl.times(quantityScale).div(positionSize));
+  if (!closedQuantity.equals(zero)) {
+    exitPrice = entryPrice.plus(pnl.times(quantityScale).div(closedQuantity));
   }
 
   // The forced trade offsets the closed position, so its signed quantity is the
-  // opposite sign of the closed position size (short close → forced buy → +).
-  const closedQty = positionSize.neg();
-  const absClosed = absBigInt(positionSize);
+  // opposite sign of the closed quantity (short close → forced buy → +).
+  const closedQty = closedQuantity.neg();
+  const absClosed = absBigInt(closedQuantity);
 
-  // `positionSize` carries the SAME sign as the position, so the residual after
-  // a (possibly partial) close is `net - positionSize`. A partial close leaves
-  // a non-zero residual: keep the position + session open and only reduce; a
-  // full close (residual == 0) resets the user and closes the session.
-  const newNetQuantity = user.netQuantity.minus(positionSize);
+  // `closedQuantity` carries the SAME sign as the position, so the residual
+  // after a (possibly partial) close is `net - closedQuantity`. A partial close
+  // leaves a non-zero residual: keep the position + session open and only
+  // reduce; a full close (residual == 0) resets the user and closes the session.
+  const newNetQuantity = user.netQuantity.minus(closedQuantity);
   const isFullClose = newNetQuantity.equals(zero);
 
   // The dedicated Liquidation entity was dropped: the flagged liquidation Trade
-  // below is the single source of truth (it captures positionSize -> signed
+  // below is the single source of truth (it captures closedQuantity -> signed
   // tradeQuantity, pnl -> realizedPnl, liquidatorFee -> liquidationFee, the
   // liquidator, and tx/time). `Perps.totalLiquidations` + `BadDebtEvent` stay.
 
