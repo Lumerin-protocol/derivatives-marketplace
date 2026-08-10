@@ -54,7 +54,7 @@ export const HashPowerPerpsDEXAbi = [
   },
   {
     "inputs": [],
-    "name": "InsufficientMargin",
+    "name": "InsufficientMarginBalance",
     "type": "error"
   },
   {
@@ -94,11 +94,6 @@ export const HashPowerPerpsDEXAbi = [
   },
   {
     "inputs": [],
-    "name": "InvalidMarginPercent",
-    "type": "error"
-  },
-  {
-    "inputs": [],
     "name": "InvalidOracle",
     "type": "error"
   },
@@ -109,12 +104,12 @@ export const HashPowerPerpsDEXAbi = [
   },
   {
     "inputs": [],
-    "name": "InvalidReduceQuantity",
+    "name": "InvalidQty",
     "type": "error"
   },
   {
     "inputs": [],
-    "name": "InvalidSize",
+    "name": "InvalidReduceQuantity",
     "type": "error"
   },
   {
@@ -223,6 +218,22 @@ export const HashPowerPerpsDEXAbi = [
       }
     ],
     "name": "UUPSUnsupportedProxiableUUID",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "int256",
+        "name": "min",
+        "type": "int256"
+      },
+      {
+        "internalType": "int256",
+        "name": "max",
+        "type": "int256"
+      }
+    ],
+    "name": "ValueOutOfRange",
     "type": "error"
   },
   {
@@ -656,7 +667,7 @@ export const HashPowerPerpsDEXAbi = [
       {
         "indexed": false,
         "internalType": "int256",
-        "name": "positionSize",
+        "name": "closedQuantity",
         "type": "int256"
       },
       {
@@ -1070,7 +1081,7 @@ export const HashPowerPerpsDEXAbi = [
           }
         ],
         "internalType": "struct HashPowerPerpsDEXBase.OrderAggregate",
-        "name": "",
+        "name": "aggregate_",
         "type": "tuple"
       }
     ],
@@ -1089,12 +1100,12 @@ export const HashPowerPerpsDEXAbi = [
     "outputs": [
       {
         "internalType": "uint256[]",
-        "name": "bidPrices",
+        "name": "bids",
         "type": "uint256[]"
       },
       {
         "internalType": "uint256[]",
-        "name": "askPrices",
+        "name": "asks",
         "type": "uint256[]"
       }
     ],
@@ -1137,7 +1148,7 @@ export const HashPowerPerpsDEXAbi = [
     "outputs": [
       {
         "internalType": "uint256",
-        "name": "totalQuantity",
+        "name": "",
         "type": "uint256"
       }
     ],
@@ -1231,7 +1242,7 @@ export const HashPowerPerpsDEXAbi = [
     "outputs": [
       {
         "internalType": "bytes32[]",
-        "name": "",
+        "name": "orderIds",
         "type": "bytes32[]"
       }
     ],

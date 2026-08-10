@@ -116,6 +116,22 @@ describe("HashPowerPerpsDEX - Admin Functions", function () {
     });
   });
 
+  describe("setLiquidatorShareBps", function () {
+    it("accepts the inclusive BPS range and uses the canonical range error", async function () {
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
+      const { perps } = contracts;
+      const { owner } = accounts;
+
+      await perps.write.setLiquidatorShareBps([10_000], { account: owner.account });
+      assert.equal(await perps.read.liquidatorShareBps(), 10_000);
+      await viem.assertions.revertWithCustomError(
+        perps.write.setLiquidatorShareBps([10_001], { account: owner.account }),
+        perps,
+        "ValueOutOfRange",
+      );
+    });
+  });
+
   describe("match fee setters (setTakerFeeBps / setMakerFeeBps)", function () {
     it("should allow owner to set maker and taker fees", async function () {
       const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);

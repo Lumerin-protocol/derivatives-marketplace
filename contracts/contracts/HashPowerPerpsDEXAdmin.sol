@@ -120,7 +120,7 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
     /// @notice Set the liquidator's share of the liquidation fee in basis points.
     /// @param _bps Share in bps (e.g., 5000 = 50% to liquidator, remainder to venue revenue).
     function setLiquidatorShareBps(uint16 _bps) external onlyOwner {
-        if (_bps > BPS) revert InvalidMarginPercent();
+        if (_bps > BPS) revert ValueOutOfRange(0, int256(BPS));
         liquidatorShareBps = _bps;
         emit LiquidatorShareBpsUpdated(_bps);
     }

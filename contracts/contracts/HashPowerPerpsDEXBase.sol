@@ -208,7 +208,7 @@ abstract contract HashPowerPerpsDEXBase is
     event OracleUpdated(address newOracle);
     event PortfolioMarginUpdated(address newPortfolioMargin);
     event PositionLiquidated(
-        address indexed user, address indexed liquidator, int256 positionSize, int256 pnl, uint256 liquidatorFee
+        address indexed user, address indexed liquidator, int256 closedQuantity, int256 pnl, uint256 liquidatorFee
     );
     /// @notice Emitted when a resting order is force-cancelled by a permissionless liquidator.
     /// @dev `OrderCancelled` is also emitted from the same path so order-lifecycle indexers
@@ -225,12 +225,12 @@ abstract contract HashPowerPerpsDEXBase is
 
     // Errors
     error InvalidPrice();
-    error InvalidSize();
-    error InsufficientMargin(); // The margin % is not sufficient to cover the position
+    error InvalidQty();
+    error InsufficientMarginBalance();
     error InsufficientCollateral(); // The user wants to remove more collateral than they have
     error OracleStale();
     error InvalidOracle();
-    error InvalidMarginPercent();
+    error ValueOutOfRange(int256 min, int256 max);
     error OrderNotBelongToSender();
     error MaxOrdersPerParticipantReached();
     error NotLiquidatable();
@@ -941,7 +941,7 @@ abstract contract HashPowerPerpsDEXBase is
     function _ensureInitialMargin(address _user, uint256 _maxAllowedIm) internal view {
         uint256 required = portfolioMargin.computePortfolioIM(_user);
         if (vault.balanceOf(_user) < required && required > _maxAllowedIm) {
-            revert InsufficientMargin();
+            revert InsufficientMarginBalance();
         }
     }
 
@@ -964,7 +964,7 @@ abstract contract HashPowerPerpsDEXBase is
     }
 
     function _validateQty(int256 _quantity) internal pure {
-        if (_quantity == 0) revert InvalidSize();
+        if (_quantity == 0) revert InvalidQty();
     }
 
     function _validatePrice(uint256 _price) internal pure {

@@ -68,7 +68,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       await viem.assertions.revertWithCustomError(
         perps.write.createOrder([marketPrice, 0n, TimeInForce.GTC], { account: buyer.account }),
         perps,
-        "InvalidSize",
+        "InvalidQty",
       );
     });
 
@@ -298,7 +298,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       await viem.assertions.revertWithCustomError(
         perps.write.createOrder([marketPrice, BigInt(quantity), TimeInForce.GTC], { account: buyer.account }),
         perps,
-        "InsufficientMargin",
+        "InsufficientMarginBalance",
       );
     });
 
@@ -389,7 +389,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       await viem.assertions.revertWithCustomError(
         perps.write.createOrder([newPrice + tick, -config.qty, TimeInForce.GTC], { account: seller.account }),
         perps,
-        "InsufficientMargin",
+        "InsufficientMarginBalance",
       );
     });
 
@@ -418,7 +418,7 @@ describe("HashPowerPerpsDEX - createOrder", function () {
       await viem.assertions.revertWithCustomError(
         perps.write.createOrder([closingPrice, config.qty * 2n, TimeInForce.GTC], { account: seller.account }),
         perps,
-        "InsufficientMargin",
+        "InsufficientMarginBalance",
       );
     });
   });

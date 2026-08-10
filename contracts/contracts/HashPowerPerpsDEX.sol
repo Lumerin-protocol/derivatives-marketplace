@@ -27,7 +27,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @dev Lives here rather than in {HashPowerPerpsDEXBase} so that a diff to
     ///      this file and the version it ships under stay in the same place,
     ///      mirroring {Futures}.
-    string public constant VERSION = "2.15.0";
+    string public constant VERSION = "3.0.0";
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ICollateralVault _vault) HashPowerPerpsDEXBase(_vault) { }
@@ -260,7 +260,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         // offsetting resting orders at another venue, and closing it would strand that
         // leg and raise the requirement. See `IPortfolioMarginEngine.hasRestingOrderDelta`.
         if (portfolioMargin.hasRestingOrderDelta(_user)) revert OrdersStillOpen();
-        if (_closeQty == 0) revert InvalidSize();
+        if (_closeQty == 0) revert InvalidQty();
 
         uint256 absNet = M.abs(position.netQuantity);
         uint256 closeAbs = _closeQty < absNet ? _closeQty : absNet;
@@ -433,7 +433,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     }
 
     /// @notice Get user's orders
-    function getUserOrders(address _user) external view returns (bytes32[] memory) {
+    function getUserOrders(address _user) external view returns (bytes32[] memory orderIds) {
         return participantOrderIdsIndex[_user].values();
     }
 
@@ -507,55 +507,56 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
 
     /// @notice Get order book depth (active price levels)
     /// @param _maxLevels Maximum number of price levels to return per side
-    /// @return bidPrices Array of bid prices (highest first)
-    /// @return askPrices Array of ask prices (lowest first)
+    /// @return bids Array of bid prices (highest first)
+    /// @return asks Array of ask prices (lowest first)
     function getOrderBookPrices(uint256 _maxLevels)
         external
         view
-        returns (uint256[] memory bidPrices, uint256[] memory askPrices)
+        returns (uint256[] memory bids, uint256[] memory asks)
     {
         uint256 bidCount = M.min(activeBidPrices.sizeOf(), _maxLevels);
         uint256 askCount = M.min(activeAskPrices.sizeOf(), _maxLevels);
 
-        bidPrices = new uint256[](bidCount);
-        askPrices = new uint256[](askCount);
+        bids = new uint256[](bidCount);
+        asks = new uint256[](askCount);
 
         // Get bid prices
         (, uint256 current) = activeBidPrices.getNextNode(0);
         for (uint256 i = 0; i < bidCount && current != 0; i++) {
-            bidPrices[i] = current;
+            bids[i] = current;
             (, current) = activeBidPrices.getNextNode(current);
         }
 
         // Get ask prices
         (, current) = activeAskPrices.getNextNode(0);
         for (uint256 i = 0; i < askCount && current != 0; i++) {
-            askPrices[i] = current;
+            asks[i] = current;
             (, current) = activeAskPrices.getNextNode(current);
         }
 
-        return (bidPrices, askPrices);
+        return (bids, asks);
     }
 
     /// @notice Get total quantity at a specific price level
     /// @param _price The price level
     /// @param _isBid True for bid side, false for ask side
-    /// @return totalQuantity The total absolute quantity at this price level
-    function getQuantityAtPrice(uint256 _price, bool _isBid) external view returns (uint256 totalQuantity) {
+    /// @return The total absolute quantity at this price level
+    function getQuantityAtPrice(uint256 _price, bool _isBid) external view returns (uint256) {
         StructuredLinkedList.List storage orderQueue = _priceOrderIds(_price, _isBid);
 
+        uint256 total = 0;
         (, uint256 orderId) = orderQueue.getNextNode(0);
         while (orderId != 0) {
             Order storage order = orders[bytes32(orderId)];
-            totalQuantity += M.abs(order.quantity);
+            total += M.abs(order.quantity);
             (, orderId) = orderQueue.getNextNode(orderId);
         }
 
-        return totalQuantity;
+        return total;
     }
 
     /// @notice Cached resting-order quantities and notionals per side for a user.
-    function getOrderAggregate(address _user) external view returns (OrderAggregate memory) {
+    function getOrderAggregate(address _user) external view returns (OrderAggregate memory aggregate_) {
         return userOrderAggregate[_user];
     }
 

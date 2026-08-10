@@ -127,7 +127,7 @@ describe("HashPowerPerpsDEX order aggregate cache migration", function () {
       buyValue: 0n,
       sellValue: 0n,
     });
-    assert.equal(await upgraded.read.VERSION(), "2.15.0");
+    assert.equal(await upgraded.read.VERSION(), "3.0.0");
   });
 
   it("atomically zeros the reused legacy liquidation-fee slot", async function () {

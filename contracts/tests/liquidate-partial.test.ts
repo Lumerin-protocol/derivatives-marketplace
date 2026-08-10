@@ -235,7 +235,7 @@ describe("HashPowerPerpsDEX - liquidatePosition(user, closeQty) partial close", 
     });
     assert.ok(event, "expected a PositionLiquidated event");
     // Short position → the closed quantity is signed negative.
-    assert.equal(event.args.positionSize, -closeQty, "closedQuantity should be the partial (signed) qty");
+    assert.equal(event.args.closedQuantity, -closeQty, "closedQuantity should be the partial (signed) qty");
     // A short losing into a pump realizes a loss (pnl < 0).
     assert.ok(event.args.pnl < 0n, "expected a realized loss on the closed portion");
   });

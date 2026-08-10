@@ -31,11 +31,6 @@ export const contractErrors = [
     "type": "error"
   },
   {
-    "inputs": [],
-    "name": "InvalidSize",
-    "type": "error"
-  },
-  {
     "inputs": [
       {
         "internalType": "address",
@@ -44,6 +39,11 @@ export const contractErrors = [
       }
     ],
     "name": "OwnableUnauthorizedAccount",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidQty",
     "type": "error"
   },
   {
@@ -86,11 +86,6 @@ export const contractErrors = [
   {
     "inputs": [],
     "name": "InsufficientCollateral",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "InsufficientMargin",
     "type": "error"
   },
   {
@@ -256,6 +251,22 @@ export const contractErrors = [
   {
     "inputs": [
       {
+        "internalType": "int256",
+        "name": "min",
+        "type": "int256"
+      },
+      {
+        "internalType": "int256",
+        "name": "max",
+        "type": "int256"
+      }
+    ],
+    "name": "ValueOutOfRange",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "bytes32",
         "name": "slot",
         "type": "bytes32"
@@ -272,11 +283,6 @@ export const contractErrors = [
   {
     "inputs": [],
     "name": "ERC1967NonPayable",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "InvalidMarginPercent",
     "type": "error"
   },
   {
@@ -333,6 +339,11 @@ export const contractErrors = [
   {
     "inputs": [],
     "name": "NotInitializing",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InsufficientMarginBalance",
     "type": "error"
   },
   {

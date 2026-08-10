@@ -12,7 +12,7 @@ All values categorized by storage mechanism and update path.
 | `FUNDING_DECIMALS` | `18` | ✅ Correct | Precision standard. Changing it breaks all funding math |
 | `QUANTITY_DECIMALS` | `6` | ✅ Correct | Precision standard. Changing it breaks all notional math |
 | `CONTRACT_SIZE_HPS_DAY` | `1e15` | ✅ Correct | Fundamental economic unit |
-| `VERSION` | `"2.12.0"` | ✅ Correct | Tied to bytecode |
+| `VERSION` | `"3.0.0"` | ✅ Correct | Tied to bytecode |
 | `MAX_ORDERS_PER_PARTICIPANT` | `100` | ✅ Correct | Architectural invariant |
 | `MAX_PRICE_LEVELS_PER_SIDE` | `200` | ✅ Correct | Architectural invariant |
 

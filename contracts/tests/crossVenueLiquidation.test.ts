@@ -66,7 +66,7 @@ describe("HashPowerPerpsDEX - cross-venue liquidation", function () {
         { account: seller.account },
       ),
       perps,
-      "InsufficientMargin",
+      "InsufficientMarginBalance",
     );
   });
 
