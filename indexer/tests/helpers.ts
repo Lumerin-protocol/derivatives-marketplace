@@ -81,6 +81,7 @@ export function setupPerps(): void {
   perps.totalOrders = 0;
   perps.activeOrders = 0;
   perps.totalTrades = 0;
+  perps.totalFills = 0;
   perps.totalVolume = BigInt.zero();
   perps.totalLiquidations = 0;
   perps.totalBadDebt = BigInt.zero();

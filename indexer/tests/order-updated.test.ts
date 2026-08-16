@@ -100,7 +100,7 @@ describe("handleOrderUpdated", () => {
     assert.fieldEquals("Perps", "0", "activeOrders", "1");
   });
 
-  test("partial fill via OrderMatched then OrderUpdated sets PARTIAL", () => {
+  test("partial fill via OrderMatched then OrderUpdated sets PARTIALLY_FILLED", () => {
     const id = orderId(1);
     const maker = userAddress(1);
     const taker = userAddress(2);
@@ -114,7 +114,7 @@ describe("handleOrderUpdated", () => {
     handleOrderMatched(createOrderMatchedEvent(id, maker, taker, price, fillQty.neg()));
     handleOrderUpdated(createOrderUpdatedEvent(id, maker, remainingQty));
 
-    assert.fieldEquals("Order", id.toHexString(), "status", "PARTIAL");
+    assert.fieldEquals("Order", id.toHexString(), "status", "PARTIALLY_FILLED");
     assert.fieldEquals("Order", id.toHexString(), "quantity", remainingQty.toString());
     assert.fieldEquals("Order", id.toHexString(), "filledQuantity", fillQty.toString());
   });

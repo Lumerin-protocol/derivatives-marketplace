@@ -1,7 +1,7 @@
 /**
  * Integration test: a perps *order* liquidation must surface on the Order
  * entity as `status = LIQUIDATED` (with `liquidator` + `liquidationFee`
- * attribution), mirroring the futures OrderEntry API.
+ * attribution), mirroring the futures Order API.
  *
  * `liquidateOrder(user, orderId)` emits BOTH `OrderCancelled` AND
  * `OrderLiquidated` in the same tx (OrderCancelled first — see
@@ -21,7 +21,6 @@ import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
 import { parseEventLogs, parseUnits } from "viem";
-import type { EntityFields } from "matchstick-ts";
 import { deployPerpsFixture } from "../../contracts/tests/fixtures.ts";
 import { TimeInForce } from "../../contracts/fixtures/timeInForce.ts";
 

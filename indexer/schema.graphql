@@ -33,9 +33,14 @@ type Perps @entity(immutable: false) {
 
   # Stats
   totalUsers: Int!
+  "Orders ever created; one per on-chain orderId."
   totalOrders: Int!
+  "Orders currently resting in the book (status ACTIVE or PARTIALLY_FILLED)."
   activeOrders: Int!
+  "Trade rows ever created. One per (tx, user, position session), so a two-sided match bumps it by 2 and a flip by 3."
   totalTrades: Int!
+  "Fill rows ever created. One per (OrderMatched, side); forced closes have no matched counterparty order and so no Fill."
+  totalFills: Int!
   totalVolume: BigInt!
   totalLiquidations: Int!
   totalBadDebt: BigInt!
@@ -62,8 +67,12 @@ type User @entity(immutable: false) {
 
   # Stats
   orderCount: Int!
+  "Orders currently resting in the book (status ACTIVE or PARTIALLY_FILLED)."
   activeOrderCount: Int!
+  "Trade rows: one per (tx, position session)."
   tradeCount: Int!
+  "Fill rows: one per matched leg."
+  fillCount: Int!
   realizedPnl: BigInt!
 
   "Transient: orderId of the user's most recent OrderCreated event. Used by the indexer to attribute taker-side fills (since OrderMatched only carries makerOrderId). Not intended for client queries."
@@ -87,7 +96,8 @@ type Order @entity(immutable: false) {
   id: Bytes! # orderId
   user: User!
   price: BigInt!
-  quantity: BigInt! # current remaining quantity (absolute value)
+  "Remaining open quantity (absolute value); zero once terminal."
+  quantity: BigInt!
   originalQuantity: BigInt! # original quantity when created
   isBuy: Boolean! # true = long/buy, false = short/sell
   # Status
@@ -112,16 +122,22 @@ type Order @entity(immutable: false) {
 }
 
 enum OrderStatus {
+  "Resting with no fills yet."
   ACTIVE
+  "Resting with at least one fill; still has remaining quantity."
+  PARTIALLY_FILLED
+  "Terminal: left the book fully matched."
   FILLED
+  "Terminal: left the book unmatched (cancel or an IOC close)."
   CANCELLED
-  PARTIAL
+  "Terminal: force-cancelled by a keeper via liquidateOrder."
   LIQUIDATED
 }
 
-# Aggregate of all fills in a single transaction for one user. This is what the UI shows in trade history.
+# Aggregate of all fills in a single transaction for one user and position
+# session. This is what the UI shows in trade history.
 type Trade @entity(immutable: false) {
-  id: Bytes! # tx hash + user address
+  id: Bytes! # tx hash + user address + position session id
   user: User!
   positionSession: PositionSession!
   tradePrice: BigInt! # volume-weighted average fill price
@@ -144,9 +160,11 @@ type Trade @entity(immutable: false) {
   transactionHash: Bytes!
 }
 
-# One per user per OrderMatched event. Individual execution against a counterparty.
+# One per user per OrderMatched leg. Individual execution against a
+# counterparty. A forced close has no matched counterparty order, so it produces
+# a Trade but no Fill.
 type Fill @entity(immutable: true) {
-  id: Bytes! # tx hash + log index + side suffix
+  id: Bytes! # tx hash + log index + leg suffix
   trade: Trade!
   "Whether `user` was the maker (resting order) or the taker (incoming order) in this match."
   side: FillSide!

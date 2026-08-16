@@ -10,14 +10,15 @@ A Graph Protocol subgraph that indexes the `HashPowerPerpsDEX` contract, turning
 
 | Entity | Mutability | Description |
 | --- | --- | --- |
-| **Perps** | mutable | Singleton (id=0). Contract config, pool balances, and global stats (total users/orders/trades/volume/liquidations). |
-| **User** | mutable | Per-address account: net position, order/trade counts, realized PnL, and relations to all other entities. |
-| **Order** | mutable | An order on the book. Tracks price, quantity, buy/sell side, status (`ACTIVE` / `FILLED` / `CANCELLED` / `PARTIAL`), and fill progress. |
-| **Trade** | immutable | A matched trade between a buyer and seller with price, quantity, volume, and the maker order reference. |
-| **PositionSnapshot** | immutable | Position state after each trade: trade price/quantity and resulting net position with entry price. |
-| **PositionClose** | immutable | Emitted when a position is fully or partially closed: quantity closed and realized PnL. |
-| **Liquidation** | immutable | Liquidation event: user, liquidator, position size, PnL, and liquidator fee. |
+| **Perps** | mutable | Singleton (id=0). Contract config, pool balances, and global stats (total users/orders/trades/fills/volume/liquidations). |
+| **User** | mutable | Per-address account: net position, order/trade/fill counts, realized PnL, and relations to all other entities. |
+| **Order** | mutable | An order on the book. Tracks price, quantity, buy/sell side, status (`ACTIVE` / `PARTIALLY_FILLED` / `FILLED` / `CANCELLED` / `LIQUIDATED`), and fill progress. |
+| **Trade** | mutable | Aggregate of all fills in one transaction for a single user and position session. Keyed by tx hash + user + session, so flipping a position in one tx yields one Trade per session rather than merging both into one row. This is what trade history shows. |
+| **Fill** | immutable | One per user per `OrderMatched` leg: the individual execution against a counterparty, with both sides' orders, price, signed quantity, fee, and realized PnL. Keyed by tx hash + log index + leg suffix so a reopen leg cannot collide with the maker. A forced close has no matched counterparty order, so it produces a Trade but no Fill. |
+| **PositionSession** | mutable | One continuous position from open to flat. Carries entry price, realized PnL, and liquidated quantity; ends when net quantity returns to zero. |
 | **PriceLevel** | mutable | Aggregated order book level: total quantity and order count at a given price and side (bid/ask). |
+| **FundingUpdate** / **FundingSettlement** | immutable | Funding rate updates and their per-user settlements. |
+| **BadDebtEvent** / **ReservePoolEvent** | immutable | Bad debt socialized on a liquidation, and reserve pool inflows/outflows. |
 
 ### Event Handlers
 

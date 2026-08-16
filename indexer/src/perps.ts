@@ -40,7 +40,36 @@ import {
   PositionSession,
 } from "../generated/schema";
 import { absBigInt, isSameSign, minBigInt } from "./lib";
-import { createEventId, getPriceLevelId, positionSessionId } from "./ids";
+import {
+  createEventId,
+  fillId,
+  getPriceLevelId,
+  positionSessionId,
+  tradeId,
+} from "./ids";
+
+// ============ Deferred Perps-singleton counters ============
+// `Trade` / `Fill` rows are minted deep inside the per-leg helpers, which have
+// no handle on the `Perps` singleton. Rather than reading + writing the
+// singleton per leg, the helpers accumulate row counts here and the surrounding
+// handler flushes them alongside its own `Perps` updates.
+let pendingNewTrades: i32 = 0;
+let pendingNewFills: i32 = 0;
+
+/**
+ * Fold pending Trade/Fill row counts onto an in-memory `Perps` singleton and
+ * reset them. The caller owns the `save()`.
+ */
+function flushPerpsCounters(perps: Perps): void {
+  if (pendingNewTrades != 0) {
+    perps.totalTrades += pendingNewTrades;
+    pendingNewTrades = 0;
+  }
+  if (pendingNewFills != 0) {
+    perps.totalFills += pendingNewFills;
+    pendingNewFills = 0;
+  }
+}
 
 // ============ Helper Functions ============
 
@@ -69,6 +98,7 @@ function getOrCreatePerps(): Perps {
     perps.totalOrders = 0;
     perps.activeOrders = 0;
     perps.totalTrades = 0;
+    perps.totalFills = 0;
     perps.totalVolume = BigInt.zero();
     perps.totalLiquidations = 0;
     perps.totalBadDebt = BigInt.zero();
@@ -164,6 +194,7 @@ function getOrCreateUser(address: Address, timestamp: BigInt): User {
     user.orderCount = 0;
     user.activeOrderCount = 0;
     user.tradeCount = 0;
+    user.fillCount = 0;
     user.realizedPnl = BigInt.zero();
     user.totalFundingPaid = BigInt.zero();
     user.totalFundingReceived = BigInt.zero();
@@ -294,7 +325,9 @@ export function handleOrderCancelled(event: OrderCancelled): void {
   level.orderCount--;
   level.save();
 
-  // Update order
+  // Update order. Nothing rests once the order is out of the book, so the
+  // remaining quantity has to go to zero.
+  order.quantity = BigInt.zero();
   order.status = "CANCELLED";
   order.closedAt = event.block.timestamp;
   order.updatedAt = event.block.timestamp;
@@ -358,6 +391,7 @@ export function handleOrderLiquidated(event: OrderLiquidated): void {
     perps.save();
   }
 
+  order.quantity = BigInt.zero();
   order.status = "LIQUIDATED";
   order.liquidator = event.params.liquidator;
   order.liquidationFee = event.params.fee;
@@ -397,8 +431,10 @@ export function handleOrderUpdated(event: OrderUpdated): void {
   order.updatedAt = event.block.timestamp;
 
   if (isClosed) {
-    // Full fill (matches already credited filledQuantity) or IOC close.
-    // Amend never emits newQuantity=0 (use cancelOrder).
+    // Full fill or IOC close (amend never emits newQuantity=0 — use
+    // cancelOrder). The maker's OrderUpdated is emitted *before* its
+    // OrderMatched, so a full fill still looks unmatched here;
+    // `updateOrderFillStats` upgrades CANCELLED to FILLED right after.
     order.status = order.filledQuantity.gt(BigInt.zero()) ? "FILLED" : "CANCELLED";
     order.closedAt = event.block.timestamp;
 
@@ -414,7 +450,7 @@ export function handleOrderUpdated(event: OrderUpdated): void {
     perps.lastUpdatedAt = event.block.timestamp;
     perps.save();
   } else if (order.filledQuantity.gt(BigInt.zero())) {
-    order.status = "PARTIAL";
+    order.status = "PARTIALLY_FILLED";
   } else {
     // Reduce-only amend (or pre-match book update): still ACTIVE.
     order.status = "ACTIVE";
@@ -467,8 +503,10 @@ export function handleOrderMatched(event: OrderMatched): void {
     0,
     quantityScale,
   );
+  // Re-load the maker: on a self-match both legs mutate the same `User` row, so
+  // the maker leg has to start from the counters the taker leg just wrote.
   processUserMatch(
-    makerUser,
+    getOrCreateUser(event.params.maker, event.block.timestamp),
     takerQty.neg(),
     tradePrice,
     event.params.makerFee,
@@ -487,26 +525,36 @@ export function handleOrderMatched(event: OrderMatched): void {
   );
 
   const volume = tradePrice.times(absQuantity).div(quantityScale);
-  perps.totalTrades++;
+  flushPerpsCounters(perps);
   perps.totalVolume = perps.totalVolume.plus(volume);
   perps.lastUpdatedAt = event.block.timestamp;
   perps.save();
 }
 
-/** Load or create the per-user per-transaction Trade aggregate. */
+/**
+ * Load or create the per-(tx, user, position session) Trade aggregate.
+ *
+ * The session is part of the id so that a tx spanning two sessions (a flip
+ * closes one and opens another) produces one row per session instead of
+ * collapsing both legs — which would leak the closed session's realized PnL
+ * into the freshly-opened one.
+ *
+ * Bumps `user.tradeCount` and the deferred `Perps.totalTrades` delta when it
+ * mints a row; the caller owns `user.save()`.
+ */
 function getOrCreateTrade(
   txHash: Bytes,
-  userId: Bytes,
-  positionSessionId: string,
+  user: User,
+  sessionId: string,
   timestamp: BigInt,
   blockNumber: BigInt,
 ): Trade {
-  const tradeId = txHash.concat(userId);
-  let trade = Trade.load(tradeId);
+  const id = tradeId(txHash, user.id, sessionId);
+  let trade = Trade.load(id);
   if (!trade) {
-    trade = new Trade(tradeId);
-    trade.user = userId;
-    trade.positionSession = positionSessionId;
+    trade = new Trade(id);
+    trade.user = user.id;
+    trade.positionSession = sessionId;
     trade.tradePrice = BigInt.zero();
     trade.tradeQuantity = BigInt.zero();
     trade.tradingFee = BigInt.zero();
@@ -518,8 +566,10 @@ function getOrCreateTrade(
     trade.timestamp = timestamp;
     trade.blockNumber = blockNumber;
     trade.transactionHash = txHash;
+
+    user.tradeCount++;
+    pendingNewTrades += 1;
   }
-  trade.positionSession = positionSessionId;
   return trade;
 }
 
@@ -597,8 +647,6 @@ function processUserMatch(
     realizedPnl = priceDiff.times(signedSettledQty).div(quantityScale);
   }
 
-  const baseTradeId = createEventId(txHash, logIndex);
-
   if (positionFlipped) {
     handleFlip(
       user,
@@ -614,7 +662,6 @@ function processUserMatch(
       userOrderId,
       counterpartyOrderId,
       side,
-      baseTradeId,
       txHash,
       blockNumber,
       logIndex,
@@ -637,7 +684,6 @@ function processUserMatch(
       side,
       isPositionOpened,
       isPositionClosed,
-      baseTradeId,
       txHash,
       blockNumber,
       logIndex,
@@ -646,7 +692,7 @@ function processUserMatch(
     );
   }
 
-  updateOrderFillStats(userOrderId, tradePrice, absBigInt(tradeQty));
+  updateOrderFillStats(userOrderId, tradePrice, absBigInt(tradeQty), timestamp);
 
   user.netQuantity = newNetQuantity;
   user.aggregatedEntryPrice = newEntryPrice;
@@ -654,11 +700,22 @@ function processUserMatch(
   user.save();
 }
 
-/** Update an order's running averageFillPrice (VWAP) and filledQuantity from one match. */
+/**
+ * Credit one match against an order: running averageFillPrice (VWAP),
+ * filledQuantity, and the derived status. Called for BOTH sides of every
+ * OrderMatched — the maker order id comes off the event, the taker's off
+ * `User.lastCreatedOrderId`.
+ *
+ * `_executeMatch` emits the maker's OrderUpdated *before* OrderMatched, so the
+ * status that handler derived was based on a stale `filledQuantity`: a fully
+ * filled maker was provisionally closed as CANCELLED and is upgraded to FILLED
+ * here, and a partially filled one moves from ACTIVE to PARTIALLY_FILLED.
+ */
 function updateOrderFillStats(
   orderId: Bytes,
   fillPrice: BigInt,
   absFillQty: BigInt,
+  timestamp: BigInt,
 ): void {
   const order = Order.load(orderId);
   if (!order) {
@@ -678,6 +735,17 @@ function updateOrderFillStats(
   // Track filledQuantity incrementally here so it stays correct even before
   // OrderUpdated arrives (taker-side OrderUpdated fires once after all matches).
   order.filledQuantity = newFilled;
+  order.updatedAt = timestamp;
+
+  // A keeper owns the close attribution; the fill only moves the counters.
+  if (order.status != "LIQUIDATED") {
+    if (order.quantity.equals(BigInt.zero())) {
+      order.status = "FILLED";
+      order.closedAt = timestamp;
+    } else {
+      order.status = "PARTIALLY_FILLED";
+    }
+  }
   order.save();
 }
 
@@ -696,7 +764,6 @@ function handleFlip(
   userOrderId: Bytes,
   counterpartyOrderId: Bytes,
   side: string,
-  baseTradeId: Bytes,
   txHash: Bytes,
   blockNumber: BigInt,
   logIndex: BigInt,
@@ -729,12 +796,12 @@ function handleFlip(
       const closeQty = tradeQty.gt(zero) ? absOld : absOld.neg();
       const trade = getOrCreateTrade(
         txHash,
-        user.id,
+        user,
         oldSession.id,
         timestamp,
         blockNumber,
       );
-      const closeFill = new Fill(baseTradeId.concatI32(sideIndex * 2));
+      const closeFill = new Fill(fillId(txHash, logIndex, sideIndex));
       closeFill.trade = trade.id;
       closeFill.side = side;
       closeFill.user = user.id;
@@ -752,6 +819,8 @@ function handleFlip(
       closeFill.blockNumber = blockNumber;
       closeFill.transactionHash = txHash;
       closeFill.save();
+      user.fillCount++;
+      pendingNewFills += 1;
       updateTradeAggregate(
         trade,
         tradePrice,
@@ -791,12 +860,14 @@ function handleFlip(
 
   const trade = getOrCreateTrade(
     txHash,
-    user.id,
+    user,
     newSessionId,
     timestamp,
     blockNumber,
   );
-  const openFill = new Fill(baseTradeId.concatI32(sideIndex * 2 + 1));
+  // `sideIndex + 2` keeps the re-opening leg's id disjoint from the leg the
+  // other side of the same log writes at `sideIndex`.
+  const openFill = new Fill(fillId(txHash, logIndex, sideIndex + 2));
   openFill.trade = trade.id;
   openFill.side = side;
   openFill.user = user.id;
@@ -814,6 +885,8 @@ function handleFlip(
   openFill.blockNumber = blockNumber;
   openFill.transactionHash = txHash;
   openFill.save();
+  user.fillCount++;
+  pendingNewFills += 1;
   updateTradeAggregate(
     trade,
     tradePrice,
@@ -824,7 +897,6 @@ function handleFlip(
     newEntryPrice,
   );
   trade.save();
-  user.tradeCount++;
 }
 
 /** Non-flip: single session + single trade (open, scale-in, partial close, or full close). */
@@ -843,7 +915,6 @@ function handleNonFlip(
   side: string,
   isPositionOpened: bool,
   isPositionClosed: bool,
-  baseTradeId: Bytes,
   txHash: Bytes,
   blockNumber: BigInt,
   logIndex: BigInt,
@@ -900,9 +971,13 @@ function handleNonFlip(
     user.currentPositionSessionId = "";
   }
 
-  if (!realizedPnl.equals(zero)) {
-    const absTradeQty = absBigInt(tradeQty);
-    const settledAbs = minBigInt(absBigInt(oldNetQuantity), absTradeQty);
+  // Any leg opposing the running position settles size, whether or not it
+  // happened to break even — so gate on the settled quantity, not on the PnL.
+  if (!oldNetQuantity.equals(zero) && !isSameSign(oldNetQuantity, tradeQty)) {
+    const settledAbs = minBigInt(
+      absBigInt(oldNetQuantity),
+      absBigInt(tradeQty),
+    );
     const oldClosed = session.closedQuantity;
     session.closedQuantity = session.closedQuantity.plus(settledAbs);
     session.realizedPnl = session.realizedPnl.plus(realizedPnl);
@@ -923,12 +998,12 @@ function handleNonFlip(
 
   const trade = getOrCreateTrade(
     txHash,
-    user.id,
+    user,
     session.id,
     timestamp,
     blockNumber,
   );
-  const fill = new Fill(baseTradeId.concatI32(sideIndex));
+  const fill = new Fill(fillId(txHash, logIndex, sideIndex));
   fill.trade = trade.id;
   fill.side = side;
   fill.user = user.id;
@@ -946,6 +1021,8 @@ function handleNonFlip(
   fill.blockNumber = blockNumber;
   fill.transactionHash = txHash;
   fill.save();
+  user.fillCount++;
+  pendingNewFills += 1;
   updateTradeAggregate(
     trade,
     tradePrice,
@@ -956,7 +1033,6 @@ function handleNonFlip(
     newEntryPrice,
   );
   trade.save();
-  user.tradeCount++;
 }
 
 export function handlePositionLiquidated(event: PositionLiquidated): void {
@@ -1034,7 +1110,7 @@ export function handlePositionLiquidated(event: PositionLiquidated): void {
 
       const trade = getOrCreateTrade(
         event.transaction.hash,
-        user.id,
+        user,
         session.id,
         event.block.timestamp,
         event.block.number,
@@ -1054,9 +1130,6 @@ export function handlePositionLiquidated(event: PositionLiquidated): void {
       trade.liquidator = event.params.liquidator;
       trade.liquidationFee = liquidatorFee;
       trade.save();
-
-      user.tradeCount++;
-      perps.totalTrades++;
     }
   }
 
@@ -1079,6 +1152,7 @@ export function handlePositionLiquidated(event: PositionLiquidated): void {
   liquidator.lastActivityAt = event.block.timestamp;
   liquidator.save();
 
+  flushPerpsCounters(perps);
   perps.totalLiquidations++;
   perps.lastUpdatedAt = event.block.timestamp;
   perps.save();
