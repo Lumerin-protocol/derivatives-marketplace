@@ -238,7 +238,7 @@ Both perps and futures use `CONTRACT_SIZE_HPS_DAY = 1e15` (1 PH/s over a day). O
 
 All three use Chainlink-style `AggregatorV3Interface` oracles:
 - **Perps**: `priceOracle` — hashprice (1 PH/s/day in collateral token units)
-- **Futures**: `hashrateOracle` — hashprice USD feed
+- **Futures**: `priceOracle` — hashprice USD feed
 - **Options**: `oracle` — underlying spot price for Black-76 pricing
 
 All enforce `MAX_ORACLE_STALENESS = 3600` (1 hour). Stale oracles revert reads (except the points hook's reference price, which gracefully returns 0).

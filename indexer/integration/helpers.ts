@@ -6,14 +6,19 @@ function padLeft(s: string, len: number): string {
 
 /**
  * Mirrors `positionSessionId` in `src/ids.ts`:
- *   blockNumber (12 digits, zero-padded) ++ logIndex (6 digits, zero-padded).
- *
- * Note: handlers derive the session's `logIndex` slot as
- * `event.logIndex * 2 + sideIndex` (taker=0, maker=1), so callers that need
- * the exact id must pass that derived slot, not the raw event logIndex.
+ *   blockNumber (12 digits) ++ logIndex (6 digits) ++ side (2 digits),
+ *   all zero-padded, where side is taker=0 / maker=1.
  */
-export function positionSessionId(blockNumber: bigint, logIndex: number): string {
-  return padLeft(blockNumber.toString(), 12) + padLeft(logIndex.toString(), 6);
+export function positionSessionId(
+  blockNumber: bigint,
+  logIndex: number,
+  side: number,
+): string {
+  return (
+    padLeft(blockNumber.toString(), 12) +
+    padLeft(logIndex.toString(), 6) +
+    padLeft(side.toString(), 2)
+  );
 }
 
 /**

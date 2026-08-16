@@ -19,15 +19,17 @@ A Graph Protocol subgraph that indexes the `HashPowerPerpsDEX` contract, turning
 | **PriceLevel** | mutable | Aggregated order book level: total quantity and order count at a given price and side (bid/ask). |
 | **FundingUpdate** / **FundingSettlement** | immutable | Funding rate updates and their per-user settlements. |
 | **BadDebtEvent** / **ReservePoolEvent** | immutable | Bad debt socialized on a liquidation, and reserve pool inflows/outflows. |
+| **LiquidationTx** | immutable | Per-tx sentinel keyed by tx hash. Carries no data; its existence lets `Perps.totalLiquidations` count liquidation transactions rather than legs. |
 
 ### Event Handlers
 
 The subgraph listens to all `HashPowerPerpsDEX` contract events:
 
-- **Order events** — `OrderCreated`, `OrderFilled`, `OrderCancelled`, `OrderUpdated`, `OrderMatched`
-- **Position events** — `PositionTrade`, `PositionClosed`, `PositionLiquidated`
-- **Config events** — `OrderFeeUpdated`, `MarginPercentUpdated`, `MaintenanceMarginPercentUpdated`, `LiquidationFeeUpdated`, `MinimumPriceIncrementUpdated`
-- **Lifecycle events** — `Initialized`
+- **Order events** — `OrderCreated`, `OrderCancelled`, `OrderLiquidated`, `OrderUpdated`, `OrderMatched`
+- **Position events** — `PositionLiquidated`
+- **Funding events** — `FundingUpdated`, `FundingSettled`, `BadDebt`
+- **Config events** — `MakerFeeBpsUpdated`, `TakerFeeBpsUpdated`, `LiquidationFeeBpsUpdated`, `LiquidatorShareBpsUpdated`, `OracleUpdated`, `PortfolioMarginUpdated`, `FundingParametersUpdated`, `MinimumMarginPerOrderUpdated`
+- **Lifecycle events** — `Initialized`, `Upgraded`
 
 On initialization, the handler also reads current contract state (addresses, config, balances) via `try_*` calls to populate the `Perps` singleton.
 

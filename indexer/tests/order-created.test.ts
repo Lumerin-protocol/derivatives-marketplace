@@ -41,6 +41,7 @@ describe("handleOrderCreated", () => {
     assert.fieldEquals("Order", id.toHexString(), "quantity", event.params.quantity.toString());
     assert.fieldEquals("Order", id.toHexString(), "originalQuantity", event.params.quantity.toString());
     assert.fieldEquals("Order", id.toHexString(), "filledQuantity", "0");
+    assert.fieldEquals("Order", id.toHexString(), "cancelledQuantity", "0");
     assert.fieldEquals("Order", id.toHexString(), "averageFillPrice", "0");
     assert.fieldEquals("Order", id.toHexString(), "user", address.toHexString());
     assert.fieldEquals("Order", id.toHexString(), "createdAt", event.block.timestamp.toString());

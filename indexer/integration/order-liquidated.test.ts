@@ -141,5 +141,26 @@ describe("liquidateOrder: Order.status = LIQUIDATED wins over co-emitted OrderCa
       fee.toString(),
       "Order.liquidationFee must mirror the on-chain OrderLiquidated.fee",
     );
+    assert.equal(
+      String(order.cancelledQuantity),
+      String(order.originalQuantity),
+      "the force-cancelled size lands entirely in cancelledQuantity",
+    );
+    // An order-only liquidation must also register as a liquidation tx; before
+    // the LiquidationTx sentinel this path never touched the counter.
+    const perpsEntity = snap.entity("Perps", "0");
+    assert.ok(perpsEntity);
+    assert.equal(
+      String(perpsEntity.totalLiquidations),
+      "1",
+      "liquidateOrder bumps Perps.totalLiquidations once for the tx",
+    );
+    const liquidationTxs = snap.saved("LiquidationTx");
+    assert.equal(liquidationTxs.length, 1, "exactly 1 LiquidationTx sentinel per tx");
+    assert.equal(
+      String(liquidationTxs[0].id).toLowerCase(),
+      liqTx.toLowerCase(),
+      "LiquidationTx.id mirrors the liquidateOrder tx hash",
+    );
   });
 });

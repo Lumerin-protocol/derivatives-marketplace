@@ -95,8 +95,8 @@ describe("handleOrderMatched", () => {
     const makerFillId = baseId.concatI32(1).toHexString();
 
     // Session IDs
-    const takerSessionId = positionSessionId(event.block.number, event.logIndex.toI32() * 2);
-    const makerSessionId = positionSessionId(event.block.number, event.logIndex.toI32() * 2 + 1);
+    const takerSessionId = positionSessionId(event.block.number, event.logIndex, 0);
+    const makerSessionId = positionSessionId(event.block.number, event.logIndex, 1);
 
     // Taker fill (buyer, +qty)
     assert.fieldEquals("Fill", takerFillId, "fillPrice", price.toString());
@@ -173,6 +173,7 @@ describe("handleOrderMatched", () => {
     assert.fieldEquals("PositionSession", takerSessionId, "user", taker.toHexString());
     assert.fieldEquals("PositionSession", takerSessionId, "entryPrice", price.toString());
     assert.fieldEquals("PositionSession", takerSessionId, "closePrice", "0");
+    assert.fieldEquals("PositionSession", takerSessionId, "netQuantity", qty.toString());
     assert.fieldEquals("PositionSession", takerSessionId, "maxQuantity", qty.toString());
     assert.fieldEquals("PositionSession", takerSessionId, "closedQuantity", "0");
     assert.fieldEquals("PositionSession", takerSessionId, "realizedPnl", "0");
@@ -191,8 +192,8 @@ describe("handleOrderMatched", () => {
       event.block.timestamp.toString(),
     );
 
-    // User currentPositionSessionId
-    assert.fieldEquals("User", taker.toHexString(), "currentPositionSessionId", takerSessionId);
+    // User currentSessionId
+    assert.fieldEquals("User", taker.toHexString(), "currentSessionId", takerSessionId);
 
     // Fill links to session and trade
     assert.fieldEquals("Fill", takerFillId, "positionSession", takerSessionId);
@@ -223,8 +224,8 @@ describe("handleOrderMatched", () => {
     event.transaction.hash = txHash;
     handleOrderMatched(event);
 
-    const takerSessionId = positionSessionId(event.block.number, event.logIndex.toI32() * 2);
-    const makerSessionId = positionSessionId(event.block.number, event.logIndex.toI32() * 2 + 1);
+    const takerSessionId = positionSessionId(event.block.number, event.logIndex, 0);
+    const makerSessionId = positionSessionId(event.block.number, event.logIndex, 1);
 
     assert.fieldEquals("PositionSession", takerSessionId, "status", "CLOSE");
     assert.fieldEquals("PositionSession", takerSessionId, "entryPrice", "0");
@@ -233,7 +234,7 @@ describe("handleOrderMatched", () => {
 
     assert.fieldEquals("User", selfTrader.toHexString(), "netQuantity", "0");
     assert.fieldEquals("User", selfTrader.toHexString(), "aggregatedEntryPrice", "0");
-    assert.fieldEquals("User", selfTrader.toHexString(), "currentPositionSessionId", "");
+    assert.fieldEquals("User", selfTrader.toHexString(), "currentSessionId", "");
     // Both legs belong to the same user but to two different sessions, so they
     // stay in two Trade rows instead of collapsing into one.
     assert.entityCount("Trade", 2);
@@ -339,7 +340,7 @@ describe("handleOrderMatched", () => {
     assert.fieldEquals("User", taker.toHexString(), "netQuantity", qty.plus(qty).toString());
     assert.fieldEquals("User", taker.toHexString(), "aggregatedEntryPrice", "3100000");
     // PositionSession.entryPrice must be updated when adding to an existing position (scale-in)
-    const sessionId = positionSessionId(event1.block.number, event1.logIndex.toI32() * 2);
+    const sessionId = positionSessionId(event1.block.number, event1.logIndex, 0);
     assert.fieldEquals("PositionSession", sessionId, "entryPrice", "3100000");
   });
 
@@ -389,7 +390,8 @@ describe("handleOrderMatched", () => {
     assert.entityCount("Fill", 4);
     const takerSessionId = positionSessionId(
       event1.block.number,
-      event1.logIndex.toI32() * 2,
+      event1.logIndex,
+      0,
     );
     const takerTradeId = tradeId(txHash, taker, takerSessionId).toHexString();
     assert.fieldEquals("Trade", takerTradeId, "fillCount", "2");
@@ -422,7 +424,7 @@ describe("handleOrderMatched", () => {
     openEvent.transaction.hash = orderId(100);
     handleOrderMatched(openEvent);
 
-    const sessionId = positionSessionId(openEvent.block.number, openEvent.logIndex.toI32() * 2);
+    const sessionId = positionSessionId(openEvent.block.number, openEvent.logIndex, 0);
     assert.fieldEquals("PositionSession", sessionId, "status", "OPEN");
     assert.fieldEquals("PositionSession", sessionId, "entryPrice", entryPrice.toString());
     assert.fieldEquals(
@@ -432,7 +434,7 @@ describe("handleOrderMatched", () => {
       openEvent.block.timestamp.toString(),
     );
     assert.fieldEquals("PositionSession", sessionId, "user", trader.toHexString());
-    assert.fieldEquals("User", trader.toHexString(), "currentPositionSessionId", sessionId);
+    assert.fieldEquals("User", trader.toHexString(), "currentSessionId", sessionId);
 
     const closeEvent = createOrderMatchedEvent(
       orderId(2),
@@ -465,7 +467,7 @@ describe("handleOrderMatched", () => {
       closeEvent.block.timestamp.toString(),
     );
 
-    assert.fieldEquals("User", trader.toHexString(), "currentPositionSessionId", "");
+    assert.fieldEquals("User", trader.toHexString(), "currentSessionId", "");
 
     // Close-side Trade should have realizedPnl and link to session
     const closeTradeId = tradeId(
@@ -533,7 +535,7 @@ describe("handleOrderMatched", () => {
       .toHexString();
     assert.fieldEquals("Fill", closeFillId, "realizedPnl", "100000");
 
-    const sessionId = positionSessionId(openEvent.block.number, openEvent.logIndex.toI32() * 2);
+    const sessionId = positionSessionId(openEvent.block.number, openEvent.logIndex, 0);
     const closeTradeId = tradeId(
       closeEvent.transaction.hash,
       trader,
@@ -597,7 +599,7 @@ describe("handleOrderMatched", () => {
       .toHexString();
     assert.fieldEquals("Fill", closeFillId, "realizedPnl", "-100000");
 
-    const sessionId = positionSessionId(openEvent.block.number, openEvent.logIndex.toI32() * 2);
+    const sessionId = positionSessionId(openEvent.block.number, openEvent.logIndex, 0);
     const closeTradeId = tradeId(
       closeEvent.transaction.hash,
       trader,
@@ -657,7 +659,7 @@ describe("handleOrderMatched", () => {
     assert.fieldEquals("User", trader.toHexString(), "netQuantity", halfQty.toString());
     assert.fieldEquals("User", trader.toHexString(), "realizedPnl", "100000");
 
-    const sessionId = positionSessionId(openEvent.block.number, openEvent.logIndex.toI32() * 2);
+    const sessionId = positionSessionId(openEvent.block.number, openEvent.logIndex, 0);
     assert.fieldEquals("PositionSession", sessionId, "status", "OPEN");
     assert.fieldEquals("PositionSession", sessionId, "realizedPnl", "100000");
     assert.fieldEquals("PositionSession", sessionId, "closedQuantity", halfQty.toString());
@@ -695,7 +697,7 @@ describe("handleOrderMatched", () => {
     openEvent.transaction.hash = orderId(100);
     handleOrderMatched(openEvent);
 
-    const oldSessionId = positionSessionId(openEvent.block.number, openEvent.logIndex.toI32() * 2);
+    const oldSessionId = positionSessionId(openEvent.block.number, openEvent.logIndex, 0);
     assert.fieldEquals("PositionSession", oldSessionId, "status", "OPEN");
 
     // Flip: trader sells 2 units at flipPrice → goes from +1 to -1
@@ -723,12 +725,14 @@ describe("handleOrderMatched", () => {
     // Old session closed with PnL
     assert.fieldEquals("PositionSession", oldSessionId, "status", "CLOSE");
     assert.fieldEquals("PositionSession", oldSessionId, "realizedPnl", "100000");
+    assert.fieldEquals("PositionSession", oldSessionId, "netQuantity", "0");
 
-    // New session opened with zero PnL
-    const newSessionId = positionSessionId(flipEvent.block.number, flipEvent.logIndex.toI32() * 2);
+    // New session opened with zero PnL, carrying only the flipped-into size.
+    const newSessionId = positionSessionId(flipEvent.block.number, flipEvent.logIndex, 0);
     assert.fieldEquals("PositionSession", newSessionId, "status", "OPEN");
     assert.fieldEquals("PositionSession", newSessionId, "realizedPnl", "0");
     assert.fieldEquals("PositionSession", newSessionId, "entryPrice", flipPrice.toString());
+    assert.fieldEquals("PositionSession", newSessionId, "netQuantity", qty.neg().toString());
 
     // Close fill carries PnL, open fill has zero. The re-opening leg sits at
     // leg index sideIndex + 2 so it cannot collide with the maker's leg.
@@ -910,7 +914,8 @@ describe("handleOrderMatched", () => {
     // Fill 2 PnL = (3200000 - 3000000) * 1000000 / 1000000 = 200000
     const sessionId = positionSessionId(
       openEvent.block.number,
-      openEvent.logIndex.toI32() * 2,
+      openEvent.logIndex,
+      0,
     );
     const closeTradeId = tradeId(closeTxHash, trader, sessionId).toHexString();
     assert.fieldEquals("Trade", closeTradeId, "realizedPnl", "300000");
@@ -950,8 +955,8 @@ describe("handleOrderMatched", () => {
     assert.fieldEquals("Fill", takerFillId, "tradingFee", takerFee.toString());
     assert.fieldEquals("Fill", makerFillId, "tradingFee", makerFee.toString());
 
-    const takerSessionId = positionSessionId(event.block.number, event.logIndex.toI32() * 2);
-    const makerSessionId = positionSessionId(event.block.number, event.logIndex.toI32() * 2 + 1);
+    const takerSessionId = positionSessionId(event.block.number, event.logIndex, 0);
+    const makerSessionId = positionSessionId(event.block.number, event.logIndex, 1);
     const takerTradeId = tradeId(
       event.transaction.hash,
       taker,

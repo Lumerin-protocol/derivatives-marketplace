@@ -88,6 +88,13 @@ describe("handleOrderUpdated", () => {
     assert.fieldEquals("Order", id.toHexString(), "status", "ACTIVE");
     assert.fieldEquals("Order", id.toHexString(), "quantity", remainingQty.toString());
     assert.fieldEquals("Order", id.toHexString(), "filledQuantity", "0");
+    // The shrink did not match, so it lands in cancelledQuantity.
+    assert.fieldEquals(
+      "Order",
+      id.toHexString(),
+      "cancelledQuantity",
+      originalQty.minus(remainingQty).toString(),
+    );
 
     assert.fieldEquals(
       "PriceLevel",
@@ -117,6 +124,8 @@ describe("handleOrderUpdated", () => {
     assert.fieldEquals("Order", id.toHexString(), "status", "PARTIALLY_FILLED");
     assert.fieldEquals("Order", id.toHexString(), "quantity", remainingQty.toString());
     assert.fieldEquals("Order", id.toHexString(), "filledQuantity", fillQty.toString());
+    // Everything that left the book matched, so nothing is cancelled.
+    assert.fieldEquals("Order", id.toHexString(), "cancelledQuantity", "0");
   });
 
   test("qty=0 after fills sets status to FILLED", () => {
@@ -134,7 +143,14 @@ describe("handleOrderUpdated", () => {
     assert.fieldEquals("Order", id.toHexString(), "status", "FILLED");
     assert.fieldEquals("Order", id.toHexString(), "quantity", BigInt.zero().toString());
     assert.fieldEquals("Order", id.toHexString(), "filledQuantity", originalQty.toString());
+    assert.fieldEquals("Order", id.toHexString(), "cancelledQuantity", "0");
     assert.fieldEquals("Order", id.toHexString(), "closedAt", updateEvent.block.timestamp.toString());
+    assert.fieldEquals(
+      "Order",
+      id.toHexString(),
+      "closedByTx",
+      updateEvent.transaction.from.toHexString(),
+    );
 
     assert.fieldEquals(
       "PriceLevel",

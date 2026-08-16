@@ -154,13 +154,24 @@ describe("liquidatePosition: forced Trade with isLiquidation + session liquidate
       "session.closePrice == derived exit price",
     );
 
-    // ---- Counter is still bumped (kept alongside the Trade) ----
+    assert.equal(
+      String(session.netQuantity),
+      "0",
+      "session.netQuantity is 0 once the session is CLOSE",
+    );
+
+    // ---- Counters are still bumped (kept alongside the Trade) ----
     const perpsEntity = snap.entity("Perps", "0");
     assert.ok(perpsEntity);
     assert.equal(
       String(perpsEntity.totalLiquidations),
       "1",
-      "Perps.totalLiquidations bumps once per liquidation",
+      "Perps.totalLiquidations counts the one liquidation tx",
+    );
+    assert.equal(
+      String(perpsEntity.totalLiquidatedValue),
+      ((expectedExitPrice * -closedQuantity) / scale).toString(),
+      "Perps.totalLiquidatedValue is the forced exit notional, scaled like totalVolume",
     );
   });
 });
