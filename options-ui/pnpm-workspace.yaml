@@ -1,0 +1,8 @@
+# pnpm 11 refuses to install unless every build script is decided explicitly.
+# These four were already being skipped under pnpm 10, and each is an optional
+# native accelerator with a working JS fallback, so keep them off.
+allowBuilds:
+  bufferutil: false
+  esbuild: false
+  keccak: false
+  utf-8-validate: false
