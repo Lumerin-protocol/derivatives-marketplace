@@ -2,5 +2,6 @@ allowBuilds:
   '@arbitrum/nitro-contracts': false
   '@cyfrin/aderyn': true
   esbuild: false
+  hardhat-viem-abi@https://codeload.github.com/lsheva/hardhat-viem-abi/tar.gz/54198ea8c9ad9b05c0c23a057ae3b1c7ab82a93a#path:packages/hardhat-viem-abi: true
   keccak: true
   secp256k1: true
