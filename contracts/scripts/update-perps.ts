@@ -1,11 +1,10 @@
-import { requireEnvsSet } from "../lib/env.ts";
 import { network } from "hardhat";
 import {
+  type Address,
   encodeAbiParameters,
   encodeFunctionData,
   getAbiItem,
   getAddress,
-  type Address,
   type Hex,
   keccak256,
   numberToHex,
@@ -13,10 +12,11 @@ import {
   zeroAddress,
 } from "viem";
 import { HashPowerPerpsDEXAbi } from "../abi/HashPowerPerpsDEX.ts";
-import { writeAndWait } from "../lib/writeContract.ts";
+import { requireEnvsSet } from "../lib/env.ts";
+import { addrUrl, txUrl } from "../lib/explorer.ts";
+import { logInfo, logPrompt, logStep, logSuccess, logTitle } from "../lib/log.ts";
 import { verifyContract } from "../lib/verify.ts";
-import { txUrl, addrUrl } from "../lib/explorer.ts";
-import { logTitle, logInfo, logStep, logSuccess, logPrompt } from "../lib/log.ts";
+import { writeAndWait } from "../lib/writeContract.ts";
 
 // `resetState` is not an initializer, so the proxy stays on whatever version it
 // is already on. Proxies deployed before `deploy-perps.ts` consumed version 3 at

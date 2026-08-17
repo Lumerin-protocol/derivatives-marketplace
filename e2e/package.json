@@ -28,5 +28,5 @@
     "@typescript/native-preview": "7.0.0-dev.20260707.2",
     "typescript": "^5.9.3"
   },
-  "packageManager": "pnpm@10.28.1"
+  "packageManager": "pnpm@11.22.0"
 }
