@@ -9,8 +9,8 @@ import { TimeInForce } from "../fixtures/timeInForce.ts";
 const { networkHelpers } = await network.getOrCreate();
 
 describe("HashPowerPerpsDEX - Order Book Limits", function () {
-  describe("minimumMarginPerOrder", function () {
-    it("should allow owner to set minimumMarginPerOrder", async function () {
+  describe("minimumMarginPerOrder compatibility surface", function () {
+    it("retains the owner setter and getter", async function () {
       const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
       const { perps } = contracts;
       const { owner } = accounts;
@@ -32,7 +32,7 @@ describe("HashPowerPerpsDEX - Order Book Limits", function () {
       });
     });
 
-    it("should reject resting order whose margin is below minimumMarginPerOrder", async function () {
+    it("does not enforce the deprecated value on a new resting order", async function () {
       const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
       const { perps } = contracts;
       const { buyer, owner } = accounts;
@@ -40,82 +40,8 @@ describe("HashPowerPerpsDEX - Order Book Limits", function () {
       const marketPrice = await perps.read.getMarketPrice();
       const price = marketPrice - config.minimumPriceIncrement;
 
-      const minMargin = parseUnits("5", config.tokenDecimals);
+      const minMargin = parseUnits("1000", config.tokenDecimals);
       await perps.write.setMinimumMarginPerOrder([minMargin], { account: owner.account });
-
-      const tinyQty = parseUnits("1", config.quantityDecimals);
-
-      await catchError(perps.abi, "OrderMarginTooLow", async () => {
-        await perps.write.createOrder([price, tinyQty, TimeInForce.GTC], { account: buyer.account });
-      });
-    });
-
-    it("should accept resting order whose margin is at or above minimumMarginPerOrder", async function () {
-      const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
-      const { perps } = contracts;
-      const { buyer, owner } = accounts;
-
-      const marketPrice = await perps.read.getMarketPrice();
-      const price = marketPrice - config.minimumPriceIncrement;
-
-      const minMargin = parseUnits("5", config.tokenDecimals);
-      await perps.write.setMinimumMarginPerOrder([minMargin], { account: owner.account });
-
-      const qty = parseUnits("2", config.quantityDecimals);
-      await perps.write.createOrder([price, qty, TimeInForce.GTC], { account: buyer.account });
-
-      const orders = await perps.read.getUserOrders([buyer.account.address]);
-      assert.equal(orders.length, 1);
-    });
-
-    it("should not enforce minimum on matched portion, only on resting remainder", async function () {
-      const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
-      const { perps } = contracts;
-      const { buyer, seller, owner } = accounts;
-
-      const marketPrice = await perps.read.getMarketPrice();
-      const qty1 = parseUnits("1", config.quantityDecimals);
-
-      await perps.write.createOrder([marketPrice, -qty1, TimeInForce.GTC], { account: seller.account });
-
-      const minMargin = parseUnits("5", config.tokenDecimals);
-      await perps.write.setMinimumMarginPerOrder([minMargin], { account: owner.account });
-
-      await perps.write.createOrder([marketPrice, qty1, TimeInForce.GTC], { account: buyer.account });
-
-      const posBuyer = await perps.read.getUserPosition([buyer.account.address]);
-      assert.equal(posBuyer.netQuantity, qty1);
-    });
-
-    it("should reject when partially matched remainder margin is below minimum", async function () {
-      const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
-      const { perps } = contracts;
-      const { buyer, seller, owner } = accounts;
-
-      const marketPrice = await perps.read.getMarketPrice();
-
-      const minMargin = parseUnits("5", config.tokenDecimals);
-      await perps.write.setMinimumMarginPerOrder([minMargin], { account: owner.account });
-
-      const qty2 = parseUnits("2", config.quantityDecimals);
-      await perps.write.createOrder([marketPrice, -qty2, TimeInForce.GTC], { account: seller.account });
-
-      const qty3 = parseUnits("3", config.quantityDecimals);
-
-      await catchError(perps.abi, "OrderMarginTooLow", async () => {
-        await perps.write.createOrder([marketPrice, qty3, TimeInForce.GTC], { account: buyer.account });
-      });
-    });
-
-    it("should not enforce minimum when minimumMarginPerOrder is 0 (disabled)", async function () {
-      const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
-      const { perps } = contracts;
-      const { buyer } = accounts;
-
-      const marketPrice = await perps.read.getMarketPrice();
-      const price = marketPrice - config.minimumPriceIncrement;
-
-      assert.equal(await perps.read.minimumMarginPerOrder(), 0n);
 
       const tinyQty = parseUnits("0.001", config.quantityDecimals);
       await perps.write.createOrder([price, tinyQty, TimeInForce.GTC], { account: buyer.account });
@@ -124,35 +50,48 @@ describe("HashPowerPerpsDEX - Order Book Limits", function () {
       assert.equal(orders.length, 1);
     });
 
-    it("should allow setting minimumMarginPerOrder to 0 to disable", async function () {
+    it("does not enforce the deprecated value on a partially matched remainder", async function () {
       const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
       const { perps } = contracts;
-      const { owner } = accounts;
+      const { buyer, seller, owner } = accounts;
 
-      await perps.write.setMinimumMarginPerOrder([parseUnits("0.5", config.tokenDecimals)], {
+      const marketPrice = await perps.read.getMarketPrice();
+      const makerQty = parseUnits("1", config.quantityDecimals);
+      const remainder = parseUnits("0.001", config.quantityDecimals);
+      await perps.write.setMinimumMarginPerOrder([parseUnits("1000", config.tokenDecimals)], {
         account: owner.account,
       });
-      assert.notEqual(await perps.read.minimumMarginPerOrder(), 0n);
+      await perps.write.createOrder([marketPrice, -makerQty, TimeInForce.GTC], { account: seller.account });
 
-      await perps.write.setMinimumMarginPerOrder([0n], { account: owner.account });
-      assert.equal(await perps.read.minimumMarginPerOrder(), 0n);
+      await perps.write.createOrder([marketPrice, makerQty + remainder, TimeInForce.GTC], {
+        account: buyer.account,
+      });
+
+      const [orderId] = await perps.read.getUserOrders([buyer.account.address]);
+      const order = await perps.read.getOrder([orderId]);
+      assert.equal(order.quantity, remainder);
     });
 
-    it("high-leverage order should require same margin as low-leverage order of same size", async function () {
+    it("does not enforce the deprecated value when reducing a resting order", async function () {
       const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
       const { perps } = contracts;
       const { buyer, owner } = accounts;
-
       const marketPrice = await perps.read.getMarketPrice();
-      const price = marketPrice - config.minimumPriceIncrement;
+      const qty = parseUnits("1", config.quantityDecimals);
+      const reducedQty = parseUnits("0.001", config.quantityDecimals);
 
-      const minMargin = parseUnits("5", config.tokenDecimals);
-      await perps.write.setMinimumMarginPerOrder([minMargin], { account: owner.account });
-
-      const tinyQty = parseUnits("1", config.quantityDecimals);
-      await catchError(perps.abi, "OrderMarginTooLow", async () => {
-        await perps.write.createOrder([price, tinyQty, TimeInForce.GTC], { account: buyer.account });
+      await perps.write.createOrder([marketPrice - config.minimumPriceIncrement, qty, TimeInForce.GTC], {
+        account: buyer.account,
       });
+      await perps.write.setMinimumMarginPerOrder([parseUnits("1000", config.tokenDecimals)], {
+        account: owner.account,
+      });
+      const [orderId] = await perps.read.getUserOrders([buyer.account.address]);
+
+      await perps.write.reduceOrderSize([orderId, reducedQty], { account: buyer.account });
+
+      const order = await perps.read.getOrder([orderId]);
+      assert.equal(order.quantity, reducedQty);
     });
   });
 

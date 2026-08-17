@@ -7,7 +7,7 @@ export const PerpsStatsQuery = gql`
       contractAddress
       collateralVault
       priceOracle
-      portfolioMarginEngine
+      portfolioMargin
       liquidationFeeBps
       liquidatorShareBps
       minimumPriceIncrement

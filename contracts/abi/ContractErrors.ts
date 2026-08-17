@@ -31,11 +31,6 @@ export const contractErrors = [
     "type": "error"
   },
   {
-    "inputs": [],
-    "name": "InvalidSize",
-    "type": "error"
-  },
-  {
     "inputs": [
       {
         "internalType": "address",
@@ -44,6 +39,11 @@ export const contractErrors = [
       }
     ],
     "name": "OwnableUnauthorizedAccount",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidQty",
     "type": "error"
   },
   {
@@ -70,17 +70,6 @@ export const contractErrors = [
   {
     "inputs": [
       {
-        "internalType": "uint256",
-        "name": "index",
-        "type": "uint256"
-      }
-    ],
-    "name": "MulticallSubCallOutOfGas",
-    "type": "error"
-  },
-  {
-    "inputs": [
-      {
         "internalType": "string",
         "name": "str",
         "type": "string"
@@ -96,12 +85,7 @@ export const contractErrors = [
   },
   {
     "inputs": [],
-    "name": "InsufficientCollateral",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "InsufficientMargin",
+    "name": "UnsupportedTokenDecimals",
     "type": "error"
   },
   {
@@ -167,11 +151,6 @@ export const contractErrors = [
       }
     ],
     "name": "ERC2612ExpiredSignature",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "InsufficientReservePool",
     "type": "error"
   },
   {
@@ -262,6 +241,22 @@ export const contractErrors = [
   {
     "inputs": [
       {
+        "internalType": "int256",
+        "name": "min",
+        "type": "int256"
+      },
+      {
+        "internalType": "int256",
+        "name": "max",
+        "type": "int256"
+      }
+    ],
+    "name": "ValueOutOfRange",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "bytes32",
         "name": "slot",
         "type": "bytes32"
@@ -282,11 +277,6 @@ export const contractErrors = [
   },
   {
     "inputs": [],
-    "name": "InvalidMarginPercent",
-    "type": "error"
-  },
-  {
-    "inputs": [],
     "name": "FunctionDisabled",
     "type": "error"
   },
@@ -298,6 +288,11 @@ export const contractErrors = [
   {
     "inputs": [],
     "name": "VaultMismatch",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "EmptyBatch",
     "type": "error"
   },
   {
@@ -334,6 +329,11 @@ export const contractErrors = [
   {
     "inputs": [],
     "name": "NotInitializing",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InsufficientMarginBalance",
     "type": "error"
   },
   {

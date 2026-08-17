@@ -5,6 +5,9 @@ import { ICollateralVault } from "collateral-margin/contracts/contracts/interfac
 import { HashPowerPerpsDEX } from "../HashPowerPerpsDEX.sol";
 
 /// @dev Test-only harness for reproducing pre-v2.13 order-cache proxy state.
+///      The removed MulticallUpgradeable base was stateless, so it is omitted here
+///      to keep the test implementation deployable without changing storage layout;
+///      Hardhat also compiles this test-only implementation with a low-runs optimizer.
 contract HashPowerPerpsDEXMigrationHarness is HashPowerPerpsDEX {
     constructor(ICollateralVault _vault) HashPowerPerpsDEX(_vault) { }
 
@@ -13,30 +16,28 @@ contract HashPowerPerpsDEXMigrationHarness is HashPowerPerpsDEX {
         delete userOrderAggregate[_user];
     }
 
-    /// @dev Retained to reproduce the prior quantity-cache migration independently.
-    function clearOrderQuantityCache(address _user) external {
-        delete userBuyOrderQty[_user];
-        delete userSellOrderQty[_user];
+    /// @dev Simulates a non-zero legacy flat-liquidation-fee value in the reused slot.
+    function setLegacyRevenueSlot(uint256 _value) external {
+        __gap3 = _value;
     }
 
-    function setLegacyOrderCache(
-        address _user,
-        uint256 _buyQty,
-        uint256 _sellQty,
-        uint256 _buyValue,
-        uint256 _sellValue
-    ) external {
-        userBuyOrderQty[_user] = _buyQty;
-        userSellOrderQty[_user] = _sellQty;
-        userBuyOrderValue[_user] = _buyValue;
-        userSellOrderValue[_user] = _sellValue;
+    /// @dev Read `__gap3` (not the live fee-pot view).
+    function legacyRevenueSlot() external view returns (uint256) {
+        return __gap3;
     }
 
-    function getLegacyOrderCache(address _user)
-        external
-        view
-        returns (uint256 buyQty, uint256 sellQty, uint256 buyValue, uint256 sellValue)
-    {
-        return (userBuyOrderQty[_user], userSellOrderQty[_user], userBuyOrderValue[_user], userSellOrderValue[_user]);
+    /// @dev Recreates the legacy `(int256 netQuantity, uint256 aggregatedEntryPrice)`
+    ///      bytes in the canonical position slots before an atomic upgrade-and-reset.
+    function setLegacyPosition(address _user, int256 _netQuantity, uint256 _legacyAverage) external {
+        Position storage position = positions[_user];
+        position.netQuantity = _netQuantity;
+        assembly {
+            sstore(add(position.slot, 1), _legacyAverage)
+        }
     }
+
+    function setFundingSnapshot(address _user, int256 _snapshot) external {
+        userFundingSnapshot[_user] = _snapshot;
+    }
+
 }

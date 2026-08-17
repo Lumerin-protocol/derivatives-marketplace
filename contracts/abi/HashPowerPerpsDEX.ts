@@ -39,22 +39,17 @@ export const HashPowerPerpsDEXAbi = [
   },
   {
     "inputs": [],
+    "name": "EmptyBatch",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "FailedCall",
     "type": "error"
   },
   {
     "inputs": [],
-    "name": "InsufficientCollateral",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "InsufficientMargin",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "InsufficientReservePool",
+    "name": "InsufficientMarginBalance",
     "type": "error"
   },
   {
@@ -84,11 +79,6 @@ export const HashPowerPerpsDEXAbi = [
   },
   {
     "inputs": [],
-    "name": "InvalidMarginPercent",
-    "type": "error"
-  },
-  {
-    "inputs": [],
     "name": "InvalidOracle",
     "type": "error"
   },
@@ -99,12 +89,12 @@ export const HashPowerPerpsDEXAbi = [
   },
   {
     "inputs": [],
-    "name": "InvalidReduceQuantity",
+    "name": "InvalidQty",
     "type": "error"
   },
   {
     "inputs": [],
-    "name": "InvalidSize",
+    "name": "InvalidReduceQuantity",
     "type": "error"
   },
   {
@@ -125,17 +115,6 @@ export const HashPowerPerpsDEXAbi = [
   {
     "inputs": [],
     "name": "MaxPriceLevelsReached",
-    "type": "error"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "index",
-        "type": "uint256"
-      }
-    ],
-    "name": "MulticallSubCallOutOfGas",
     "type": "error"
   },
   {
@@ -224,6 +203,27 @@ export const HashPowerPerpsDEXAbi = [
       }
     ],
     "name": "UUPSUnsupportedProxiableUUID",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "UnsupportedTokenDecimals",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "int256",
+        "name": "min",
+        "type": "int256"
+      },
+      {
+        "internalType": "int256",
+        "name": "max",
+        "type": "int256"
+      }
+    ],
+    "name": "ValueOutOfRange",
     "type": "error"
   },
   {
@@ -381,25 +381,6 @@ export const HashPowerPerpsDEXAbi = [
       }
     ],
     "name": "MakerFeeBpsUpdated",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": false,
-        "internalType": "int16",
-        "name": "newTakerFeeBps",
-        "type": "int16"
-      },
-      {
-        "indexed": false,
-        "internalType": "int16",
-        "name": "newMakerFeeBps",
-        "type": "int16"
-      }
-    ],
-    "name": "MatchFeeUpdated",
     "type": "event"
   },
   {
@@ -657,7 +638,7 @@ export const HashPowerPerpsDEXAbi = [
       {
         "indexed": false,
         "internalType": "int256",
-        "name": "positionSize",
+        "name": "closedQuantity",
         "type": "int256"
       },
       {
@@ -723,6 +704,19 @@ export const HashPowerPerpsDEXAbi = [
         "internalType": "uint8",
         "name": "",
         "type": "uint8"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "MAX_ORACLE_STALENESS",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
       }
     ],
     "stateMutability": "view",
@@ -796,25 +790,6 @@ export const HashPowerPerpsDEXAbi = [
   {
     "inputs": [
       {
-        "internalType": "address",
-        "name": "account",
-        "type": "address"
-      }
-    ],
-    "name": "balanceOf",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
         "internalType": "bytes32",
         "name": "_orderId",
         "type": "bytes32"
@@ -823,6 +798,19 @@ export const HashPowerPerpsDEXAbi = [
     "name": "cancelOrder",
     "outputs": [],
     "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "collectedFeesBalance",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   },
   {
@@ -919,57 +907,12 @@ export const HashPowerPerpsDEXAbi = [
   },
   {
     "inputs": [],
-    "name": "getBestAskPrice",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "getBestBidPrice",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
     "name": "getMarketPrice",
     "outputs": [
       {
         "internalType": "uint256",
         "name": "",
         "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "_user",
-        "type": "address"
-      }
-    ],
-    "name": "getNetPositionDelta",
-    "outputs": [
-      {
-        "internalType": "int256",
-        "name": "",
-        "type": "int256"
       }
     ],
     "stateMutability": "view",
@@ -1045,7 +988,7 @@ export const HashPowerPerpsDEXAbi = [
           }
         ],
         "internalType": "struct HashPowerPerpsDEXBase.OrderAggregate",
-        "name": "",
+        "name": "aggregate_",
         "type": "tuple"
       }
     ],
@@ -1064,12 +1007,12 @@ export const HashPowerPerpsDEXAbi = [
     "outputs": [
       {
         "internalType": "uint256[]",
-        "name": "bidPrices",
+        "name": "bids",
         "type": "uint256[]"
       },
       {
         "internalType": "uint256[]",
-        "name": "askPrices",
+        "name": "asks",
         "type": "uint256[]"
       }
     ],
@@ -1112,7 +1055,7 @@ export const HashPowerPerpsDEXAbi = [
     "outputs": [
       {
         "internalType": "uint256",
-        "name": "totalQuantity",
+        "name": "",
         "type": "uint256"
       }
     ],
@@ -1206,7 +1149,7 @@ export const HashPowerPerpsDEXAbi = [
     "outputs": [
       {
         "internalType": "bytes32[]",
-        "name": "",
+        "name": "orderIds",
         "type": "bytes32[]"
       }
     ],
@@ -1231,9 +1174,9 @@ export const HashPowerPerpsDEXAbi = [
             "type": "int256"
           },
           {
-            "internalType": "uint256",
-            "name": "aggregatedEntryPrice",
-            "type": "uint256"
+            "internalType": "int256",
+            "name": "netEntryValue",
+            "type": "int256"
           }
         ],
         "internalType": "struct HashPowerPerpsDEXBase.Position",
@@ -1245,13 +1188,19 @@ export const HashPowerPerpsDEXAbi = [
     "type": "function"
   },
   {
-    "inputs": [],
-    "name": "getUsersWithPositions",
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      }
+    ],
+    "name": "hasRestingOrderDelta",
     "outputs": [
       {
-        "internalType": "address[]",
+        "internalType": "bool",
         "name": "",
-        "type": "address[]"
+        "type": "bool"
       }
     ],
     "stateMutability": "view",
@@ -1307,22 +1256,10 @@ export const HashPowerPerpsDEXAbi = [
     "type": "function"
   },
   {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "_user",
-        "type": "address"
-      }
-    ],
-    "name": "isLiquidatable",
-    "outputs": [
-      {
-        "internalType": "bool",
-        "name": "",
-        "type": "bool"
-      }
-    ],
-    "stateMutability": "view",
+    "inputs": [],
+    "name": "initializeV3",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -1458,49 +1395,6 @@ export const HashPowerPerpsDEXAbi = [
     "type": "function"
   },
   {
-    "inputs": [
-      {
-        "internalType": "bytes[]",
-        "name": "data",
-        "type": "bytes[]"
-      }
-    ],
-    "name": "multicall",
-    "outputs": [
-      {
-        "internalType": "bytes[]",
-        "name": "results",
-        "type": "bytes[]"
-      }
-    ],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "bytes[]",
-        "name": "data",
-        "type": "bytes[]"
-      }
-    ],
-    "name": "multicallStopOnFailure",
-    "outputs": [
-      {
-        "internalType": "bool[]",
-        "name": "successes",
-        "type": "bool[]"
-      },
-      {
-        "internalType": "bytes[]",
-        "name": "results",
-        "type": "bytes[]"
-      }
-    ],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
     "inputs": [],
     "name": "owner",
     "outputs": [
@@ -1591,7 +1485,13 @@ export const HashPowerPerpsDEXAbi = [
     "type": "function"
   },
   {
-    "inputs": [],
+    "inputs": [
+      {
+        "internalType": "address[]",
+        "name": "_participants",
+        "type": "address[]"
+      }
+    ],
     "name": "resetState",
     "outputs": [],
     "stateMutability": "nonpayable",
@@ -1867,6 +1767,13 @@ export const HashPowerPerpsDEXAbi = [
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "withdrawCollectedFees",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   }
 ] as const;

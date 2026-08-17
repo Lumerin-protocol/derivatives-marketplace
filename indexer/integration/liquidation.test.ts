@@ -60,9 +60,9 @@ describe("liquidatePosition: forced Trade with isLiquidation + session liquidate
     const sellerAddr = seller.account.address.toLowerCase() as `0x${string}`;
     const ownerAddr = owner.account.address.toLowerCase() as `0x${string}`;
 
-    // On-chain event values: positionSize is the SIGNED closed position
+    // On-chain event values: closedQuantity is the SIGNED closed quantity
     // (seller short → negative); pnl/fee are signed/unsigned respectively.
-    const positionSize = liquidated.args.positionSize as bigint; // signed, negative
+    const closedQuantity = liquidated.args.closedQuantity as bigint; // signed, negative
     const pnl = liquidated.args.pnl as bigint;
     const liquidatorFee = liquidated.args.liquidatorFee as bigint;
     assert.equal(
@@ -70,13 +70,13 @@ describe("liquidatePosition: forced Trade with isLiquidation + session liquidate
       sellerAddr,
       "the liquidated user is the underwater seller",
     );
-    assert.ok(positionSize < 0n, "seller short → signed positionSize is negative");
+    assert.ok(closedQuantity < 0n, "seller short → signed closedQuantity is negative");
 
     // Exit price derived from the event the same way the indexer must:
-    //   exit = entry + pnl * 10^quantityDecimals / positionSize
+    //   exit = entry + pnl * 10^quantityDecimals / closedQuantity
     // using the seller's entry price (= the match price = initialPrice).
     const scale = 10n ** BigInt(config.quantityDecimals);
-    const expectedExitPrice = config.initialPrice + (pnl * scale) / positionSize;
+    const expectedExitPrice = config.initialPrice + (pnl * scale) / closedQuantity;
 
     const snap = await matchstick.indexSnapshot([]);
 
@@ -122,8 +122,8 @@ describe("liquidatePosition: forced Trade with isLiquidation + session liquidate
     // the OPPOSITE sign of the closed position (short close → forced buy → +).
     assert.equal(
       String(liqTrade.tradeQuantity),
-      (-positionSize).toString(),
-      "Trade.tradeQuantity is the offsetting forced trade (-positionSize)",
+      (-closedQuantity).toString(),
+      "Trade.tradeQuantity is the offsetting forced trade (-closedQuantity)",
     );
 
     // ---- The closing PositionSession ----
@@ -135,12 +135,12 @@ describe("liquidatePosition: forced Trade with isLiquidation + session liquidate
     assert.equal(session.status, "CLOSE", "session must be CLOSE after liquidation");
     assert.equal(
       String(session.liquidatedQuantity),
-      (-positionSize).toString(),
+      (-closedQuantity).toString(),
       "PositionSession.liquidatedQuantity == abs(closed qty)",
     );
     assert.equal(
       String(session.closedQuantity),
-      (-positionSize).toString(),
+      (-closedQuantity).toString(),
       "session.closedQuantity == abs(closed qty) after the full liquidation close",
     );
     assert.equal(
@@ -154,13 +154,24 @@ describe("liquidatePosition: forced Trade with isLiquidation + session liquidate
       "session.closePrice == derived exit price",
     );
 
-    // ---- Counter is still bumped (kept alongside the Trade) ----
+    assert.equal(
+      String(session.netQuantity),
+      "0",
+      "session.netQuantity is 0 once the session is CLOSE",
+    );
+
+    // ---- Counters are still bumped (kept alongside the Trade) ----
     const perpsEntity = snap.entity("Perps", "0");
     assert.ok(perpsEntity);
     assert.equal(
       String(perpsEntity.totalLiquidations),
       "1",
-      "Perps.totalLiquidations bumps once per liquidation",
+      "Perps.totalLiquidations counts the one liquidation tx",
+    );
+    assert.equal(
+      String(perpsEntity.totalLiquidatedValue),
+      ((expectedExitPrice * -closedQuantity) / scale).toString(),
+      "Perps.totalLiquidatedValue is the forced exit notional, scaled like totalVolume",
     );
   });
 });

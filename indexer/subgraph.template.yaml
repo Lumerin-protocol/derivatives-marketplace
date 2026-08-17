@@ -13,6 +13,10 @@ dataSources:
       address: "${PERPS_ADDRESS}"
       startBlock: ${PERPS_START_BLOCK}
       abi: HashPowerPerpsDEX
+    context:
+      startBlock:
+        type: BigInt
+        data: "${PERPS_START_BLOCK}"
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
@@ -22,13 +26,14 @@ dataSources:
         - User
         - Order
         - Trade
-        - PositionSnapshot
-        - PositionClose
-        - Liquidation
+        - Fill
+        - PositionSession
         - PriceLevel
+        - LiquidationTx
         - FundingUpdate
         - FundingSettlement
         - BadDebtEvent
+        - ReservePoolEvent
       abis:
         - name: HashPowerPerpsDEX
           file: ../contracts/abi/HashPowerPerpsDEX.json
@@ -54,10 +59,6 @@ dataSources:
         - event: BadDebt(indexed address,uint256)
           handler: handleBadDebt
         # Config events
-        # MatchFeeUpdated is only emitted by resetState; the individual setters
-        # emit the per-side events below.
-        - event: MatchFeeUpdated(int16,int16)
-          handler: handleMatchFeeUpdated
         - event: MakerFeeBpsUpdated(int16)
           handler: handleMakerFeeBpsUpdated
         - event: TakerFeeBpsUpdated(int16)

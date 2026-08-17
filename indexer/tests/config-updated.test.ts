@@ -1,8 +1,13 @@
-import { describe, test, beforeEach, clearStore } from "matchstick-as/assembly/index";
+import {
+  beforeEach,
+  clearStore,
+  createMockedFunction,
+  describe,
+  test,
+} from "matchstick-as/assembly/index";
 import { Address, BigInt, ethereum } from "@graphprotocol/graph-ts";
 import { newTypedMockEventWithParams } from "matchstick-as/assembly/defaults";
 import {
-  handleMatchFeeUpdated,
   handleMakerFeeBpsUpdated,
   handleTakerFeeBpsUpdated,
   handleLiquidationFeeBpsUpdated,
@@ -13,7 +18,6 @@ import {
   handleMinimumMarginPerOrderUpdated,
 } from "../src/perps";
 import {
-  MatchFeeUpdated,
   MakerFeeBpsUpdated,
   TakerFeeBpsUpdated,
   LiquidationFeeBpsUpdated,
@@ -24,7 +28,14 @@ import {
   MinimumMarginPerOrderUpdated,
 } from "../generated/HashPowerPerpsDEX/HashPowerPerpsDEX";
 import { assert } from "matchstick-as/assembly/index";
-import { setupDataSourceMock, paramUint, setupPerps } from "./helpers";
+import {
+  contractAddress,
+  mockPerpsContractCallsAsReverted,
+  paramUint,
+  setupDataSourceMock,
+  setupPerps,
+  userAddress,
+} from "./helpers";
 
 function paramI32(name: string, value: i32): ethereum.EventParam {
   return new ethereum.EventParam(name, ethereum.Value.fromI32(value));
@@ -35,18 +46,6 @@ describe("config update handlers", () => {
     clearStore();
     setupDataSourceMock();
     setupPerps();
-  });
-
-  test("handleMatchFeeUpdated sets takerFeeBps and makerFeeBps", () => {
-    const event = newTypedMockEventWithParams<MatchFeeUpdated>([
-      paramI32("newTakerFeeBps", 30),
-      paramI32("newMakerFeeBps", -10),
-    ]);
-    handleMatchFeeUpdated(event);
-
-    assert.fieldEquals("Perps", "0", "takerFeeBps", "30");
-    assert.fieldEquals("Perps", "0", "makerFeeBps", "-10");
-    assert.fieldEquals("Perps", "0", "lastUpdatedAt", event.block.timestamp.toString());
   });
 
   test("handleMakerFeeBpsUpdated sets makerFeeBps", () => {
@@ -102,7 +101,7 @@ describe("config update handlers", () => {
     assert.fieldEquals("Perps", "0", "lastUpdatedAt", event.block.timestamp.toString());
   });
 
-  test("handlePortfolioMarginUpdated sets portfolioMarginEngine", () => {
+  test("handlePortfolioMarginUpdated sets portfolioMargin", () => {
     const engine = Address.fromString(
       "0x2222222222222222222222222222222222222222",
     );
@@ -114,7 +113,7 @@ describe("config update handlers", () => {
     ]);
     handlePortfolioMarginUpdated(event);
 
-    assert.fieldEquals("Perps", "0", "portfolioMarginEngine", engine.toHexString());
+    assert.fieldEquals("Perps", "0", "portfolioMargin", engine.toHexString());
     assert.fieldEquals("Perps", "0", "lastUpdatedAt", event.block.timestamp.toString());
   });
 
@@ -141,5 +140,38 @@ describe("config update handlers", () => {
 
     assert.fieldEquals("Perps", "0", "minimumMarginPerOrder", minMargin.toString());
     assert.fieldEquals("Perps", "0", "lastUpdatedAt", event.block.timestamp.toString());
+  });
+});
+
+describe("Perps singleton created from scratch", () => {
+  beforeEach(() => clearStore());
+
+  test("getOrCreatePerps populates startBlock from the dataSource context", () => {
+    const startBlock = BigInt.fromI64(222_848_905);
+    setupDataSourceMock(startBlock);
+    mockPerpsContractCallsAsReverted();
+    // No setupPerps() — the first handler invocation creates the singleton and
+    // must read startBlock from the mocked data source context.
+    const event = newTypedMockEventWithParams<MakerFeeBpsUpdated>([
+      paramI32("newMakerFeeBps", 0),
+    ]);
+    handleMakerFeeBpsUpdated(event);
+
+    assert.fieldEquals("Perps", "0", "startBlock", startBlock.toString());
+  });
+
+  test("getOrCreatePerps reads collateralVault off the vault() getter", () => {
+    const vault = userAddress(21);
+    setupDataSourceMock();
+    mockPerpsContractCallsAsReverted();
+    createMockedFunction(contractAddress(), "vault", "vault():(address)").returns([
+      ethereum.Value.fromAddress(vault),
+    ]);
+    const event = newTypedMockEventWithParams<MakerFeeBpsUpdated>([
+      paramI32("newMakerFeeBps", 0),
+    ]);
+    handleMakerFeeBpsUpdated(event);
+
+    assert.fieldEquals("Perps", "0", "collateralVault", vault.toHexString());
   });
 });

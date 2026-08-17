@@ -96,7 +96,7 @@ describe("handleFundingSettled", () => {
     openLongPosition(trader, maker, entryPrice, oneUnit, orderId(1), orderId(100), 1);
 
     // Trader is buyer (sideIndex=0), session uses logIndex*2+0
-    const sessionId = positionSessionId(BigInt.fromI32(1), 1 * 2);
+    const sessionId = positionSessionId(BigInt.fromI32(1), BigInt.fromI32(1), 0);
 
     const settle1 = createFundingSettledEvent(trader, fundingPaid, 2);
     handleFundingSettled(settle1);
@@ -137,7 +137,7 @@ describe("handleFundingSettled", () => {
     const fundingAmount = BigInt.fromI32(-40000);
 
     openLongPosition(trader, openMaker, entryPrice, oneUnit, orderId(1), orderId(100), 1);
-    const sessionId = positionSessionId(BigInt.fromI32(1), 1 * 2);
+    const sessionId = positionSessionId(BigInt.fromI32(1), BigInt.fromI32(1), 0);
 
     const settle = createFundingSettledEvent(trader, fundingAmount, 2);
     handleFundingSettled(settle);

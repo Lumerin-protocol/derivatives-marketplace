@@ -142,11 +142,13 @@ All three subsystems delegate margin computation to a shared **PortfolioMarginEn
 | Partial liquidation | Supported. `closeQty < \|netQuantity\|`. Guards against over-liquidation (`OverLiquidation`) | `:934-940` |
 | Keeper fee | **DISABLED** (0 fee emitted). Variable + event field reserved for future incentive. | `:942-945`, `:1006-1016` |
 | Bad debt | User loss > collateral → insurance fund covers up to its balance. Shortfall emits `BadDebt`. | `:1028-1037` |
-| Batch (multi-user) | Via nested `multicallStopOnFailure([multicallStopOnFailure([liquidatePosition])])` | `:900-909` |
+| Batch (multi-user) | No on-chain entry point; keeper processes and re-snapshots each user independently | Keeper venue adapter |
 
-**Critical invariant**: Orders MUST be liquidated before the position. Keepers compose:
+**Critical invariant**: Orders MUST be liquidated before the position. Keepers sequence:
 ```
-multicallStopOnFailure([liquidateOrder × N, liquidatePosition])
+liquidateOrders(user, orderIds)
+re-snapshot portfolio health
+liquidatePosition(user, closeQty)
 ```
 
 ### 7.3 Futures Liquidation
@@ -186,9 +188,9 @@ multicallStopOnFailure([liquidateOrder × N, liquidatePosition])
 | Futures | **100** | `MAX_ORDERS_PER_PARTICIPANT = 100` |
 | Options | Unlimited (but max 20 active series) | `maxSeriesPerUser = 20` |
 
-### 8.2 Minimum Order Margin (Perps only)
+### 8.2 Deprecated Minimum Order Margin (Perps only)
 
-`minimumMarginPerOrder` — configurable floor that prevents dust/spam orders. Resting orders whose IM < minimum revert with `OrderMarginTooLow`. Set to 0 to disable.
+`minimumMarginPerOrder`, its setter/event, and `OrderMarginTooLow` remain in the ABI for compatibility, but no order path enforces the value. Portfolio IM from the PME is the canonical collateral requirement.
 
 ### 8.3 Time-in-Force Options
 
@@ -236,7 +238,7 @@ Both perps and futures use `CONTRACT_SIZE_HPS_DAY = 1e15` (1 PH/s over a day). O
 
 All three use Chainlink-style `AggregatorV3Interface` oracles:
 - **Perps**: `priceOracle` — hashprice (1 PH/s/day in collateral token units)
-- **Futures**: `hashrateOracle` — hashprice USD feed
+- **Futures**: `priceOracle` — hashprice USD feed
 - **Options**: `oracle` — underlying spot price for Black-76 pricing
 
 All enforce `MAX_ORACLE_STALENESS = 3600` (1 hour). Stale oracles revert reads (except the points hook's reference price, which gracefully returns 0).

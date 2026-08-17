@@ -14,6 +14,8 @@
     "test-coverage": "hardhat test --coverage",
     "build": "hardhat compile",
     "compile": "hardhat compile",
+    "storage:check": "hardhat compile && node scripts/check-perps-storage-layout.mjs",
+    "storage:baseline": "hardhat compile && node scripts/check-perps-storage-layout.mjs --write",
     "clean": "rm -rf abi artifacts cache",
     "aderyn": "aderyn",
     "deploy:perps": "hardhat run scripts/deploy-perps.ts",
@@ -49,15 +51,10 @@
     "@openzeppelin/contracts": "5.1.0",
     "@openzeppelin/contracts-upgradeable": "5.1.0",
     "@openzeppelin/hardhat-upgrades": "^3.9.1",
-    "collateral-margin": "github:Lumerin-protocol/collateral-margin#9372f537a57682bb126aede41aac51be004828a6",
+    "collateral-margin": "github:Lumerin-protocol/collateral-margin#d6eea43b8d477d7ebf4e7bde6fba1c0f4047ca9a",
     "hashprice-oracle": "github:Lumerin-protocol/hashprice-oracle.git#main",
     "multicall3": "github:mds1/multicall3",
     "solidity-linked-list": "^6.5.0"
   },
-  "packageManager": "pnpm@10.28.1",
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "hardhat-viem-abi"
-    ]
-  }
+  "packageManager": "pnpm@11.22.0"
 }

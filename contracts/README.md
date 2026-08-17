@@ -75,7 +75,7 @@ Users deposit an ERC-20 collateral token (e.g. USDC) into the contract, which mi
 Margin is **not** computed by this contract. Both tiers come from the `PortfolioMarginEngine`, which nets exposure across every product settling into the same `CollateralVault` (perps, futures, options):
 
 - **Initial margin** — `portfolioMargin.computePortfolioIM(user)`. Required to place orders (non-reduce-only) and to withdraw.
-- **Maintenance margin** — `portfolioMargin.computePortfolioMM(user)`. Below this the account is liquidatable; `isLiquidatable` and every `liquidate*` entry point compare the vault balance against it.
+- **Maintenance margin** — `portfolioMargin.computePortfolioMM(user)`. Below this the account is liquidatable; the engine's `isLiquidatable(user)` view and every `liquidate*` entry point compare the vault balance against it.
 
 #### What the DEX contributes
 
@@ -159,6 +159,26 @@ preceding 180 days and confirms candidates against `getUserOrders`. Set
 `EVENT_LOOKBACK_DAYS` to change the search period. It writes in
 `ORDER_CACHE_WRITE_BATCH_SIZE` batches (default 25) and verifies all four fields
 against a canonical order scan.
+
+#### Explicit reset and migration participants
+
+The contract does not enumerate position holders on chain. The legacy
+`usersWithPositions` storage slot remains dead and untouched solely for proxy
+layout compatibility.
+
+Testnet resets require an explicit comma-separated participant list:
+
+```sh
+PERPS_ADDRESS=0x... RESET_PARTICIPANTS=0x...,0x... pnpm reset:perps
+```
+
+The script deduplicates addresses and calls `resetState(address[])` in
+`RESET_BATCH_SIZE` batches (default 25). Only supplied accounts have their
+orders, position, and funding snapshot cleared; collateral, global funding, and
+the monotonic order nonce are preserved. Operators must build a complete list
+from authoritative configuration or indexed event history. Any future net-entry
+position migration must likewise accept explicit participant arrays and must not
+read the dead enumeration slot.
 
 ### Funding Fees
 

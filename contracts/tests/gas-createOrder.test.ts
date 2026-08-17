@@ -11,6 +11,7 @@ import { deployPerpsWithCollateralFixture, deployPerpsWithOrdersFixture } from "
 import { TimeInForce } from "../fixtures/timeInForce.ts";
 
 const { viem, networkHelpers } = await network.getOrCreate();
+const WAD = 10n ** 18n;
 
 function getPerps(addr: `0x${string}`) {
   return viem.getContractAt("HashPowerPerpsDEX", addr);
@@ -44,6 +45,21 @@ async function placeAsksAtPrice(perps: Perps, seller: Client, price: bigint, qty
   }
 }
 
+async function enablePointsHook(perps: Perps, owner: { account: Account }) {
+  const points = await viem.deployContract("Points", [owner.account.address]);
+  const hook = await viem.deployContract(
+    "PointsHook",
+    [points.address, owner.account.address, WAD, WAD, parseUnits("10", 6)],
+  );
+  await points.write.grantRole([await points.read.MINTER_ROLE(), hook.address], {
+    account: owner.account,
+  });
+  await hook.write.grantRole([await hook.read.HOOK_CALLER_ROLE(), perps.address], {
+    account: owner.account,
+  });
+  await perps.write.setHook([hook.address], { account: owner.account });
+}
+
 async function placeAsksMultiLevel(
   perps: Perps,
   seller: Client,
@@ -61,6 +77,38 @@ async function placeAsksMultiLevel(
   }
 }
 
+async function benchmarkBidLadderInsertion(
+  scenarioName: string,
+  selectPrice: (marketPrice: bigint, tick: bigint, prices: bigint[]) => bigint,
+) {
+  const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
+  const { perps } = contracts;
+  const { buyer, pc } = accounts;
+  const marketPrice = await perps.read.getMarketPrice();
+  const tick = config.minimumPriceIncrement;
+  const quantity = parseUnits("1", config.quantityDecimals);
+  const prices = Array.from({ length: 10 }, (_, index) => marketPrice - BigInt((index + 1) * 2) * tick);
+
+  await perps.write.createOrders(
+    [
+      prices.map((price) => ({
+        price,
+        quantity,
+        timeInForce: TimeInForce.GTC,
+      })),
+    ],
+    { account: buyer.account },
+  );
+
+  await createOrderAndLogGas(
+    perps,
+    pc,
+    scenarioName,
+    [selectPrice(marketPrice, tick, prices), quantity],
+    buyer.account,
+  );
+}
+
 describe("Gas: createOrder", function () {
   it("createOrder_restingOnly (no match)", async function () {
     const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
@@ -76,6 +124,25 @@ describe("Gas: createOrder", function () {
     assert.equal(orders.length, 1);
   });
 
+  it("createOrder_priceLadderInsertions", async function () {
+    await benchmarkBidLadderInsertion(
+      "createOrder_priceLadder_existing",
+      (_marketPrice, _tick, prices) => prices[4],
+    );
+    await benchmarkBidLadderInsertion(
+      "createOrder_priceLadder_head",
+      (marketPrice, tick) => marketPrice - tick,
+    );
+    await benchmarkBidLadderInsertion(
+      "createOrder_priceLadder_middle",
+      (marketPrice, tick) => marketPrice - 11n * tick,
+    );
+    await benchmarkBidLadderInsertion(
+      "createOrder_priceLadder_tail",
+      (marketPrice, tick) => marketPrice - 21n * tick,
+    );
+  });
+
   it("createOrder_1Match", async function () {
     const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithOrdersFixture);
     const { perps } = contracts;
@@ -88,6 +155,55 @@ describe("Gas: createOrder", function () {
 
     const position = await perps.read.getUserPosition([buyer2.account.address]);
     assert.equal(position.netQuantity, qty);
+  });
+
+  it("createOrder_portfolioReducingResting", async function () {
+    const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
+    const { perps } = contracts;
+    const { seller, buyer2, pc } = accounts;
+    const marketPrice = await perps.read.getMarketPrice();
+    const tick = config.minimumPriceIncrement;
+    const qty = parseUnits("1", config.quantityDecimals);
+
+    await perps.write.createOrder([marketPrice, -qty, TimeInForce.GTC], { account: seller.account });
+    await perps.write.createOrder([marketPrice, qty, TimeInForce.GTC], { account: buyer2.account });
+    await createOrderAndLogGas(
+      perps,
+      pc,
+      "createOrder_portfolioReducingResting",
+      [marketPrice + tick, -qty],
+      buyer2.account,
+    );
+
+    const orders = await perps.read.getUserOrders([buyer2.account.address]);
+    assert.equal(orders.length, 1);
+  });
+
+  it("createOrder_portfolioReducingResting_50ExistingOrders", async function () {
+    const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
+    const { perps } = contracts;
+    const { seller, buyer2, pc } = accounts;
+    const marketPrice = await perps.read.getMarketPrice();
+    const tick = config.minimumPriceIncrement;
+    const qty = parseUnits("1", config.quantityDecimals);
+
+    await perps.write.createOrder([marketPrice, -qty, TimeInForce.GTC], { account: seller.account });
+    await perps.write.createOrder([marketPrice, qty, TimeInForce.GTC], { account: buyer2.account });
+    await perps.write.createOrders([
+      Array.from({ length: 50 }, () => ({
+        price: marketPrice - tick,
+        quantity: qty,
+        timeInForce: TimeInForce.GTC,
+      })),
+    ], { account: buyer2.account });
+
+    await createOrderAndLogGas(
+      perps,
+      pc,
+      "createOrder_portfolioReducingResting_50ExistingOrders",
+      [marketPrice + tick, -qty],
+      buyer2.account,
+    );
   });
 
   it("createOrder_3Matches (one price level)", async function () {
@@ -121,6 +237,26 @@ describe("Gas: createOrder", function () {
 
     const position = await perps.read.getUserPosition([buyer2.account.address]);
     assert.equal(position.netQuantity, qty * 10n);
+  });
+
+  it("createOrder_10Matches_pointsHook", async function () {
+    const { contracts, accounts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
+    const { perps } = contracts;
+    const { owner, seller, buyer2, pc } = accounts;
+    const marketPrice = await perps.read.getMarketPrice();
+    const tick = config.minimumPriceIncrement;
+    const qty = parseUnits("1", config.quantityDecimals);
+
+    await enablePointsHook(perps, owner);
+    await placeAsksAtPrice(perps, seller, marketPrice + tick, qty, 10);
+    await createOrderAndLogGas(
+      perps,
+      pc,
+      "createOrder_10Matches_pointsHook",
+      [marketPrice + tick, qty * 10n],
+      buyer2.account,
+      10,
+    );
   });
 
   it("createOrder_10Matches_5Levels", async function () {

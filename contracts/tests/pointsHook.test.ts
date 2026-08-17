@@ -4,6 +4,7 @@ import { network } from "hardhat";
 import { parseUnits, getAddress, parseEventLogs, zeroAddress, maxUint256 } from "viem";
 import type { Account } from "viem";
 import {
+  deployPerpsFixture,
   deployPerpsWithCollateralFixture,
   deployPerpsWithLiquidatablePositionFixture,
 } from "./fixtures.ts";
@@ -211,6 +212,36 @@ describe("HashPowerPerpsDEX - points hook wiring", function () {
 
       await data.makeLiquidatable();
       await perps.write.liquidatePosition([seller.account.address, maxUint256], { account: buyer2.account });
+
+      assert.equal(await points.read.balanceOf([buyer2.account.address]), KEEPER_POINTS);
+    });
+
+    it("notifies exactly once on a successful partial position liquidation", async function () {
+      const data = await networkHelpers.loadFixture(deployPerpsFixture);
+      const { contracts, accounts, config } = data;
+      const { perps, priceOracle, vault } = contracts;
+      const { owner, seller, buyer, buyer2 } = accounts;
+      const entry = await perps.read.getMarketPrice();
+      const quantity = parseUnits("40", config.quantityDecimals);
+
+      await perps.write.setLiquidationFeeBps([0], { account: owner.account });
+      await vault.write.deposit([entry * 13n], { account: seller.account });
+      await vault.write.deposit([entry * 20n], { account: buyer.account });
+      await perps.write.createOrder([entry, -quantity, TimeInForce.GTC], {
+        account: seller.account,
+      });
+      await perps.write.createOrder([entry, quantity, TimeInForce.GTC], {
+        account: buyer.account,
+      });
+
+      const { points, hook } = await deployPointsStack(perps.address, owner);
+      await perps.write.setHook([hook.address], { account: owner.account });
+      await priceOracle.write.setPrice([(entry * 13n) / 10n, config.oracle.decimals]);
+
+      await perps.write.liquidatePosition(
+        [seller.account.address, parseUnits("30", config.quantityDecimals)],
+        { account: buyer2.account },
+      );
 
       assert.equal(await points.read.balanceOf([buyer2.account.address]), KEEPER_POINTS);
     });

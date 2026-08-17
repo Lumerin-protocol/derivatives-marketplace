@@ -144,11 +144,17 @@ async function main() {
       accountLabels.map(([, account]) => usdcMock.read.balanceOf([account.account.address])),
     ),
     usdcMock.read.balanceOf([owner.account.address]),
-    perps.read.balanceOf([perps.address]),
+    vault.read.balanceOf([perps.address]),
     Promise.all(
       accountLabels.map(([, account]) => perps.read.getUserOrders([account.account.address])),
     ),
   ]);
+  const averageEntries = positions.map((position) => {
+    if (position.netQuantity === 0n) return 0n;
+    const absQty = position.netQuantity < 0n ? -position.netQuantity : position.netQuantity;
+    const absEntry = position.netEntryValue < 0n ? -position.netEntryValue : position.netEntryValue;
+    return (absEntry * 1_000_000n) / absQty;
+  });
 
   const userOrders = await Promise.all(
     userOrderIds.map((orderIds: readonly Hex[]) =>
@@ -301,7 +307,7 @@ async function main() {
           ? `${position.netQuantity >= 0n ? "LONG" : "SHORT"} ${formatUnits(
               position.netQuantity >= 0n ? position.netQuantity : -position.netQuantity,
               6,
-            )} @ avg ${formatUnits(position.aggregatedEntryPrice, config.tokenDecimals)} USDC`
+            )} @ avg ${formatUnits(averageEntries[idx], config.tokenDecimals)} USDC`
           : "no position"
       }`,
     );

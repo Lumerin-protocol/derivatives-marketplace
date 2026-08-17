@@ -1,8 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
-import { encodeFunctionData, maxUint256, parseEventLogs, parseUnits, zeroHash } from "viem";
-import type { Hex, } from "viem";
+import { maxUint256, parseEventLogs, parseUnits, zeroHash } from "viem";
 import {
   deployPerpsFixture,
   deployPerpsWithCollateralFixture,
@@ -13,46 +12,12 @@ import { TimeInForce } from "../fixtures/timeInForce.ts";
 const { viem, networkHelpers } = await network.connect();
 
 /**
- * Wrap `liquidatePosition(user)` in its own single-entry inner
- * `multicallStopOnFailure` so a per-user revert (`OrdersStillOpen`,
- * `NotLiquidatable`) is converted into a successful return — the outer
- * multicall keeps going to the next user. Same composition used by the keeper
- * (and by `liquidate.test.ts`) to express batched skip-and-continue.
- */
-function encodeInnerLiquidatePosition(abi: readonly unknown[], user: `0x${string}`): Hex {
-  return encodeFunctionData({
-    abi,
-    functionName: "multicallStopOnFailure",
-    args: [
-      [
-        encodeFunctionData({
-          abi,
-          functionName: "liquidatePosition",
-          // Full close (clamped to |netQty|) — this suite exercises complete liquidations.
-          args: [user, maxUint256],
-        }),
-      ],
-    ],
-  });
-}
-
-/** Encode a `liquidateOrder(user, orderId)` sub-call for use inside `multicallStopOnFailure`. */
-function encodeLiquidateOrder(abi: readonly unknown[], user: `0x${string}`, orderId: Hex): Hex {
-  return encodeFunctionData({
-    abi,
-    functionName: "liquidateOrder",
-    args: [user, orderId],
-  });
-}
-
-/**
  * Strict orders-first invariant + permissionless liquidation entry points.
  *
  * Surface under test:
  *   - liquidateOrder(user, id)              — single cancel
  *   - liquidateOrders(user, ids[])          — keeper-chosen ids, stop-on-failure
  *   - liquidatePosition(user, closeQty)     — reverts OrdersStillOpen if any orders remain
- *   - nested multicallStopOnFailure         — per-user skip-and-continue batches
  *   - setLiquidationFeeBps(uint16)          — bps fee on notional; liquidator share defaults to 0
  *
  * Fixture pattern: build an underwater account that ALSO has resting orders so we can
@@ -66,7 +31,7 @@ async function deployUnderwaterWithOrdersFixture(conn: Parameters<typeof deployP
 
   // Configure a small liquidation fee so the per-order bps fee math is exercised: the fee
   // is charged on cancelled-order notional, but the liquidator share defaults to 0 (the
-  // whole fee goes to the insurance fund). Tests that need to exercise the position-side
+  // whole fee becomes venue revenue). Tests that need to exercise the position-side
   // path don't depend on this override.
   const liquidationFeeBps = 50; // 0.5%
   await perps.write.setLiquidationFeeBps([liquidationFeeBps], { account: owner.account });
@@ -109,7 +74,7 @@ async function deployUnderwaterWithOrdersFixture(conn: Parameters<typeof deployP
   };
 }
 
-describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopOnFailure batches)", function () {
+describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition", function () {
   describe("liquidateOrder", function () {
     it("reverts when user is healthy", async function () {
       const { contracts, accounts } = await networkHelpers.loadFixture(
@@ -171,7 +136,7 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
     it("cancels the order and charges the bps fee (liquidator share defaults to 0)", async function () {
       const data = await networkHelpers.loadFixture(deployUnderwaterWithOrdersFixture);
       const { contracts, accounts } = data;
-      const { perps } = contracts;
+      const { perps, vault } = contracts;
       const { seller, buyer2, pc } = accounts;
 
       await data.makeUnderwater();
@@ -180,16 +145,18 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
       assert.ok(ordersBefore.length >= 1);
       const targetId = ordersBefore[0];
 
-      const liqBalanceBefore = await perps.read.balanceOf([buyer2.account.address]);
-      const sellerBalanceBefore = await perps.read.balanceOf([seller.account.address]);
+      const liqBalanceBefore = await vault.read.balanceOf([buyer2.account.address]);
+      const sellerBalanceBefore = await vault.read.balanceOf([seller.account.address]);
+      const revenueBefore = await perps.read.collectedFeesBalance();
+      const insuranceBefore = await vault.read.insuranceFundBalance();
 
       const hash = await perps.write.liquidateOrder([seller.account.address, targetId], {
         account: buyer2.account,
       });
       const receipt = await pc.waitForTransactionReceipt({ hash });
 
-      const liqBalanceAfter = await perps.read.balanceOf([buyer2.account.address]);
-      const sellerBalanceAfter = await perps.read.balanceOf([seller.account.address]);
+      const liqBalanceAfter = await vault.read.balanceOf([buyer2.account.address]);
+      const sellerBalanceAfter = await vault.read.balanceOf([seller.account.address]);
 
       // Liquidator gets nothing (liquidatorShareBps defaults to 0); the user pays the fee.
       assert.equal(liqBalanceAfter - liqBalanceBefore, 0n);
@@ -227,12 +194,14 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
       );
       assert.ok(liquidated.args.fee > 0n, "fee should be non-zero");
       assert.equal(sellerBalanceBefore - sellerBalanceAfter, liquidated.args.fee);
+      assert.equal(await perps.read.collectedFeesBalance(), revenueBefore + liquidated.args.fee);
+      assert.equal(await vault.read.insuranceFundBalance(), insuranceBefore);
     });
 
     it("does not pay the liquidator even when liquidationFeeBps is set high (share defaults to 0)", async function () {
       const data = await networkHelpers.loadFixture(deployUnderwaterWithOrdersFixture);
       const { contracts, accounts } = data;
-      const { perps } = contracts;
+      const { perps, vault } = contracts;
       const { seller, buyer2, owner } = accounts;
 
       await data.makeUnderwater();
@@ -240,16 +209,16 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
       // 100% fee — capped at the seller's balance; still nothing for the liquidator.
       await perps.write.setLiquidationFeeBps([10000], { account: owner.account });
 
-      const sellerBalanceBefore = await perps.read.balanceOf([seller.account.address]);
-      const liqBalanceBefore = await perps.read.balanceOf([buyer2.account.address]);
+      const sellerBalanceBefore = await vault.read.balanceOf([seller.account.address]);
+      const liqBalanceBefore = await vault.read.balanceOf([buyer2.account.address]);
 
       const orders = await perps.read.getUserOrders([seller.account.address]);
       await perps.write.liquidateOrder([seller.account.address, orders[0]], {
         account: buyer2.account,
       });
 
-      const sellerBalanceAfter = await perps.read.balanceOf([seller.account.address]);
-      const liqBalanceAfter = await perps.read.balanceOf([buyer2.account.address]);
+      const sellerBalanceAfter = await vault.read.balanceOf([seller.account.address]);
+      const liqBalanceAfter = await vault.read.balanceOf([buyer2.account.address]);
 
       // Liquidator still gets 0 at default share. User pays what they can.
       assert.equal(liqBalanceAfter, liqBalanceBefore, "liquidator balance unchanged");
@@ -261,7 +230,7 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
     it("cancels all specified orders without paying a fee (payout disabled)", async function () {
       const data = await networkHelpers.loadFixture(deployUnderwaterWithOrdersFixture);
       const { contracts, accounts } = data;
-      const { perps } = contracts;
+      const { perps, vault } = contracts;
       const { seller, buyer2 } = accounts;
 
       await data.makeUnderwater();
@@ -269,13 +238,13 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
       const ordersBefore = await perps.read.getUserOrders([seller.account.address]);
       assert.equal(ordersBefore.length, 2);
 
-      const liqBalanceBefore = await perps.read.balanceOf([buyer2.account.address]);
+      const liqBalanceBefore = await vault.read.balanceOf([buyer2.account.address]);
 
       await perps.write.liquidateOrders([seller.account.address, ordersBefore], {
         account: buyer2.account,
       });
 
-      const liqBalanceAfter = await perps.read.balanceOf([buyer2.account.address]);
+      const liqBalanceAfter = await vault.read.balanceOf([buyer2.account.address]);
       const ordersAfter = await perps.read.getUserOrders([seller.account.address]);
 
       assert.equal(ordersAfter.length, 0);
@@ -308,7 +277,7 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
     it("stops early once user becomes healthy mid-batch", async function () {
       const data = await networkHelpers.loadFixture(deployUnderwaterWithOrdersFixture);
       const { contracts, accounts } = data;
-      const { perps, priceOracle } = contracts;
+      const { perps, pme, priceOracle } = contracts;
       const { seller, buyer2 } = accounts;
 
       // Barely underwater so cancelling resting shorts can flip healthy mid-batch.
@@ -317,7 +286,7 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
       const bump = initialPrice + tick * 30n;
       await priceOracle.write.setPrice([bump, data.config.oracle.decimals]);
 
-      const underwater = await perps.read.isLiquidatable([seller.account.address]);
+      const underwater = await pme.read.isLiquidatable([seller.account.address]);
       if (!underwater) {
         await data.makeUnderwater();
       }
@@ -382,19 +351,18 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
       );
     });
 
-    it("succeeds after orders are cleared via multicallStopOnFailure(liquidateOrder × N)", async function () {
+    it("succeeds after orders are cleared via liquidateOrders", async function () {
       const data = await networkHelpers.loadFixture(deployUnderwaterWithOrdersFixture);
       const { contracts, accounts } = data;
-      const { perps } = contracts;
+      const { perps, vault } = contracts;
       const { seller, buyer2 } = accounts;
 
       await data.makeUnderwater();
 
       const orders = await perps.read.getUserOrders([seller.account.address]);
-      const calls = orders.map((id) => encodeLiquidateOrder(perps.abi, seller.account.address, id));
-      await perps.write.multicallStopOnFailure([calls], { account: buyer2.account });
+      await perps.write.liquidateOrders([seller.account.address, orders], { account: buyer2.account });
 
-      const liqBalanceBefore = await perps.read.balanceOf([buyer2.account.address]);
+      const liqBalanceBefore = await vault.read.balanceOf([buyer2.account.address]);
 
       await perps.write.liquidatePosition([seller.account.address, maxUint256], {
         account: buyer2.account,
@@ -403,7 +371,7 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
       const positionAfter = await perps.read.getUserPosition([seller.account.address]);
       assert.equal(positionAfter.netQuantity, 0n);
 
-      const liqBalanceAfter = await perps.read.balanceOf([buyer2.account.address]);
+      const liqBalanceAfter = await vault.read.balanceOf([buyer2.account.address]);
       // Liquidator gets nothing (liquidatorShareBps defaults to 0).
       assert.equal(liqBalanceAfter, liqBalanceBefore);
     });
@@ -433,59 +401,6 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition (+ multicallStopO
         positionLiquidated.args.liquidator.toLowerCase(),
         buyer2.account.address.toLowerCase(),
       );
-    });
-  });
-
-  describe("nested multicallStopOnFailure (batch) with orders-first invariant", function () {
-    it("skips users with open orders — outer multicall succeeds, no PositionLiquidated emitted", async function () {
-      const data = await networkHelpers.loadFixture(deployUnderwaterWithOrdersFixture);
-      const { contracts, accounts } = data;
-      const { perps } = contracts;
-      const { seller, buyer2, pc } = accounts;
-
-      await data.makeUnderwater();
-
-      // Seller is underwater AND has open orders -> the inner liquidatePosition reverts
-      // OrdersStillOpen, the inner multicall returns cleanly, and the outer multicall
-      // succeeds without emitting PositionLiquidated.
-      const calls = [encodeInnerLiquidatePosition(perps.abi, seller.account.address)];
-      const hash = await perps.write.multicallStopOnFailure([calls], { account: buyer2.account });
-      const receipt = await pc.waitForTransactionReceipt({ hash });
-
-      const events = parseEventLogs({ logs: receipt.logs, abi: perps.abi, eventName: "PositionLiquidated" });
-      assert.equal(events.length, 0);
-    });
-
-    it("liquidates underwater users with no open orders, skips those that have orders", async function () {
-      const data = await networkHelpers.loadFixture(deployUnderwaterWithOrdersFixture);
-      const { contracts, accounts } = data;
-      const { perps } = contracts;
-      const { seller, buyer, buyer2 } = accounts;
-
-      await data.makeUnderwater();
-
-      // Force-clear seller's orders via multicallStopOnFailure(liquidateOrder × N) first.
-      const sellerOrders = await perps.read.getUserOrders([seller.account.address]);
-      const orderCalls = sellerOrders.map((id) =>
-        encodeLiquidateOrder(perps.abi, seller.account.address, id),
-      );
-      await perps.write.multicallStopOnFailure([orderCalls], { account: buyer2.account });
-
-      // Now the nested-multicall batch should succeed for seller even if buyer is still healthy.
-      // Explicit gas: `eth_estimateGas` can't size nested-multicall batches correctly (an inner
-      // OOG reverts the inner cleanly, which the outer treats as a stop instead of as gas
-      // starvation), so we over-allocate. The off-chain keeper (in the collateral-margin
-      // repo) implements the production batch gas-sizing strategy.
-      const calls = [seller.account.address, buyer.account.address].map((u) =>
-        encodeInnerLiquidatePosition(perps.abi, u),
-      );
-      await perps.write.multicallStopOnFailure([calls], {
-        account: buyer2.account,
-        gas: 5_000_000n,
-      });
-
-      const sellerPos = await perps.read.getUserPosition([seller.account.address]);
-      assert.equal(sellerPos.netQuantity, 0n);
     });
   });
 });

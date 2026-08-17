@@ -2,7 +2,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
 import { parseUnits, zeroAddress } from "viem";
-import { deployPerpsFixture } from "./fixtures.ts";
+import { TimeInForce } from "../fixtures/timeInForce.ts";
+import { deployPerpsFixture, deployPerpsWithCollateralFixture } from "./fixtures.ts";
 
 const { viem, networkHelpers } = await network.getOrCreate();
 
@@ -113,6 +114,36 @@ describe("HashPowerPerpsDEX - Admin Functions", function () {
       const liquidationFeeBps = await perps.read.liquidationFeeBps();
       assert.equal(liquidationFeeBps, 0);
     });
+
+    it("accepts the inclusive BPS range and rejects above it", async function () {
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
+      const { perps } = contracts;
+      const { owner } = accounts;
+
+      await perps.write.setLiquidationFeeBps([10_000], { account: owner.account });
+      assert.equal(await perps.read.liquidationFeeBps(), 10_000);
+      await viem.assertions.revertWithCustomError(
+        perps.write.setLiquidationFeeBps([10_001], { account: owner.account }),
+        perps,
+        "ValueOutOfRange",
+      );
+    });
+  });
+
+  describe("setLiquidatorShareBps", function () {
+    it("accepts the inclusive BPS range and uses the canonical range error", async function () {
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
+      const { perps } = contracts;
+      const { owner } = accounts;
+
+      await perps.write.setLiquidatorShareBps([10_000], { account: owner.account });
+      assert.equal(await perps.read.liquidatorShareBps(), 10_000);
+      await viem.assertions.revertWithCustomError(
+        perps.write.setLiquidatorShareBps([10_001], { account: owner.account }),
+        perps,
+        "ValueOutOfRange",
+      );
+    });
   });
 
   describe("match fee setters (setTakerFeeBps / setMakerFeeBps)", function () {
@@ -193,6 +224,51 @@ describe("HashPowerPerpsDEX - Admin Functions", function () {
         perps.write.setTakerFeeBps([29], { account: owner.account }),
         perps,
         "InvalidFee",
+      );
+    });
+  });
+
+  describe("withdrawCollectedFees", function () {
+    it("allows only the owner to withdraw accrued venue revenue", async function () {
+      const { contracts, accounts, config } = await networkHelpers.loadFixture(
+        deployPerpsWithCollateralFixture,
+      );
+      const { perps, usdcMock, vault } = contracts;
+      const { owner, buyer, seller } = accounts;
+      const price = await perps.read.getMarketPrice();
+      const quantity = parseUnits("1", config.quantityDecimals);
+
+      await perps.write.createOrder([price, -quantity, TimeInForce.GTC], {
+        account: seller.account,
+      });
+      await perps.write.createOrder([price, quantity, TimeInForce.GTC], {
+        account: buyer.account,
+      });
+
+      const revenue = await perps.read.collectedFeesBalance();
+      assert.ok(revenue > 0n);
+      assert.equal(await vault.read.balanceOf([perps.address]), revenue);
+
+      const ownerBalanceBefore = await usdcMock.read.balanceOf([owner.account.address]);
+      await perps.write.withdrawCollectedFees({ account: owner.account });
+
+      assert.equal(await perps.read.collectedFeesBalance(), 0n);
+      assert.equal(await vault.read.balanceOf([perps.address]), 0n);
+      assert.equal(
+        await usdcMock.read.balanceOf([owner.account.address]),
+        ownerBalanceBefore + revenue,
+      );
+    });
+
+    it("rejects a non-owner withdrawal", async function () {
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
+      const { perps } = contracts;
+      const { buyer } = accounts;
+
+      await viem.assertions.revertWithCustomError(
+        perps.write.withdrawCollectedFees({ account: buyer.account }),
+        perps,
+        "OwnableUnauthorizedAccount",
       );
     });
   });
@@ -289,6 +365,18 @@ describe("HashPowerPerpsDEX - Admin Functions", function () {
   });
 
   describe("contract size (fixed compile-time constant)", function () {
+    it("keeps the implementation runtime within the EIP-170 limit", async function () {
+      const { contracts, accounts } = await networkHelpers.loadFixture(deployPerpsFixture);
+      const implementation = await viem.deployContract("HashPowerPerpsDEX", [
+        contracts.vault.address,
+      ]);
+      const code = await accounts.pc.getCode({ address: implementation.address });
+      assert.ok(code);
+      const runtimeSize = (code.length - 2) / 2;
+      console.log(`  HashPowerPerpsDEX runtime: ${runtimeSize.toLocaleString()} B`);
+      assert.ok(runtimeSize <= 24_576, `runtime ${runtimeSize} B exceeds EIP-170`);
+    });
+
     it("exposes CONTRACT_SIZE_HPS_DAY = 1e15 (1 PH/s/day)", async function () {
       const { contracts } = await networkHelpers.loadFixture(deployPerpsFixture);
       const { perps } = contracts;

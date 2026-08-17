@@ -125,7 +125,7 @@ describe("HashPowerPerpsDEX - OrderMatched event", function () {
     assert.equal(prices[2], marketPrice + 3n * tick);
   });
 
-  it("emits correct entry price and zero net qty on full close", async function () {
+  it("emits zero entry price and zero net qty on full close", async function () {
     const { contracts, accounts, config } = await networkHelpers.loadFixture(
       deployPerpsWithOrdersFixture,
     );
@@ -138,7 +138,7 @@ describe("HashPowerPerpsDEX - OrderMatched event", function () {
     await perps.write.createOrder([marketPrice + tick, qty, TimeInForce.GTC], { account: buyer2.account });
     const positionOpen = await perps.read.getUserPosition([buyer2.account.address]);
     assert.equal(positionOpen.netQuantity, qty);
-    const entryPrice = positionOpen.aggregatedEntryPrice;
+    assert.ok(positionOpen.netEntryValue > 0n);
 
     // buyer2 fully closes: sell 1 unit (match against a resting buy)
     await perps.write.createOrder([marketPrice - tick, qty, TimeInForce.GTC], { account: seller.account });
@@ -157,7 +157,7 @@ describe("HashPowerPerpsDEX - OrderMatched event", function () {
     const e = matched[0].args;
     assert.equal(e.taker, getAddress(buyer2.account.address));
     assert.equal(e.takerNetQtyAfter, 0n, "taker position after close should be zero");
-    assert.equal(e.takerEntryPriceAfter, entryPrice, "event should emit closed position entry price, not 0");
+    assert.equal(e.takerEntryPriceAfter, 0n, "event should expose cleared closed-position state");
   });
 
   it("emits correct makerOrderId linking to the resting order", async function () {

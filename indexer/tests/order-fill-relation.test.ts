@@ -5,7 +5,7 @@ import {
   clearStore,
   assert,
 } from "matchstick-as/assembly/index";
-import { Address, BigInt, Bytes, ethereum } from "@graphprotocol/graph-ts";
+import { Address, BigInt, Bytes } from "@graphprotocol/graph-ts";
 import { newTypedMockEventWithParams } from "matchstick-as/assembly/defaults";
 import {
   handleOrderCancelled,
@@ -246,7 +246,7 @@ describe("Order ↔ Fill relation and averageFillPrice", () => {
 
     assert.fieldEquals("Order", makerOid.toHexString(), "averageFillPrice", price.toString());
     assert.fieldEquals("Order", makerOid.toHexString(), "filledQuantity", takerQty.toString());
-    assert.fieldEquals("Order", makerOid.toHexString(), "status", "PARTIAL");
+    assert.fieldEquals("Order", makerOid.toHexString(), "status", "PARTIALLY_FILLED");
 
     assert.fieldEquals("Order", takerOid.toHexString(), "averageFillPrice", price.toString());
     assert.fieldEquals("Order", takerOid.toHexString(), "filledQuantity", takerQty.toString());

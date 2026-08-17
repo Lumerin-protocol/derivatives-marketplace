@@ -12,7 +12,7 @@ All values categorized by storage mechanism and update path.
 | `FUNDING_DECIMALS` | `18` | ✅ Correct | Precision standard. Changing it breaks all funding math |
 | `QUANTITY_DECIMALS` | `6` | ✅ Correct | Precision standard. Changing it breaks all notional math |
 | `CONTRACT_SIZE_HPS_DAY` | `1e15` | ✅ Correct | Fundamental economic unit |
-| `VERSION` | `"2.12.0"` | ✅ Correct | Tied to bytecode |
+| `VERSION` | `"3.0.0"` | ✅ Correct | Tied to bytecode |
 | `MAX_ORDERS_PER_PARTICIPANT` | `100` | ✅ Correct | Architectural invariant |
 | `MAX_PRICE_LEVELS_PER_SIDE` | `200` | ✅ Correct | Architectural invariant |
 
@@ -53,7 +53,7 @@ All fine. No changes needed.
 | `liquidatorShareBps` | `setLiquidatorShareBps` | `LiquidatorShareBpsUpdated` | ✅ Yes |
 | `takerFeeBps` / `makerFeeBps` | `setMatchFee` | `MatchFeeUpdated` | ✅ Yes — only new matches |
 | `fundingRateMaxBps` / `fundingPeriod` | `setFundingParameters` | `FundingParametersUpdated` | ✅ Yes — only future funding accrual |
-| `minimumMarginPerOrder` | `setMinimumMarginPerOrder` | `MinimumMarginPerOrderUpdated` | ✅ Yes — only new resting orders |
+| `minimumMarginPerOrder` | `setMinimumMarginPerOrder` | `MinimumMarginPerOrderUpdated` | Compatibility only — stored and emitted, never enforced |
 | `portfolioMargin` | `setPortfolioMargin` | `PortfolioMarginUpdated` | ⚠️ Instant re-evaluation of all positions |
 | `hook` | `setHook` | `HookUpdated` | ✅ Yes |
 
@@ -70,9 +70,8 @@ All setters now emit events. Previously `setOracle` and `setPortfolioMargin` wer
 
 These are **remnants from before the PME integration**. The contract used to compute margin internally with these percentages. Now all margin is delegated to `portfolioMargin.computePortfolioIM/MM()`. The variables and their events are dead code.
 
-They're emitted from `resetState()` (test-only), which confirms they're treated as config state, but **nothing ever writes them** — no initialize arg, no setter.
-
-**Action**: Replace with `_gap` slots to preserve storage layout, or give them setters and actually use them as fallback/default values. If they stay dead, remove the events from `resetState()`.
+They were replaced with gap slots; participant reset no longer emits unrelated
+configuration events.
 
 ---
 
@@ -109,7 +108,8 @@ All config setters now emit events:
 | `priceOrdersLongQueue` / `priceOrdersShortQueue` | FIFO queues at each price |
 | `participantOrderIdsIndex` | User → order IDs lookup |
 | `activeBidPrices` / `activeAskPrices` | Sorted price ladders |
-| `positions` / `usersWithPositions` | Position state |
+| `positions` | Position state |
+| `usersWithPositions` | Dead legacy enumeration slot retained only for proxy layout compatibility |
 
 All fine.
 

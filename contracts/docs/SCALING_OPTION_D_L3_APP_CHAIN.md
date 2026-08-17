@@ -54,7 +54,9 @@ flowchart TD
 
 ### Bottleneck 3: Unbounded View Functions
 
-**Not a problem.** The sequencer node serves view calls locally with no gas limit for `eth_call`. Even `getUsersWithPositions()` with 100K users works fine as a local read.
+**Reduced surface.** Position-holder enumeration is handled by off-chain event
+indexing; the contract exposes no global position list. Remaining depth views are
+served locally by the sequencer for `eth_call`.
 
 ### Bottleneck 4: Price Level Pollution / DoS
 

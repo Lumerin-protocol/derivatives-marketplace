@@ -116,6 +116,11 @@ async function main() {
   logStep("Deployed", addrUrl(pc, perpsProxy.address));
 
   const perps = await viem.getContractAt("HashPowerPerpsDEX", perpsProxy.address);
+  // Fresh proxies have a zeroed slot already; consume migration version 3 now so
+  // a later upgrade cannot reset revenue accrued by this deployment.
+  const initV3Res = await perps.simulate.initializeV3();
+  const initV3Receipt = await writeAndWait(deployer, initV3Res);
+  logStep("Initialized revenue slot", txUrl(pc, initV3Receipt.transactionHash));
 
   // Set fees
   logInfo("Set fees", {

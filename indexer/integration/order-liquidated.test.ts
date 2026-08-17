@@ -1,7 +1,7 @@
 /**
  * Integration test: a perps *order* liquidation must surface on the Order
  * entity as `status = LIQUIDATED` (with `liquidator` + `liquidationFee`
- * attribution), mirroring the futures OrderEntry API.
+ * attribution), mirroring the futures Order API.
  *
  * `liquidateOrder(user, orderId)` emits BOTH `OrderCancelled` AND
  * `OrderLiquidated` in the same tx (OrderCancelled first — see
@@ -21,7 +21,6 @@ import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
 import { parseEventLogs, parseUnits } from "viem";
-import type { EntityFields } from "matchstick-ts";
 import { deployPerpsFixture } from "../../contracts/tests/fixtures.ts";
 import { TimeInForce } from "../../contracts/fixtures/timeInForce.ts";
 
@@ -141,6 +140,27 @@ describe("liquidateOrder: Order.status = LIQUIDATED wins over co-emitted OrderCa
       String(order.liquidationFee),
       fee.toString(),
       "Order.liquidationFee must mirror the on-chain OrderLiquidated.fee",
+    );
+    assert.equal(
+      String(order.cancelledQuantity),
+      String(order.originalQuantity),
+      "the force-cancelled size lands entirely in cancelledQuantity",
+    );
+    // An order-only liquidation must also register as a liquidation tx; before
+    // the LiquidationTx sentinel this path never touched the counter.
+    const perpsEntity = snap.entity("Perps", "0");
+    assert.ok(perpsEntity);
+    assert.equal(
+      String(perpsEntity.totalLiquidations),
+      "1",
+      "liquidateOrder bumps Perps.totalLiquidations once for the tx",
+    );
+    const liquidationTxs = snap.saved("LiquidationTx");
+    assert.equal(liquidationTxs.length, 1, "exactly 1 LiquidationTx sentinel per tx");
+    assert.equal(
+      String(liquidationTxs[0].id).toLowerCase(),
+      liqTx.toLowerCase(),
+      "LiquidationTx.id mirrors the liquidateOrder tx hash",
     );
   });
 });

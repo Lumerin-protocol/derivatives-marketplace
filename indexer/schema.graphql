@@ -7,17 +7,25 @@ type Perps @entity(immutable: false) {
   contractAddress: Bytes!
   "Vault holding user collateral; the ERC-20 itself is read off the vault."
   collateralVault: Bytes!
+  "Oracle the contract prices against; matches the `priceOracle()` getter."
   priceOracle: Bytes!
-  portfolioMarginEngine: Bytes!
+  "Margin engine the contract defers to; matches the `portfolioMargin()` getter."
+  portfolioMargin: Bytes!
+
+  "Block number the indexer was configured to start from (sourced from the data source context, set via PERPS_START_BLOCK)."
+  startBlock: BigInt!
 
   # Constants
+  "Positions are divisible, so quantities carry 6 decimals. Mirrors Futures.quantityDecimals (0 there, whole contracts) so both markets expose the same scaling knob."
   quantityDecimals: Int!
   minimumPriceIncrement: BigInt!
 
   # Configuration
   liquidationFeeBps: Int!
   liquidatorShareBps: Int!
+  "Taker fee in basis points of notional."
   takerFeeBps: Int!
+  "Maker fee in basis points of notional; negative means a rebate."
   makerFeeBps: Int!
 
   # Funding
@@ -25,19 +33,30 @@ type Perps @entity(immutable: false) {
   fundingPeriod: BigInt!
   cumulativeFundingPerUnit: BigInt!
   lastFundingUpdateTime: BigInt!
+  "Perps-only: minimum margin the contract requires per resting order. Futures sizes margin per position, not per order, so it has no counterpart."
   minimumMarginPerOrder: BigInt!
 
   # Pool balances
+  "Perps-only: insurance reserve backing bad debt. Futures has no on-chain reserve pool, so it has no counterpart."
   reservePoolBalance: BigInt!
   collectedFeesBalance: BigInt!
 
   # Stats
   totalUsers: Int!
+  "Orders ever created; one per on-chain orderId."
   totalOrders: Int!
+  "Orders currently resting in the book (status ACTIVE or PARTIALLY_FILLED)."
   activeOrders: Int!
+  "Trade rows ever created. One per (tx, user, position session), so a two-sided match bumps it by 2 and a flip by 3."
   totalTrades: Int!
+  "Fill rows ever created. One per (OrderMatched, side); forced closes have no matched counterparty order and so no Fill."
+  totalFills: Int!
+  "Matched notional: sum of tradePrice * abs(quantity) / 10^quantityDecimals. Futures divides by nothing since its quantities are whole contracts."
   totalVolume: BigInt!
+  "Liquidation transactions, not legs: one keeper tx closing several orders or positions counts once."
   totalLiquidations: Int!
+  "Notional closed by force, in the same units as totalVolume: sum of exitPrice * abs(closedQuantity) / 10^quantityDecimals over every PositionLiquidated."
+  totalLiquidatedValue: BigInt!
   totalBadDebt: BigInt!
 
   # Timestamps
@@ -53,8 +72,8 @@ type User @entity(immutable: false) {
   # Position state (current net position)
   netQuantity: BigInt!
   aggregatedEntryPrice: BigInt!
-  "ID of the current open position session (empty when flat). Deterministic: blockNumber + padded logIndex of the open event."
-  currentPositionSessionId: String!
+  "ID of the currently-OPEN PositionSession. Empty string when flat."
+  currentSessionId: String!
 
   # Funding
   totalFundingPaid: BigInt!
@@ -62,8 +81,12 @@ type User @entity(immutable: false) {
 
   # Stats
   orderCount: Int!
+  "Orders currently resting in the book (status ACTIVE or PARTIALLY_FILLED)."
   activeOrderCount: Int!
+  "Trade rows: one per (tx, position session)."
   tradeCount: Int!
+  "Fill rows: one per matched leg."
+  fillCount: Int!
   realizedPnl: BigInt!
 
   "Transient: orderId of the user's most recent OrderCreated event. Used by the indexer to attribute taker-side fills (since OrderMatched only carries makerOrderId). Not intended for client queries."
@@ -87,14 +110,21 @@ type Order @entity(immutable: false) {
   id: Bytes! # orderId
   user: User!
   price: BigInt!
-  quantity: BigInt! # current remaining quantity (absolute value)
-  originalQuantity: BigInt! # original quantity when created
+  "Remaining open quantity (absolute value); zero once terminal."
+  quantity: BigInt!
+  "Quantity requested by the OrderCreated event that opened this order."
+  originalQuantity: BigInt!
   isBuy: Boolean! # true = long/buy, false = short/sell
   # Status
   status: OrderStatus!
+  "Quantity that became fills."
   filledQuantity: BigInt!
-  "Volume-weighted average price across all fills against this order. Zero if no fills."
+  "Quantity that left the book without matching (amend shrink, cancel, self-cross, IOC remainder, liquidation)."
+  cancelledQuantity: BigInt!
+  "Quantity-weighted average price across all fills against this order. Zero if no fills."
   averageFillPrice: BigInt!
+  "EOA that sent the tx where this order closed (tx.from). NOT necessarily the participant — for liquidations it's the keeper. Use `liquidator` for semantic close attribution."
+  closedByTx: Bytes
   "Keeper that force-cancelled this order; populated only when status = LIQUIDATED (from the paired OrderLiquidated event)."
   liquidator: Bytes
   "Fee paid by the order's participant to `liquidator`; populated only when status = LIQUIDATED."
@@ -112,19 +142,25 @@ type Order @entity(immutable: false) {
 }
 
 enum OrderStatus {
+  "Resting with no fills yet."
   ACTIVE
+  "Resting with at least one fill; still has remaining quantity."
+  PARTIALLY_FILLED
+  "Terminal: left the book fully matched."
   FILLED
+  "Terminal: left the book with zero fills — user cancel, amend-to-zero, or an IOC/FOK order whose size was fully absorbed by self-crossing. A partially filled IOC ends FILLED instead, with its unmatched remainder in `cancelledQuantity`."
   CANCELLED
-  PARTIAL
+  "Terminal: force-cancelled by a keeper via liquidateOrder / liquidateOrders."
   LIQUIDATED
 }
 
-# Aggregate of all fills in a single transaction for one user. This is what the UI shows in trade history.
+# Aggregate of all fills in a single transaction for one user and position
+# session. This is what the UI shows in trade history.
 type Trade @entity(immutable: false) {
-  id: Bytes! # tx hash + user address
+  id: Bytes! # tx hash + user + positionSession id
   user: User!
   positionSession: PositionSession!
-  tradePrice: BigInt! # volume-weighted average fill price
+  tradePrice: BigInt! # quantity-weighted average fill price
   tradeQuantity: BigInt! # signed sum of all fill quantities
   tradingFee: BigInt! # sum of all trading fees
   realizedPnl: BigInt! # sum of all fill PnLs
@@ -144,9 +180,11 @@ type Trade @entity(immutable: false) {
   transactionHash: Bytes!
 }
 
-# One per user per OrderMatched event. Individual execution against a counterparty.
+# One per user per OrderMatched leg. Individual execution against a
+# counterparty. A forced close has no matched counterparty order, so it produces
+# a Trade but no Fill.
 type Fill @entity(immutable: true) {
-  id: Bytes! # tx hash + log index + side suffix
+  id: Bytes! # tx hash + log index + leg suffix
   trade: Trade!
   "Whether `user` was the maker (resting order) or the taker (incoming order) in this match."
   side: FillSide!
@@ -207,6 +245,14 @@ type FundingSettlement @entity(immutable: true) {
   transactionHash: Bytes!
 }
 
+# Per-tx sentinel used by handleOrderLiquidated / handlePositionLiquidated to bump
+# `Perps.totalLiquidations` exactly once regardless of how many legs the
+# keeper liquidation tx contained. The entity itself carries no data — its
+# existence is the dedup signal.
+type LiquidationTx @entity(immutable: true) {
+  id: Bytes! # transaction hash
+}
+
 # Bad debt event when a user can't cover losses
 type BadDebtEvent @entity(immutable: true) {
   id: Bytes! # tx hash + log index
@@ -233,13 +279,16 @@ enum ReservePoolEventType {
   FEE
 }
 
-# One per open→close cycle. ID = blockNumber (padded) + logIndex (padded) of the open event.
+# One per open→close cycle. ID = blockNumber (padded) + logIndex (padded) + side
+# of the open event.
 type PositionSession @entity(immutable: false) {
-  id: String! # blockNumber (12 digits) + logIndex (6 digits), deterministic
+  id: String! # blockNumber (12 digits) + logIndex (6 digits) + side (2 digits); deterministic
   status: PositionSessionStatus!
   user: User!
-  entryPrice: BigInt! # average entry price of the position
-  closePrice: BigInt! # average exit price (updated as we close)
+  entryPrice: BigInt! # quantity-weighted average entry price
+  closePrice: BigInt! # quantity-weighted average exit price (updated as we close)
+  "Signed running net qty. Mirrors User.netQuantity while OPEN; 0 once CLOSE."
+  netQuantity: BigInt!
   maxQuantity: BigInt! # maximum absolute quantity reached (non-cumulative)
   closedQuantity: BigInt! # cumulative quantity closed
   "Cumulative absolute quantity closed via liquidation in this session (default 0). 'Was liquidated' = liquidatedQuantity > 0."

@@ -4,6 +4,10 @@ import { network } from "hardhat";
 import { parseUnits } from "viem";
 import { deployPerpsWithCollateralFixture, deployPerpsWithOrdersFixture } from "./fixtures.ts";
 import { TimeInForce } from "../fixtures/timeInForce.ts";
+import {
+  getBestBidPrice,
+  getBestAskPrice,
+} from "./lib/viewHelpers.ts";
 
 const { networkHelpers } = await network.getOrCreate();
 
@@ -85,7 +89,7 @@ describe("HashPowerPerpsDEX - Order Book View Functions", function () {
       const { contracts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
       const { perps } = contracts;
 
-      const bestBid = await perps.read.getBestBidPrice();
+      const bestBid = await getBestBidPrice(perps);
       assert.equal(bestBid, 0n);
     });
 
@@ -95,7 +99,7 @@ describe("HashPowerPerpsDEX - Order Book View Functions", function () {
       const { marketPrice } = config;
       const tick = config.minimumPriceIncrement;
 
-      const bestBid = await perps.read.getBestBidPrice();
+      const bestBid = await getBestBidPrice(perps);
       assert.equal(bestBid, marketPrice - tick);
     });
   });
@@ -105,7 +109,7 @@ describe("HashPowerPerpsDEX - Order Book View Functions", function () {
       const { contracts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
       const { perps } = contracts;
 
-      const bestAsk = await perps.read.getBestAskPrice();
+      const bestAsk = await getBestAskPrice(perps);
       assert.equal(bestAsk, 0n);
     });
 
@@ -115,7 +119,7 @@ describe("HashPowerPerpsDEX - Order Book View Functions", function () {
       const { marketPrice } = config;
       const tick = config.minimumPriceIncrement;
 
-      const bestAsk = await perps.read.getBestAskPrice();
+      const bestAsk = await getBestAskPrice(perps);
       assert.equal(bestAsk, marketPrice + tick);
     });
   });

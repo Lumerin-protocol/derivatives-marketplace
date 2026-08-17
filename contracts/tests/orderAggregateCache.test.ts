@@ -70,11 +70,6 @@ describe("HashPowerPerpsDEX order aggregate cache migration", function () {
     await harness.write.clearOrderAggregateCache([buyer.account.address], {
       account: owner.account,
     });
-    await harness.write.setLegacyOrderCache(
-      [buyer.account.address, 111n, 222n, 333n, 444n],
-      { account: owner.account },
-    );
-
     assert.deepEqual(await harness.read.getOrderAggregate([buyer.account.address]), {
       buyQty: 0n,
       sellQty: 0n,
@@ -84,12 +79,6 @@ describe("HashPowerPerpsDEX order aggregate cache migration", function () {
     const zeroRisk = await harness.read.getRiskView([buyer.account.address]);
     assert.equal(zeroRisk.buyOrderDelta, 0n);
     assert.equal(zeroRisk.sellOrderDelta, 0n);
-    assert.deepEqual(await harness.read.getLegacyOrderCache([buyer.account.address]), [
-      111n,
-      222n,
-      333n,
-      444n,
-    ]);
     await assert.rejects(
       () =>
         harness.write.rebuildOrderAggregateCache([[buyer.account.address]], {
@@ -138,7 +127,50 @@ describe("HashPowerPerpsDEX order aggregate cache migration", function () {
       buyValue: 0n,
       sellValue: 0n,
     });
-    assert.equal(await upgraded.read.VERSION(), "2.13.0");
+  });
+
+  it("atomically zeros the reused legacy liquidation-fee slot", async function () {
+    const { contracts, accounts } = await networkHelpers.loadFixture(
+      deployPerpsWithCollateralFixture,
+    );
+    const { perps, vault } = contracts;
+    const { owner } = accounts;
+
+    const harnessImpl = await viem.deployContract("HashPowerPerpsDEXMigrationHarness", [
+      vault.address,
+    ]);
+    await perps.write.upgradeToAndCall([harnessImpl.address, "0x"], {
+      account: owner.account,
+    });
+    const harness = await viem.getContractAt(
+      "HashPowerPerpsDEXMigrationHarness",
+      perps.address,
+    );
+    await harness.write.setLegacyRevenueSlot([123_456n], { account: owner.account });
+    assert.equal(await harness.read.legacyRevenueSlot(), 123_456n);
+
+    const fixedImpl = await viem.deployContract("HashPowerPerpsDEX", [vault.address]);
+    const migrationData = encodeFunctionData({
+      abi: fixedImpl.abi,
+      functionName: "initializeV3",
+    });
+    await harness.write.upgradeToAndCall([fixedImpl.address, migrationData], {
+      account: owner.account,
+    });
+
+    const upgraded = await viem.getContractAt("HashPowerPerpsDEX", perps.address);
+    // Live fee-pot view is the vault balance (empty here); the gapped slot was zeroed.
+    assert.equal(await upgraded.read.collectedFeesBalance(), 0n);
+    const publicClient = await viem.getPublicClient();
+    const legacySlot = await publicClient.getStorageAt({
+      address: perps.address,
+      slot: "0x2",
+    });
+    assert.equal(BigInt(legacySlot ?? "0x0"), 0n);
+    await assert.rejects(
+      () => upgraded.write.initializeV3({ account: owner.account }),
+      /InvalidInitialization/,
+    );
   });
 
   it("keeps mixed aggregates exact across create, reduce, cancel, fill, and self-cross", async function () {
@@ -214,7 +246,7 @@ describe("HashPowerPerpsDEX order aggregate cache migration", function () {
     await assertCacheMatchesScan(perps, seller.account.address, config.quantityDecimals);
   });
 
-  it("clears both aggregate sides during reset", async function () {
+  it("clears both aggregate sides during resetState", async function () {
     const { contracts, accounts, config } = await networkHelpers.loadFixture(
       deployPerpsWithCollateralFixture,
     );
@@ -231,7 +263,9 @@ describe("HashPowerPerpsDEX order aggregate cache migration", function () {
       [price + config.minimumPriceIncrement, -qty, TimeInForce.GTC],
       { account: buyer.account },
     );
-    await perps.write.resetState({ account: owner.account });
+    await perps.write.resetState([[buyer.account.address]], {
+      account: owner.account,
+    });
 
     assert.deepEqual(await perps.read.getOrderAggregate([buyer.account.address]), {
       buyQty: 0n,

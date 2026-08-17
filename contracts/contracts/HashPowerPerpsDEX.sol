@@ -21,26 +21,25 @@ import { HashPowerPerpsDEXAdmin } from "./HashPowerPerpsDEXAdmin.sol";
 /// @dev on their collateral balance and withdraw later when collateral is added
 contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     using EnumerableSet for EnumerableSet.Bytes32Set;
-    using EnumerableSet for EnumerableSet.AddressSet;
     using StructuredLinkedList for StructuredLinkedList.List;
 
     /// @notice Implementation version, bumped on every deployed change.
     /// @dev Lives here rather than in {HashPowerPerpsDEXBase} so that a diff to
     ///      this file and the version it ships under stay in the same place,
     ///      mirroring {Futures}.
-    string public constant VERSION = "2.13.0";
+    string public constant VERSION = "6.5.0";
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ICollateralVault _vault) HashPowerPerpsDEXBase(_vault) { }
 
     /// @notice Initialize the contract
     /// @param _priceOracle The Chainlink-style price oracle
-    /// @param _vault Ignored — vault is now an immutable set in the constructor.
-    ///        Kept for backwards compatibility with existing proxy deployments.
-    function initialize(AggregatorV3Interface _priceOracle, ICollateralVault _vault) external initializer {
+    /// @param _vault Must match the immutable constructor vault. The argument is retained
+    ///        to preserve the historical initializer signature.
+    function initialize(AggregatorV3Interface _priceOracle, ICollateralVault _vault) public initializer {
+        _validateVault(_vault);
         __Ownable_init(_msgSender());
         __UUPSUpgradeable_init();
-        __Multicall_init();
 
         setOracle(_priceOracle);
     }
@@ -48,21 +47,24 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @notice One-shot post-upgrade migration to wire up the portfolio margin engine added in v2.
     /// @dev Intended to be invoked atomically via `upgradeToAndCall`:
     ///      `proxy.upgradeToAndCall(newImpl, abi.encodeCall(this.initializeV2, (vault, pm)))`.
-    /// @param _vault Ignored — vault is now an immutable set in the constructor.
-    ///        Kept for backwards compatibility.
+    /// @param _vault Must match the immutable constructor vault. The argument is retained
+    ///        to preserve the historical initializer signature.
     /// @param _pm The portfolio margin engine (may be `address(0)` to set later via `setPortfolioMargin`).
-    /// @dev Deliberately unvalidated: the migration has to be able to run atomically with the
-    ///      upgrade, before the engine on the other side is wired up. `setPortfolioMargin`
-    ///      applies the checks.
+    /// @dev A nonzero engine must already expose the complete dependency surface. Pass zero
+    ///      when an atomic upgrade must precede wiring the engine on the other side.
     function initializeV2(ICollateralVault _vault, IPortfolioMarginEngine _pm) external reinitializer(2) onlyOwner {
-        portfolioMargin = _pm;
+        _validateVault(_vault);
+        if (address(_pm) == address(0)) {
+            portfolioMargin = _pm;
+        } else {
+            _setPortfolioMargin(_pm);
+        }
     }
 
-    // ── Vault integration ───────────────────────────────────────────────────
-
-    /// @notice Returns the user's collateral balance from the vault.
-    function balanceOf(address account) public view returns (uint256) {
-        return vault.balanceOf(account);
+    /// @notice One-shot migration that clears the reused legacy flat-liquidation-fee slot.
+    /// @dev Invoke atomically through `upgradeToAndCall` before any v2.15 fee path executes.
+    function initializeV3() external reinitializer(3) onlyOwner {
+        __gap3 = 0;
     }
 
     /// @notice Get current market price from oracle
@@ -77,35 +79,60 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @param _tif Order lifetime / fill policy
     function createOrder(uint256 _price, int256 _quantity, TimeInForce _tif) external {
         address sender = _msgSender();
+        _validateOrderIntent(_price, _quantity, _tif);
         _updateGlobalFunding();
-        bool skipMargin = _createOrder(sender, _price, _quantity, _tif);
-        if (!skipMargin) {
-            _ensureInitialMargin(sender);
+        _settleFunding(sender);
+        uint256 maxAllowedIm;
+        if (_isLocallyReducing(sender, _quantity)) {
+            maxAllowedIm = portfolioMargin.computePortfolioIM(sender);
         }
+        _createOrder(sender, _price, _quantity, _tif);
+        _ensureNoCollateralDeficit(sender, maxAllowedIm);
     }
 
     /// @notice Batched placement with per-leg time-in-force — IM check once at the end.
+    /// @dev Unlike `createOrder`, batch placement does not use the below-IM,
+    ///      portfolio-non-increasing exception. Any non-empty batch must leave
+    ///      the account fully above portfolio IM. This avoids an additional
+    ///      pre-batch PME traversal.
+    ///      Empty input reverts so simulate-before-write callers do not submit
+    ///      a no-op transaction.
     function createOrders(OrderIntent[] calldata _intents) external {
-        address sender = _msgSender();
-        _updateGlobalFunding();
         uint256 len = _intents.length;
+        if (len == 0) revert EmptyBatch();
+        address sender = _msgSender();
         for (uint256 i = 0; i < len; i++) {
             OrderIntent calldata intent = _intents[i];
+            _validateOrderIntent(intent.price, intent.quantity, intent.timeInForce);
+        }
+        _updateGlobalFunding();
+        _settleFunding(sender);
+        for (uint256 j = 0; j < len; j++) {
+            OrderIntent calldata intent = _intents[j];
             _createOrder(sender, intent.price, intent.quantity, intent.timeInForce);
         }
-        _ensureInitialMargin(sender);
+        _ensureNoCollateralDeficit(sender, 0);
     }
 
     /// @notice Cancel, reduce-in-place, then place orders — IM check once at the end.
     /// @dev Cancels/reduces run first so freed margin is available to the creates.
     ///      Reduces keep FIFO queue position; creates always join the back.
+    ///      Cancel/reduce-only batches skip PME because they cannot expand possible
+    ///      post-fill exposures. Batches with creates use one strict final IM check;
+    ///      the single-order below-IM exception does not apply.
     function updateOrders(
         bytes32[] calldata _cancelIds,
         ReduceIntent[] calldata _reduces,
         OrderIntent[] calldata _intents
     ) external {
         address sender = _msgSender();
+        uint256 createLen = _intents.length;
+        for (uint256 v = 0; v < createLen; v++) {
+            OrderIntent calldata intent = _intents[v];
+            _validateOrderIntent(intent.price, intent.quantity, intent.timeInForce);
+        }
         _updateGlobalFunding();
+        if (createLen != 0) _settleFunding(sender);
         uint256 cancelLen = _cancelIds.length;
         for (uint256 i = 0; i < cancelLen; i++) {
             _cancelOrder(sender, _cancelIds[i]);
@@ -114,12 +141,11 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         for (uint256 r = 0; r < reduceLen; r++) {
             _reduceOrderSize(sender, _reduces[r].orderId, _reduces[r].newQuantity);
         }
-        uint256 createLen = _intents.length;
         for (uint256 j = 0; j < createLen; j++) {
             OrderIntent calldata intent = _intents[j];
             _createOrder(sender, intent.price, intent.quantity, intent.timeInForce);
         }
-        _ensureInitialMargin(sender);
+        if (createLen != 0) _ensureNoCollateralDeficit(sender, 0);
     }
 
     /// @notice Shrink a resting order owned by the caller without losing FIFO priority.
@@ -136,29 +162,13 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         _cancelOrder(_msgSender(), _orderId);
     }
 
-    /// @dev Per-leg body of `createOrder` / `createOrders` without the IM-check epilogue.
-    ///      Returns true when the leg is reduce-only (single-order callers may skip IM);
-    ///      batch callers always check once at the end.
-    ///      Caller must have already run `_updateGlobalFunding()` for this tx.
-    function _createOrder(address _participant, uint256 _price, int256 _quantity, TimeInForce _tif)
-        internal
-        returns (bool isReduceOnly)
-    {
-        _validateTIF(_tif);
-        _validateQty(_quantity);
-        _validatePrice(_price);
-
-        // Settle taker's funding once before matching so per-match _updateUserPosition
-        // calls can skip it (cumulativeFundingPerUnit is constant within this tx).
-        _settleFunding(_participant);
+    /// @dev Validated per-leg body of `createOrder` / `createOrders` without the IM-check epilogue.
+    ///      Caller has already updated global funding and settled the taker once for this tx.
+    function _createOrder(address _participant, uint256 _price, int256 _quantity, TimeInForce _tif) internal {
 
         bool isBuy = _quantity > 0;
         bytes32 orderId = _nextOrderId();
         emit OrderCreated(orderId, _participant, _price, _quantity);
-
-        // Snapshot before matching — reduce-only vs position minus already-resting reduces.
-        int256 positionBefore = positions[_participant].netQuantity;
-        uint256 reducingBefore = _restingReduceAbs(_participant, positionBefore);
 
         int256 remainingQuantity = _matchWithOppositeOrders(_participant, _price, _quantity);
         bool partiallyOrFullyFilled = remainingQuantity != _quantity;
@@ -173,15 +183,6 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
             }
 
             if (remainingQuantity != 0) {
-                // Validate minimum margin per resting order
-                if (minimumMarginPerOrder > 0) {
-                    uint256 restingValue = _calculateValue(_price, M.abs(remainingQuantity));
-                    uint256 restingMargin = portfolioMargin.linearOrderMargin(restingValue);
-                    if (restingMargin < minimumMarginPerOrder) {
-                        revert OrderMarginTooLow();
-                    }
-                }
-
                 // Validate max orders per participant
                 EnumerableSet.Bytes32Set storage participantOrders = participantOrderIdsIndex[_participant];
                 if (participantOrders.length() >= MAX_ORDERS_PER_PARTICIPANT) {
@@ -193,9 +194,10 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
                 _addOrderAggregate(_participant, isBuy, _price, M.abs(remainingQuantity));
                 participantOrders.add(orderId);
                 StructuredLinkedList.List storage orderQueue = _priceOrderIds(_price, isBuy);
+                bool newPriceLevel = orderQueue.sizeOf() == 0;
                 orderQueue.pushBack(uint256(orderId));
 
-                _addPriceLevel(_price, isBuy);
+                if (newPriceLevel) _addPriceLevel(_price, isBuy);
             }
         } else {
             // IOC (or FOK after a full fill): never rest; close the taker order id at 0.
@@ -204,9 +206,6 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
             }
         }
 
-        // Opposite side and combined reducing size (resting + this intent) ≤ position.
-        isReduceOnly = positionBefore != 0 && (positionBefore > 0 ? _quantity < 0 : _quantity > 0)
-            && M.abs(_quantity) + reducingBefore <= M.abs(positionBefore);
     }
 
     /// @dev Shared cancel body for `cancelOrder` / `updateOrders`. Caller must
@@ -216,10 +215,10 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         if (order.participant != _participant) {
             revert OrderNotBelongToSender();
         }
+        if (order.quantity == 0) revert OrderNotExists();
 
         bool isBid = order.quantity > 0;
-        _subtractOrderAggregate(order.participant, isBid, order.price, M.abs(order.quantity), 0);
-        _removeOrder(_orderId, order.participant, order.price, isBid);
+        _removeRestingOrder(_orderId, order.participant, order.price, order.quantity);
         _removePriceLevelIfEmpty(_priceOrderIds(order.price, isBid), order.price, isBid);
         emit OrderCancelled(_orderId, order.participant);
     }
@@ -236,95 +235,87 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         uint256 newAbs = M.abs(_newQuantity);
         if (newAbs >= oldAbs) revert InvalidReduceQuantity();
 
-        if (minimumMarginPerOrder > 0) {
-            uint256 restingValue = _calculateValue(order.price, newAbs);
-            uint256 restingMargin = portfolioMargin.linearOrderMargin(restingValue);
-            if (restingMargin < minimumMarginPerOrder) revert OrderMarginTooLow();
-        }
-
-        bool isBid = oldQty > 0;
-        _subtractOrderAggregate(order.participant, isBid, order.price, oldAbs, newAbs);
-        order.quantity = _newQuantity;
-        emit OrderUpdated(_orderId, order.participant, _newQuantity);
+        _reduceRestingOrder(_orderId, order, _newQuantity);
     }
 
-    /// @notice Check if a user's position can be liquidated.
-    /// @dev Returns true iff the user has a position AND is below MM. Note: this view does NOT
-    ///      check the orders-must-be-clear rule enforced by `liquidatePosition`. Callers that
-    ///      want the full preflight should also check `getUserOrders(user).length == 0`.
-    function isLiquidatable(address _user) public view returns (bool) {
-        return positions[_user].netQuantity != 0 && _underwater(_user);
+    /// @notice Whether the participant has margin-relevant resting-order delta.
+    /// @dev Part of the ILinearMarket surface read by the portfolio margin engine. The
+    ///      liquidatability predicate itself lives on the engine
+    ///      ({IPortfolioMarginEngine-isLiquidatable}) — it is a property of the portfolio,
+    ///      not of any single venue. Combine it with this view and the position views to
+    ///      tell whether this venue holds anything actionable.
+    function hasRestingOrderDelta(address _user) external view returns (bool) {
+        OrderAggregate storage aggregate = userOrderAggregate[_user];
+        return aggregate.buyQty != 0 || aggregate.sellQty != 0;
     }
 
     /// @notice Force-close a single underwater user's position. Permissionless.
     /// @dev Strict orders-first invariant: reverts with `OrdersStillOpen` if the user has any
     ///      open orders anywhere in the portfolio, not merely on this book. The keeper must
-    ///      clear them first by composing
-    ///      `multicallStopOnFailure([liquidateOrder × N, liquidatePosition])` so the position
-    ///      close runs atomically once the orders are gone — and must drain the *other*
-    ///      venues' books in the same sweep, since orders there gate this call too.
-    ///
-    ///      Multi-user batches: there is no `liquidateBatch` entry point. Instead, compose
-    ///      nested {MulticallStopOnFailureUpgradeable.multicallStopOnFailure} calls — wrap
-    ///      each per-user clear-and-close as its OWN inner multicall, then bundle them in an
-    ///      outer multicall. The inner converts a per-user revert (e.g. `NotLiquidatable`,
-    ///      `OrdersStillOpen`) into a successful return, so the outer skips that user and
-    ///      keeps going. See {MulticallStopOnFailureUpgradeable} for the OOG semantics this
-    ///      composition still preserves at the leaf level (a clean OOG inside the inner
-    ///      reverts the inner with a non-empty selector, which the outer treats as a normal
-    ///      stop — keepers should size the outer-tx gas as the sum of per-user estimates +
-    ///      a buffer rather than relying on `eth_estimateGas` over the whole bundle).
+    ///      clear them first through each venue's typed `liquidateOrders` method, then
+    ///      re-snapshot portfolio health before closing the position. Orders on *other*
+    ///      venues also gate this call, so keepers must drain every venue before retrying.
     /// @param _closeQty Absolute quantity (QUANTITY_DECIMALS) the keeper wants to close. Clamped to
     ///        `|netQuantity|`; pass `type(uint256).max` for a full close. Sizing the partial amount
     ///        so the account lands at/under IM is the keeper's off-chain responsibility — an
     ///        oversize partial reverts `OverLiquidation`.
     function liquidatePosition(address _user, uint256 _closeQty) external {
-        _updateGlobalFunding();
-        _settleFunding(_user);
+        // Funding-independent checks first (cheap). `_underwater` runs after funding settle
+        // because settlement changes vault balances that feed the portfolio MM predicate.
+        // Portfolio-wide, not just this book: a position here can be the only thing
+        // offsetting resting orders at another venue. See `IPortfolioMarginEngine.hasRestingOrderDelta`.
+        if (portfolioMargin.hasRestingOrderDelta(_user)) revert OrdersStillOpen();
+        if (_closeQty == 0) revert InvalidQty();
 
         Position memory position = positions[_user];
         if (position.netQuantity == 0) revert NotLiquidatable();
+
+        _updateGlobalFunding();
+        _settleFunding(_user);
         if (!_underwater(_user)) revert NotLiquidatable();
-        // Portfolio-wide, not just this book: a position here can be the only thing
-        // offsetting resting orders at another venue, and closing it would strand that
-        // leg and raise the requirement. See `IPortfolioMarginEngine.hasRestingOrderDelta`.
-        if (portfolioMargin.hasRestingOrderDelta(_user)) revert OrdersStillOpen();
-        if (_closeQty == 0) revert InvalidSize();
 
         uint256 absNet = M.abs(position.netQuantity);
         uint256 closeAbs = _closeQty < absNet ? _closeQty : absNet;
+        uint256 currentPrice = getMarketPrice();
 
-        // Full close: delete the position and settle the whole PnL (bad-debt path). No IM buffer
-        // guard — the keeper deliberately deleveraged the entire position (deep underwater).
+        // Full close still runs the portfolio OverLiquidation guard: residual risk can remain
+        // on other venues (Futures / options) sharing this PME. Guard before emit/notify so
+        // an oversize close does not pay log/hook gas on the revert path.
         if (closeAbs == absNet) {
-            _doLiquidatePosition(_user);
+            (int256 pnl, int256 closedQuantity, uint256 liqFee) = _doLiquidatePosition(_user, currentPrice);
+            _revertIfOverLiquidated(_user);
+            emit PositionLiquidated(_user, _msgSender(), closedQuantity, pnl, liqFee);
+            _notifyLiquidation(_msgSender(), liqFee);
             return;
         }
 
-        (int256 pnl, int256 signedClose) = _doPartialLiquidatePosition(_user, position, closeAbs);
+        (int256 pnl, int256 signedClose) = _doPartialLiquidatePosition(_user, position, closeAbs, currentPrice);
 
         // Charge liquidation fee on the closed notional
-        uint256 currentPrice = getMarketPrice();
         uint256 closedNotional = _calculateValue(currentPrice, closeAbs);
         uint256 liqFee = _chargeLiquidationFee(_user, closedNotional);
 
-        // Over-liquidation guard: a position remains here, so if there is a real IM buffer
-        // (`im > mm`) the leftover balance must sit at/under IM.
-        uint256 im = portfolioMargin.computePortfolioIM(_user);
-        uint256 mm = portfolioMargin.computePortfolioMM(_user);
-        if (im > mm && balanceOf(_user) > im) revert OverLiquidation();
+        _revertIfOverLiquidated(_user);
 
         emit PositionLiquidated(_user, _msgSender(), signedClose, pnl, liqFee);
+        _notifyLiquidation(_msgSender(), liqFee);
+    }
+
+    /// @dev Over-liquidation guard: leftover balance must sit at/under IM when a real IM>MM
+    ///      buffer remains. Runs after full and partial closes (vacuous when IM == MM == 0).
+    function _revertIfOverLiquidated(address _user) internal view {
+        (uint256 im, uint256 mm) = portfolioMargin.computePortfolioMargins(_user);
+        if (im > mm && vault.balanceOf(_user) > im) revert OverLiquidation();
     }
 
     /// @notice Force-cancel a single resting order owned by an underwater user. Permissionless.
     function liquidateOrder(address _user, bytes32 _orderId) external {
-        _updateGlobalFunding();
-
-        if (!_underwater(_user)) revert NotLiquidatable();
-
         Order memory order = orders[_orderId];
         if (order.participant != _user) revert OrderNotBelongToUser();
+        if (order.quantity == 0) revert OrderNotExists();
+
+        _updateGlobalFunding();
+        if (!_underwater(_user)) revert NotLiquidatable();
 
         _doLiquidateOrder(_user, _orderId, order);
     }
@@ -337,11 +328,11 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         uint256 cancelled = 0;
         uint256 len = _orderIds.length;
         for (uint256 i = 0; i < len; i++) {
-            if (!_underwater(_user)) break;
             bytes32 orderId = _orderIds[i];
             Order memory order = orders[orderId];
-            // Skip raced/stale ids; stop only once healthy.
+            // Skip raced/stale ids before the expensive portfolio MM check.
             if (order.participant != _user || order.quantity == 0) continue;
+            if (!_underwater(_user)) break;
             _doLiquidateOrder(_user, orderId, order);
             cancelled++;
         }
@@ -362,8 +353,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         bool isBid = _order.quantity > 0;
         uint256 orderAbsQty = M.abs(_order.quantity);
         uint256 orderNotional = _calculateValue(_order.price, orderAbsQty);
-        _subtractOrderAggregate(_user, isBid, _order.price, orderAbsQty, 0);
-        _removeOrder(_orderId, _user, _order.price, isBid);
+        _removeRestingOrder(_orderId, _user, _order.price, _order.quantity);
         _removePriceLevelIfEmpty(_priceOrderIds(_order.price, isBid), _order.price, isBid);
 
         uint256 liqFee = _chargeLiquidationFee(_user, orderNotional);
@@ -373,17 +363,10 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         _notifyLiquidation(_msgSender(), liqFee);
     }
 
-    /// @notice Get the best bid price (highest)
-    function getBestBidPrice() public view returns (uint256) {
-        return _bestBidPrice();
-    }
-
-    /// @notice Get the best ask price (lowest)
-    function getBestAskPrice() public view returns (uint256) {
-        return _bestAskPrice();
-    }
-
-    /// @notice Simulate an order: how much would match and at what average price (view, no state change).
+    /// @notice Simulate a limit order: filled qty, VWAP, and remainder (view, no state change).
+    /// @dev Skips own resting liquidity (matches on-match STP net-out). Self-trade is judged
+    ///      against the caller, so simulating for another account requires setting the
+    ///      `eth_call` `from` field to that account.
     /// @param _price Limit price (same as createOrder)
     /// @param _quantity Order quantity (positive = buy, negative = sell)
     /// @return filledQuantity Signed quantity that would be matched (same sign as _quantity)
@@ -412,18 +395,19 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
 
             while (orderIdUint != 0 && remaining != 0) {
                 Order storage makerOrder = orders[bytes32(orderIdUint)];
-                // STP: self-cross nets out, not a fill
-                if (makerOrder.participant == _msgSender()) {
-                    uint256 selfAmt = M.min(M.abs(makerOrder.quantity), M.abs(remaining));
-                    remaining -= _toSignedQuantity(selfAmt, remaining);
-                    (, orderIdUint) = orderQueue.getNextNode(orderIdUint);
-                    continue;
-                }
-                uint256 matchAmt = M.min(M.abs(makerOrder.quantity), M.abs(remaining));
-                if (matchAmt > 0) {
-                    totalNotional += _calculateValue(makerOrder.price, matchAmt);
-                    totalFilledAbs += matchAmt;
-                    remaining -= _toSignedQuantity(matchAmt, remaining);
+                // STP: own resting size would net out, not fill.
+                if (makerOrder.participant != _msgSender() && makerOrder.quantity != 0) {
+                    uint256 matchAmt = M.min(M.abs(makerOrder.quantity), M.abs(remaining));
+                    if (matchAmt > 0) {
+                        // `currentPrice` equals `makerOrder.price` at this level; use the
+                        // ladder cursor so the fill source matches Futures.
+                        totalNotional += _calculateValue(currentPrice, matchAmt);
+                        totalFilledAbs += matchAmt;
+                        remaining -= _toSignedQuantity(matchAmt, remaining);
+                    }
+                } else if (makerOrder.participant == _msgSender() && makerOrder.quantity != 0) {
+                    uint256 cancelAmt = M.min(M.abs(makerOrder.quantity), M.abs(remaining));
+                    remaining -= _toSignedQuantity(cancelAmt, remaining);
                 }
                 (, orderIdUint) = orderQueue.getNextNode(orderIdUint);
             }
@@ -452,7 +436,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @param _user Address of the user
     /// @return pendingFunding Positive = user owes, negative = user receives (in collateral token units)
     function getPendingFunding(address _user) public view returns (int256) {
-        return _pendingFunding(_user);
+        return _pendingFunding(_user, 0);
     }
 
     // View functions
@@ -463,22 +447,13 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     }
 
     /// @notice Get user's orders
-    function getUserOrders(address _user) external view returns (bytes32[] memory) {
+    function getUserOrders(address _user) external view returns (bytes32[] memory orderIds) {
         return participantOrderIdsIndex[_user].values();
     }
 
-    /// @notice Get user's net position
+    /// @notice Get the user's exact signed position aggregate.
     function getUserPosition(address _user) external view returns (Position memory) {
         return positions[_user];
-    }
-
-    /// @notice Net linear delta of the user's position, signed and scaled by
-    ///         10^collateralDecimals (ILinearMarket). Each unit of net quantity
-    ///         contributes ±10^collateralDecimals of delta; quantity decimals are
-    ///         scaled off here so the portfolio margin engine needs no
-    ///         product-specific constants.
-    function getNetPositionDelta(address _user) external view returns (int256) {
-        return (positions[_user].netQuantity * int256(10 ** collateralDecimals)) / int256(10 ** QUANTITY_DECIMALS);
     }
 
     /// @notice ILinearMarket: all per-user margin inputs in a single call
@@ -491,23 +466,24 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     ///      when filling it would take the portfolio genuinely short.
     function getRiskView(address _user) external view returns (ILinearMarket.RiskView memory view_) {
         Position memory position = positions[_user];
+        OrderAggregate storage aggregate = userOrderAggregate[_user];
+        uint256 buyQty = aggregate.buyQty;
+        uint256 sellQty = aggregate.sellQty;
+        if (position.netQuantity == 0 && buyQty == 0 && sellQty == 0) return view_;
+
         uint256 currentPrice = getMarketPrice();
 
-        view_.netPositionDelta =
-            (position.netQuantity * int256(10 ** collateralDecimals)) / int256(10 ** QUANTITY_DECIMALS);
+        view_.netPositionDelta = position.netQuantity;
         if (position.netQuantity != 0) {
             // Mark PnL only. Funding travels in `pendingFunding`; netting it in here too
             // would have the engine charge the same debt twice (it adds both terms).
             // This deliberately differs from `getUnrealizedPnl`, which is a UX view.
             view_.unrealizedPnl = _calculatePositionPnl(position, currentPrice);
         }
-        view_.pendingFunding = getPendingFunding(_user);
+        view_.pendingFunding = _pendingFunding(_user, currentPrice);
 
-        OrderAggregate storage aggregate = userOrderAggregate[_user];
-        uint256 buyQty = aggregate.buyQty;
-        uint256 sellQty = aggregate.sellQty;
-        view_.buyOrderDelta = (buyQty * (10 ** collateralDecimals)) / (10 ** QUANTITY_DECIMALS);
-        view_.sellOrderDelta = (sellQty * (10 ** collateralDecimals)) / (10 ** QUANTITY_DECIMALS);
+        view_.buyOrderDelta = buyQty;
+        view_.sellOrderDelta = sellQty;
 
         // Instant mark-to-market loss if a whole side fills. Filling a bid above spot costs
         // the difference immediately and in full, which the old shock-scaled reservation
@@ -522,11 +498,6 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         if (sellMark > sellVal) view_.sellOrderFillLoss = sellMark - sellVal;
     }
 
-    /// @notice Get all users with positions
-    function getUsersWithPositions() external view returns (address[] memory) {
-        return usersWithPositions.values();
-    }
-
     /// @notice Get total unrealized PnL for a user (including pending funding)
     function getUnrealizedPnl(address _user) external view returns (int256) {
         Position memory position = positions[_user];
@@ -537,57 +508,40 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         return pnl;
     }
 
-    /// @notice Get order book depth (active price levels)
+    /// @notice Active bid/ask price levels (bids high→low, asks low→high).
     /// @param _maxLevels Maximum number of price levels to return per side
-    /// @return bidPrices Array of bid prices (highest first)
-    /// @return askPrices Array of ask prices (lowest first)
+    /// @return bids Array of bid prices (highest first)
+    /// @return asks Array of ask prices (lowest first)
     function getOrderBookPrices(uint256 _maxLevels)
         external
         view
-        returns (uint256[] memory bidPrices, uint256[] memory askPrices)
+        returns (uint256[] memory bids, uint256[] memory asks)
     {
-        uint256 bidCount = M.min(activeBidPrices.sizeOf(), _maxLevels);
-        uint256 askCount = M.min(activeAskPrices.sizeOf(), _maxLevels);
-
-        bidPrices = new uint256[](bidCount);
-        askPrices = new uint256[](askCount);
-
-        // Get bid prices
-        (, uint256 current) = activeBidPrices.getNextNode(0);
-        for (uint256 i = 0; i < bidCount && current != 0; i++) {
-            bidPrices[i] = current;
-            (, current) = activeBidPrices.getNextNode(current);
-        }
-
-        // Get ask prices
-        (, current) = activeAskPrices.getNextNode(0);
-        for (uint256 i = 0; i < askCount && current != 0; i++) {
-            askPrices[i] = current;
-            (, current) = activeAskPrices.getNextNode(current);
-        }
-
-        return (bidPrices, askPrices);
+        bids = _activePricesSlice(activeBidPrices, _maxLevels);
+        asks = _activePricesSlice(activeAskPrices, _maxLevels);
     }
 
-    /// @notice Get total quantity at a specific price level
+    /// @notice Sum of resting abs quantity at one (price, side).
     /// @param _price The price level
     /// @param _isBid True for bid side, false for ask side
-    /// @return totalQuantity The total absolute quantity at this price level
-    function getQuantityAtPrice(uint256 _price, bool _isBid) external view returns (uint256 totalQuantity) {
+    /// @return The total absolute quantity at this price level
+    function getQuantityAtPrice(uint256 _price, bool _isBid) external view returns (uint256) {
         StructuredLinkedList.List storage orderQueue = _priceOrderIds(_price, _isBid);
 
+        uint256 total = 0;
+        uint256 size = orderQueue.sizeOf();
+        if (size == 0) return 0;
+
         (, uint256 orderId) = orderQueue.getNextNode(0);
-        while (orderId != 0) {
-            Order storage order = orders[bytes32(orderId)];
-            totalQuantity += M.abs(order.quantity);
+        for (uint256 i = 0; i < size && orderId != 0; i++) {
+            total += M.abs(orders[bytes32(orderId)].quantity);
             (, orderId) = orderQueue.getNextNode(orderId);
         }
-
-        return totalQuantity;
+        return total;
     }
 
     /// @notice Cached resting-order quantities and notionals per side for a user.
-    function getOrderAggregate(address _user) external view returns (OrderAggregate memory) {
+    function getOrderAggregate(address _user) external view returns (OrderAggregate memory aggregate_) {
         return userOrderAggregate[_user];
     }
 }

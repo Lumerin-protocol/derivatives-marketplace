@@ -1,10 +1,7 @@
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
-import { StructuredLinkedList } from "solidity-linked-list/contracts/StructuredLinkedList.sol";
 import { AggregatorV3Interface } from "./interfaces/AggregatorV3Interface.sol";
-import { ICollateralVault } from "collateral-margin/contracts/contracts/interfaces/ICollateralVault.sol";
 import { IPortfolioMarginEngine } from "collateral-margin/contracts/contracts/interfaces/IPortfolioMarginEngine.sol";
 import { IPointsHook } from "collateral-margin/contracts/contracts/interfaces/IPointsHook.sol";
 import { HashPowerPerpsDEXBase } from "./HashPowerPerpsDEXBase.sol";
@@ -26,9 +23,6 @@ import { HashPowerPerpsDEXBase } from "./HashPowerPerpsDEXBase.sol";
 ///      needed, declare it in {HashPowerPerpsDEXBase} at the end alongside the existing
 ///      gap slots.
 abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
-    using EnumerableSet for EnumerableSet.AddressSet;
-    using StructuredLinkedList for StructuredLinkedList.List;
-
     /// @notice Authorize upgrade (only owner)
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
 
@@ -37,28 +31,11 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
     /// @notice Set the portfolio margin engine for cross-product margin checks.
     /// @dev Every order and every liquidation routes through the engine, and the venue
     ///      never null-checks it, so a wrong address here bricks the book. The engine must
-    ///      also aggregate this venue's own vault.
+    ///      also aggregate this venue's own vault and answer every risk-parameter read used
+    ///      by the venue.
     function setPortfolioMargin(IPortfolioMarginEngine _pm) external onlyOwner {
-        address pm = address(_pm);
-        if (pm == address(0)) revert ZeroAddress();
-        _requireContract(pm);
-
-        // Probe the order-margin read rather than `computePortfolioIM`: it is what every
-        // order placement calls, and unlike the IM path it needs no oracle, so wiring a
-        // venue must not depend on the engine's feed being set yet.
-        try _pm.linearOrderMargin(0) returns (uint256) { }
-        catch {
-            revert InvalidDependency();
-        }
-
-        try _pm.vault() returns (ICollateralVault pinned) {
-            if (address(pinned) != address(vault)) revert VaultMismatch();
-        } catch {
-            revert InvalidDependency();
-        }
-
-        portfolioMargin = _pm;
-        emit PortfolioMarginUpdated(pm);
+        if (address(_pm) == address(0)) revert ZeroAddress();
+        _setPortfolioMargin(_pm);
     }
 
     /// @notice Set (or clear) the points/rewards hook. Pass `address(0)` to disable points.
@@ -94,7 +71,7 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
         } catch {
             revert InvalidDependency();
         }
-        if (answer <= 0 || updatedAt == 0) revert InvalidOracle();
+        _validateOracleRound(answer, updatedAt);
 
         uint8 dec;
         try _oracle.decimals() returns (uint8 _dec) {
@@ -126,25 +103,35 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
         emit TakerFeeBpsUpdated(_takerFeeBps);
     }
 
+    /// @notice Withdraw accrued trading and liquidation revenue to the venue owner.
+    /// @dev Drains the venue's vault account (the fee pot). No separate accumulator.
+    function withdrawCollectedFees() external onlyOwner {
+        vault.withdrawTo(owner(), vault.balanceOf(address(this)));
+    }
+
     /// @notice Set the liquidation fee in basis points on the liquidated notional.
     /// @param _bps Fee in bps (e.g., 50 = 0.5% of the closed position or cancelled order value).
+    ///         Capped at `BPS` (100% of notional); same bound as {setLiquidatorShareBps}.
     function setLiquidationFeeBps(uint16 _bps) external onlyOwner {
+        _validateBPS(_bps);
         liquidationFeeBps = _bps;
         emit LiquidationFeeBpsUpdated(_bps);
     }
 
     /// @notice Set the liquidator's share of the liquidation fee in basis points.
-    /// @param _bps Share in bps (e.g., 5000 = 50% to liquidator, remainder to insurance fund).
+    /// @param _bps Share in bps (e.g., 5000 = 50% to liquidator, remainder to venue revenue).
     function setLiquidatorShareBps(uint16 _bps) external onlyOwner {
-        if (_bps > BPS) revert InvalidMarginPercent();
+        _validateBPS(_bps);
         liquidatorShareBps = _bps;
         emit LiquidatorShareBpsUpdated(_bps);
     }
 
     // ── Risk parameters ───────────────────────────────────────────────────────
 
-    /// @notice Set minimum margin per resting order (in collateral token units)
-    /// @param _minimumMarginPerOrder Minimum margin locked per resting order (0 = no minimum)
+    /// @notice Set the deprecated minimum-margin compatibility value.
+    /// @dev Retained with its event for ABI and storage compatibility. Order placement and
+    ///      reduction do not enforce this value; portfolio IM is the canonical requirement.
+    /// @param _minimumMarginPerOrder Compatibility value reported by the legacy getter.
     function setMinimumMarginPerOrder(uint256 _minimumMarginPerOrder) external onlyOwner {
         minimumMarginPerOrder = _minimumMarginPerOrder;
         emit MinimumMarginPerOrderUpdated(_minimumMarginPerOrder);
@@ -190,42 +177,14 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
 
     // ── Testnet maintenance ───────────────────────────────────────────────────
 
-    /// @notice Reset all trading state (orders, positions, funding, nonce)
-    /// @dev Intended for testnet use to wipe state without redeploying. ERC20 balances are not touched.
-    function resetState() external onlyOwner {
-        // Clear all bid orders and price levels
-        (, uint256 price) = activeBidPrices.getNextNode(0);
-        while (price != 0) {
-            (, uint256 nextPrice) = activeBidPrices.getNextNode(price);
-            _clearPriceLevelOrders(price, true);
-            activeBidPrices.remove(price);
-            price = nextPrice;
+    /// @notice Clear orders, position, and funding snapshot for explicit participants.
+    /// @dev Intended for testnet resets and migrations. The caller must supply the complete
+    ///      participant set; the contract deliberately performs no global enumeration.
+    ///      Global funding, configuration, collateral balances, and the order nonce are untouched.
+    function resetState(address[] calldata _participants) external onlyOwner {
+        uint256 len = _participants.length;
+        for (uint256 i = 0; i < len; i++) {
+            _resetStateForParticipant(_participants[i]);
         }
-
-        // Clear all ask orders and price levels
-        (, price) = activeAskPrices.getNextNode(0);
-        while (price != 0) {
-            (, uint256 nextPrice) = activeAskPrices.getNextNode(price);
-            _clearPriceLevelOrders(price, false);
-            activeAskPrices.remove(price);
-            price = nextPrice;
-        }
-
-        // Clear all positions and per-user funding snapshots
-        address[] memory users = usersWithPositions.values();
-        for (uint256 i = 0; i < users.length; i++) {
-            delete userFundingSnapshot[users[i]];
-            delete positions[users[i]];
-            usersWithPositions.remove(users[i]);
-        }
-
-        cumulativeFundingPerUnit = 0;
-        lastFundingUpdateTime = 0;
-        // nonce = 0;
-        emit LiquidationFeeBpsUpdated(liquidationFeeBps);
-        emit LiquidatorShareBpsUpdated(liquidatorShareBps);
-        emit MatchFeeUpdated(takerFeeBps, makerFeeBps);
-        emit MinimumMarginPerOrderUpdated(minimumMarginPerOrder);
-        emit FundingParametersUpdated(fundingRateMaxBps, fundingPeriod);
     }
 }

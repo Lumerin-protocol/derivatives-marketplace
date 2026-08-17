@@ -4,6 +4,9 @@ import { network } from "hardhat";
 import { parseUnits } from "viem";
 import { deployPerpsWithCollateralFixture } from "./fixtures.ts";
 import { TimeInForce } from "../fixtures/timeInForce.ts";
+import {
+  getAverageEntryPrice,
+} from "./lib/viewHelpers.ts";
 
 const { networkHelpers } = await network.getOrCreate();
 
@@ -142,7 +145,7 @@ describe("HashPowerPerpsDEX - Self-Trade Prevention", function () {
     const posB = await perps.read.getUserPosition([userB.account.address]);
     assert.equal(posA.netQuantity, qty4);
     assert.equal(posB.netQuantity, -qty4);
-    assert.equal(posA.aggregatedEntryPrice, price);
+    assert.equal(await getAverageEntryPrice(perps, userA.account.address), price);
   });
 
   it("matching bug: should correctly update quantity and perform matching correctly", async function () {
@@ -166,8 +169,8 @@ describe("HashPowerPerpsDEX - Self-Trade Prevention", function () {
 
     assert.equal(positionA.netQuantity, -qty);
     assert.equal(positionB.netQuantity, qty);
-    assert.equal(positionA.aggregatedEntryPrice, price + tick);
-    assert.equal(positionB.aggregatedEntryPrice, price + tick);
+    assert.equal(await getAverageEntryPrice(perps, userA.account.address), price + tick);
+    assert.equal(await getAverageEntryPrice(perps, userB.account.address), price + tick);
     assert.equal(ordersA.length, 1);
     assert.equal(quantityAtPrice, qty);
     assert.equal(orderBook[1][0], price);

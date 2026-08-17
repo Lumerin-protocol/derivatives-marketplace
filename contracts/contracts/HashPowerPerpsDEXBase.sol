@@ -9,7 +9,6 @@ import { StructuredLinkedList } from "solidity-linked-list/contracts/StructuredL
 import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import { MulticallStopOnFailureUpgradeable } from "./MulticallStopOnFailureUpgradeable.sol";
 import { AggregatorV3Interface } from "./interfaces/AggregatorV3Interface.sol";
 import { ICollateralVault } from "collateral-margin/contracts/contracts/interfaces/ICollateralVault.sol";
 import { IPortfolioMarginEngine } from "collateral-margin/contracts/contracts/interfaces/IPortfolioMarginEngine.sol";
@@ -25,7 +24,6 @@ abstract contract HashPowerPerpsDEXBase is
     Initializable,
     UUPSUpgradeable,
     OwnableUpgradeable,
-    MulticallStopOnFailureUpgradeable,
     Versionable
 {
     using SafeERC20 for IERC20;
@@ -34,7 +32,7 @@ abstract contract HashPowerPerpsDEXBase is
     using StructuredLinkedList for StructuredLinkedList.List;
 
     // Constants
-    uint256 private constant MAX_ORACLE_STALENESS = 3600; // 1 hour
+    uint256 public constant MAX_ORACLE_STALENESS = 3600; // 1 hour
     uint8 public constant FUNDING_DECIMALS = 18;
     uint8 public constant MAX_ORDERS_PER_PARTICIPANT = 100;
     uint8 public constant QUANTITY_DECIMALS = 6;
@@ -56,6 +54,7 @@ abstract contract HashPowerPerpsDEXBase is
 
     // Immutables (set in constructor, derived from vault)
     ICollateralVault public immutable vault;
+    /// @dev Collateral token decimals (must be 6). Distinct from QUANTITY_DECIMALS.
     uint8 internal immutable collateralDecimals;
 
     // State variables
@@ -65,8 +64,7 @@ abstract contract HashPowerPerpsDEXBase is
     uint8 private __gap1;
     /// @dev Dead — former maintenanceMarginPercent. Margin is now delegated to PortfolioMarginEngine.
     uint8 private __gap2;
-    /// @dev Dead — former liquidationFee (flat). Now bps-based via liquidationFeeBps.
-    uint256 private __gap3;
+    uint256 internal __gap3;
     uint8 private __gap4;
     uint8 internal oracleDecimals;
     uint256 private nonce; // Nonce for order IDs
@@ -84,7 +82,9 @@ abstract contract HashPowerPerpsDEXBase is
 
     // Position mappings - net position per user
     mapping(address => Position) internal positions; // Net position per user
-    EnumerableSet.AddressSet internal usersWithPositions; // Users with active positions
+    /// @dev Dead legacy enumeration slot. Retained untouched for upgrade storage compatibility;
+    ///      never read, written, reused, or cleared.
+    EnumerableSet.AddressSet internal usersWithPositions;
 
     // Reserve and fees
     int16 public takerFeeBps; // Taker fee in basis points (e.g., 5 = 0.05%)
@@ -98,7 +98,10 @@ abstract contract HashPowerPerpsDEXBase is
     mapping(address => int256) internal userFundingSnapshot; // Per-user snapshot of cumulativeFundingPerUnit
 
     // Order book limits
-    uint256 public minimumMarginPerOrder; // Minimum margin (collateral) locked per resting order (0 = no minimum)
+    /// @notice Deprecated compatibility value; no order path enforces it.
+    /// @dev Retained forever at its historical slot, with its generated getter, because
+    ///      integrations and existing proxies may still read governance's last configured value.
+    uint256 public minimumMarginPerOrder;
     /// @dev Deprecated/dead legacy cache slots. Retained forever for proxy storage compatibility.
     ///      v2.13+ must never read or write these mappings.
     mapping(address => uint256) internal userBuyOrderValue;
@@ -122,7 +125,7 @@ abstract contract HashPowerPerpsDEXBase is
     uint16 public liquidationFeeBps;
     /// @notice Share of the liquidation fee paid to the keeper (msg.sender).
     ///         In basis points: 10_000 = 100% to liquidator, 5_000 = 50/50 split.
-    ///         The remainder goes to the insurance fund.
+    ///         The remainder becomes venue revenue in this contract's vault account.
     /// @dev Appended at end of storage to preserve the upgradeable layout.
     uint16 public liquidatorShareBps;
 
@@ -152,7 +155,7 @@ abstract contract HashPowerPerpsDEXBase is
     /// @notice Represents a user's net position
     struct Position {
         int256 netQuantity; // Net position quantity (positive = long, negative = short)
-        uint256 aggregatedEntryPrice; // Weighted average entry price
+        int256 netEntryValue; // Exact signed entry value in collateral units
     }
 
     /// @notice Order lifetime / fill policy. GTD is not supported.
@@ -196,7 +199,6 @@ abstract contract HashPowerPerpsDEXBase is
         uint256 makerEntryPriceAfter,
         uint256 takerEntryPriceAfter
     );
-    event MatchFeeUpdated(int16 newTakerFeeBps, int16 newMakerFeeBps);
     event MakerFeeBpsUpdated(int16 newMakerFeeBps);
     event TakerFeeBpsUpdated(int16 newTakerFeeBps);
     event LiquidationFeeBpsUpdated(uint16 newLiquidationFeeBps);
@@ -204,7 +206,7 @@ abstract contract HashPowerPerpsDEXBase is
     event OracleUpdated(address newOracle);
     event PortfolioMarginUpdated(address newPortfolioMargin);
     event PositionLiquidated(
-        address indexed user, address indexed liquidator, int256 positionSize, int256 pnl, uint256 liquidatorFee
+        address indexed user, address indexed liquidator, int256 closedQuantity, int256 pnl, uint256 liquidatorFee
     );
     /// @notice Emitted when a resting order is force-cancelled by a permissionless liquidator.
     /// @dev `OrderCancelled` is also emitted from the same path so order-lifecycle indexers
@@ -214,18 +216,18 @@ abstract contract HashPowerPerpsDEXBase is
     event FundingUpdated(int256 fundingRate, int256 cumulativeFundingPerUnit, uint256 timestamp);
     event FundingSettled(address indexed user, int256 amount);
     event FundingParametersUpdated(uint256 maxBps, uint256 period);
+    /// @dev Deprecated compatibility event retained with the legacy setter.
     event MinimumMarginPerOrderUpdated(uint256 newMinimumMarginPerOrder);
     /// @notice Emitted whenever the points hook address changes.
     event HookUpdated(address indexed hook);
 
     // Errors
     error InvalidPrice();
-    error InvalidSize();
-    error InsufficientMargin(); // The margin % is not sufficient to cover the position
-    error InsufficientCollateral(); // The user wants to remove more collateral than they have
+    error InvalidQty();
+    error InsufficientMarginBalance();
     error OracleStale();
     error InvalidOracle();
-    error InvalidMarginPercent();
+    error ValueOutOfRange(int256 min, int256 max);
     error OrderNotBelongToSender();
     error MaxOrdersPerParticipantReached();
     error NotLiquidatable();
@@ -233,12 +235,12 @@ abstract contract HashPowerPerpsDEXBase is
     /// @notice Partial liquidation left balance above IM while a real IM>MM buffer remains.
     error OverLiquidation();
     error OrderNotBelongToUser(); // liquidateOrder called with an id not owned by the specified user
-    error InsufficientReservePool(); // The reserve pool does not have enough collateral to cover user profit
     error InvalidFundingParameters();
     /// @notice Fee magnitude above `MAX_FEE_BPS`, or a maker+taker sum below zero (which
-    ///         would make every match a net outflow from the insurance fund).
+    ///         would make every match a net outflow from the fee pot).
     error InvalidFee();
-    error OrderMarginTooLow(); // Order margin is below minimumMarginPerOrder
+    /// @dev Deprecated compatibility declaration. Runtime order paths no longer raise it.
+    error OrderMarginTooLow();
     error MaxPriceLevelsReached(); // Too many active price levels on one side of the book
     error InsuranceFundNotConfigured(); // CollateralVault.insuranceFund not set by vault owner
     /// @notice FOK could not fill entirely, or IOC matched nothing.
@@ -246,19 +248,23 @@ abstract contract HashPowerPerpsDEXBase is
     error InvalidTimeInForce();
     error InvalidReduceQuantity();
     error OrderNotExists();
+    error EmptyBatch();
     error ZeroAddress();
     /// @notice The margin engine aggregates a different vault than this venue settles into.
     error VaultMismatch();
     /// @dev A dependency did not answer a call the venue depends on: no code at the address,
     ///      or the call reverted. Which dependency is bad is implied by the setter that reverted.
     error InvalidDependency();
+    /// @notice Perps prices, values, and ticks are denominated in six-decimal collateral.
+    error UnsupportedTokenDecimals();
 
     /// @param _vault The shared collateral vault. Its `collateralToken()` becomes the underlying ERC20.
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ICollateralVault _vault) {
-        if (address(_vault) == address(0)) revert InsufficientCollateral();
+        if (address(_vault) == address(0)) revert ZeroAddress();
         vault = _vault;
         collateralDecimals = IERC20Metadata(address(_vault.collateralToken())).decimals();
+        if (collateralDecimals != 6) revert UnsupportedTokenDecimals();
         _disableInitializers();
     }
 
@@ -267,12 +273,17 @@ abstract contract HashPowerPerpsDEXBase is
     /// @dev Validates a proposed (maker, taker) fee pair. Both bounds matter:
     ///      `MAX_FEE_BPS` keeps the unreserved fee small relative to the MM floor, and the
     ///      non-negative sum keeps a match from being a net outflow — without it a maker
-    ///      rebate exceeding the taker fee drains the insurance fund once per trade,
-    ///      unbounded in volume.
+    ///      rebate exceeding the taker fee drains the fee pot once per trade, unbounded in
+    ///      volume.
     function _validateFees(int16 _makerFeeBps, int16 _takerFeeBps) internal pure {
         if (_makerFeeBps > MAX_FEE_BPS || _makerFeeBps < -MAX_FEE_BPS) revert InvalidFee();
         if (_takerFeeBps > MAX_FEE_BPS || _takerFeeBps < -MAX_FEE_BPS) revert InvalidFee();
         if (int256(_makerFeeBps) + int256(_takerFeeBps) < 0) revert InvalidFee();
+    }
+
+    /// @dev Inclusive `[0, BPS]` bound for liquidation fee / share knobs (100% of notional).
+    function _validateBPS(uint16 _bps) internal pure {
+        if (_bps > BPS) revert ValueOutOfRange(0, int256(BPS));
     }
 
     // ── Dependency probes ─────────────────────────────────────────────────────
@@ -285,24 +296,79 @@ abstract contract HashPowerPerpsDEXBase is
         if (target.code.length == 0) revert InvalidDependency();
     }
 
+    /// @dev Historical initializer arguments still include the vault even though the
+    ///      dependency is immutable. Reject a proxy wired with deployment calldata for a
+    ///      different implementation vault instead of silently accepting the mismatch.
+    function _validateVault(ICollateralVault _vault) internal view {
+        if (address(_vault) != address(vault)) revert VaultMismatch();
+    }
+
+    /// @dev Validate every read the venue relies on before adopting a portfolio margin
+    ///      engine. The zero address is handled by callers because initializeV2 deliberately
+    ///      permits it while the ongoing governance setter does not.
+    function _setPortfolioMargin(IPortfolioMarginEngine _pm) internal {
+        address pm = address(_pm);
+        _requireContract(pm);
+
+        try _pm.vault() returns (ICollateralVault pinned) {
+            if (address(pinned) != address(vault)) revert VaultMismatch();
+        } catch {
+            revert InvalidDependency();
+        }
+
+        try _pm.linearOrderMargin(0) returns (uint256) { }
+        catch {
+            revert InvalidDependency();
+        }
+
+        try _pm.imSpotShock() returns (uint256) { }
+        catch {
+            revert InvalidDependency();
+        }
+
+        try _pm.mmSpotShock() returns (uint256) { }
+        catch {
+            revert InvalidDependency();
+        }
+
+        portfolioMargin = _pm;
+        emit PortfolioMarginUpdated(pm);
+    }
+
     // ── Internal helpers: points hook ─────────────────────────────────────────
 
     /// @dev Notify the points hook of a fill. Skipped when no hook is configured. The call is
     ///      intentionally not isolated: a reverting hook reverts the fill (unplug via setHook).
-    ///      `_makerPrice` is the resting maker order's price; `_refPriceForPoints()` supplies the
-    ///      oracle reference for the hook's price-improvement multiplier (0 when stale → no bonus).
+    ///      `_makerPrice` is the resting maker order's price; `_refPrice` is cached once per
+    ///      taker order for the hook's price-improvement multiplier (0 when stale → no bonus).
     function _notifyFill(
+        IPointsHook _hook,
         address _maker,
         address _taker,
         uint256 _notional,
         int256 _makerFee,
         int256 _takerFee,
-        uint256 _makerPrice
+        uint256 _makerPrice,
+        uint256 _refPrice
     ) internal {
-        IPointsHook _hook = hook;
         if (address(_hook) == address(0)) return;
         uint256 takerFeeAbs = _takerFee > 0 ? uint256(_takerFee) : 0;
-        _hook.onFill(_maker, _taker, _notional, _makerFee, takerFeeAbs, _makerPrice, _refPriceForPoints());
+        _hook.onFill(_maker, _taker, _notional, _makerFee, takerFeeAbs, _makerPrice, _refPrice);
+    }
+
+    /// @dev True when a Chainlink-shaped round is usable for hard mark-price paths.
+    function _isUsableOracleRound(int256 answer, uint256 updatedAt) internal view returns (bool) {
+        if (answer <= 0 || updatedAt == 0 || updatedAt > block.timestamp) return false;
+        if (block.timestamp - updatedAt > MAX_ORACLE_STALENESS) return false;
+        return true;
+    }
+
+    /// @dev Soft oracle → venue price. Returns 0 when the round is unusable (never reverts).
+    ///      Used by points bonus and funding accrual so a stale feed cannot brick cancels.
+    function _softMarketPrice() internal view returns (uint256) {
+        (, int256 answer,, uint256 updatedAt,) = priceOracle.latestRoundData();
+        if (!_isUsableOracleRound(answer, updatedAt)) return 0;
+        return _getMarketPrice(uint256(answer));
     }
 
     /// @dev Oracle reference price for the points price-improvement multiplier, in the same
@@ -310,11 +376,7 @@ abstract contract HashPowerPerpsDEXBase is
     ///      reverting when the oracle is stale or non-positive, so a points-side read can never
     ///      block a fill — the hook simply applies no bonus (1x) when the reference is 0.
     function _refPriceForPoints() internal view returns (uint256) {
-        (, int256 answer,, uint256 updatedAt,) = priceOracle.latestRoundData();
-        if (answer <= 0) return 0;
-        if (block.timestamp - updatedAt > MAX_ORACLE_STALENESS) return 0;
-        uint256 price = M.scaleDecimals(uint256(answer), oracleDecimals, collateralDecimals);
-        return M.roundToNearest(price, minimumPriceIncrement);
+        return _softMarketPrice();
     }
 
     /// @dev Notify the points hook of a liquidation. Skipped when no hook is configured. Not
@@ -328,8 +390,8 @@ abstract contract HashPowerPerpsDEXBase is
     // ── Internal helpers: collateral movement ─────────────────────────────────
 
     /// @dev Move collateral between two accounts via the vault.
-    function _move(address _from, address _to, uint256 _amount) internal {
-        vault.internalTransfer(_from, _to, _amount);
+    function _internalTransfer(address from, address to, uint256 amount) internal {
+        vault.internalTransfer(from, to, amount);
     }
 
     /// @dev Shared reserve / fee ledger: vault `INSURANCE_FUND_ADDR` receipt account.
@@ -341,27 +403,47 @@ abstract contract HashPowerPerpsDEXBase is
 
     // ── Internal helpers: pricing ─────────────────────────────────────────────
 
-    /// @dev Body of {getMarketPrice}: current oracle price scaled to collateral decimals.
-    function _marketPrice() internal view returns (uint256) {
+    /// @dev Hard path for mark price / admin probes. Reverts `InvalidOracle` or
+    ///      `OracleStale`; returns when the round is usable. Soft callers that must
+    ///      not revert (points ref) check the same predicates and return 0 instead.
+    function _validateOracleRound(int256 answer, uint256 updatedAt) internal view {
+        if (answer <= 0 || updatedAt == 0 || updatedAt > block.timestamp) revert InvalidOracle();
+        if (block.timestamp - updatedAt > MAX_ORACLE_STALENESS) revert OracleStale();
+    }
+
+    /// @dev Raw oracle answer after hard validation (mirrors Futures `_getPrice`).
+    function _getPrice() internal view returns (uint256) {
         (, int256 answer,, uint256 updatedAt,) = priceOracle.latestRoundData();
+        _validateOracleRound(answer, updatedAt);
+        return uint256(answer);
+    }
 
-        // Check for stale price
-        if (block.timestamp - updatedAt > MAX_ORACLE_STALENESS) {
-            revert OracleStale();
+    /// @dev Scale a raw hashprice answer to venue price units and round to the tick
+    ///      (mirrors Futures `_getMarketPrice`).
+    function _getMarketPrice(uint256 _hashpriceUsd) internal view returns (uint256) {
+        uint256 scaled = M.scaleDecimals(_hashpriceUsd, oracleDecimals, collateralDecimals);
+        return M.roundToNearest(scaled, minimumPriceIncrement);
+    }
+
+    /// @dev Body of {getMarketPrice}: hard-validated oracle price in venue units.
+    function _marketPrice() internal view returns (uint256) {
+        return _getMarketPrice(_getPrice());
+    }
+
+    function _activePricesSlice(StructuredLinkedList.List storage priceList, uint256 _maxLevels)
+        internal
+        view
+        returns (uint256[] memory)
+    {
+        uint256 total = priceList.sizeOf();
+        uint256 count = M.min(total, _maxLevels);
+        uint256[] memory out = new uint256[](count);
+        (, uint256 current) = priceList.getNextNode(0);
+        for (uint256 i = 0; i < count && current != 0; i++) {
+            out[i] = current;
+            (, current) = priceList.getNextNode(current);
         }
-
-        // Handle negative prices
-        if (answer < 0) {
-            revert InvalidOracle();
-        }
-
-        // Convert oracle price to collateral token decimals (oracle already quotes 1 PH/s/day)
-        uint256 price = M.scaleDecimals(uint256(answer), oracleDecimals, collateralDecimals);
-
-        // Round to nearest minimumPriceIncrement
-        price = M.roundToNearest(price, minimumPriceIncrement);
-
-        return price;
+        return out;
     }
 
     // ── Internal helpers: order placement / matching ──────────────────────────
@@ -374,15 +456,8 @@ abstract contract HashPowerPerpsDEXBase is
     /// @dev Absolute qty of resting orders that reduce `_net`.
     function _restingReduceAbs(address _user, int256 _net) internal view returns (uint256 total) {
         if (_net == 0) return 0;
-        EnumerableSet.Bytes32Set storage ids = participantOrderIdsIndex[_user];
-        uint256 len = ids.length();
-        for (uint256 i = 0; i < len; i++) {
-            Order memory order = orders[ids.at(i)];
-            if (order.quantity == 0) continue;
-            if (_net > 0 ? order.quantity < 0 : order.quantity > 0) {
-                total += M.abs(order.quantity);
-            }
-        }
+        OrderAggregate storage aggregate = userOrderAggregate[_user];
+        return _net > 0 ? aggregate.sellQty : aggregate.buyQty;
     }
 
     /// @notice Match incoming order with opposite orders using limit price logic (direct walk).
@@ -398,13 +473,19 @@ abstract contract HashPowerPerpsDEXBase is
         if (oppositePrices.sizeOf() == 0) return remainingQuantity;
 
         (, uint256 currentPrice) = oppositePrices.getNextNode(0);
+        if ((_isBuy && currentPrice > _limitPrice) || (!_isBuy && currentPrice < _limitPrice)) {
+            return remainingQuantity;
+        }
+        IPointsHook pointsHook = hook;
+        uint256 refPrice = address(pointsHook) == address(0) ? 0 : _refPriceForPoints();
 
         while (currentPrice != 0 && remainingQuantity != 0) {
             if (_isBuy && currentPrice > _limitPrice) break;
             if (!_isBuy && currentPrice < _limitPrice) break;
 
             (, uint256 nextPrice) = oppositePrices.getNextNode(currentPrice);
-            remainingQuantity = _matchOrdersAtPrice(_taker, currentPrice, remainingQuantity, _isBuy);
+            remainingQuantity =
+                _matchOrdersAtPrice(_taker, currentPrice, remainingQuantity, _isBuy, pointsHook, refPrice);
             currentPrice = nextPrice;
         }
 
@@ -414,7 +495,14 @@ abstract contract HashPowerPerpsDEXBase is
     /// @notice Match orders at a specific price level (direct walk).
     /// @dev Self-cross (maker == taker) nets out size with no trade, fees, or
     ///      position update — same STP semantics as Futures.
-    function _matchOrdersAtPrice(address _taker, uint256 _price, int256 _remainingQty, bool _isBuy)
+    function _matchOrdersAtPrice(
+        address _taker,
+        uint256 _price,
+        int256 _remainingQty,
+        bool _isBuy,
+        IPointsHook _pointsHook,
+        uint256 _refPrice
+    )
         internal
         returns (int256)
     {
@@ -431,7 +519,7 @@ abstract contract HashPowerPerpsDEXBase is
                 continue;
             }
 
-            _remainingQty = _executeMatch(_taker, makerOrderId, makerOrder, _remainingQty);
+            _remainingQty = _executeMatch(_taker, makerOrderId, makerOrder, _remainingQty, _pointsHook, _refPrice);
             (, orderIdUint) = makerOrderQueue.getNextNode(0);
         }
 
@@ -452,25 +540,28 @@ abstract contract HashPowerPerpsDEXBase is
         uint256 makerAbs = M.abs(makerQty);
         uint256 remainingAbs = M.abs(_remainingQty);
         uint256 cancelAmt = makerAbs < remainingAbs ? makerAbs : remainingAbs;
-        bool makerIsBid = makerQty > 0;
-
-        _subtractOrderAggregate(_taker, makerIsBid, makerPrice, makerAbs, makerAbs - cancelAmt);
 
         if (cancelAmt == makerAbs) {
-            _removeOrder(_makerOrderId, _taker, makerPrice, makerIsBid);
+            _removeRestingOrder(_makerOrderId, _taker, makerPrice, makerQty);
             emit OrderCancelled(_makerOrderId, _taker);
         } else {
             uint256 reducedMakerAbs = makerAbs - cancelAmt;
             int256 newMakerQty = M.toSigned(makerQty > 0, reducedMakerAbs);
-            _makerOrder.quantity = newMakerQty;
-            emit OrderUpdated(_makerOrderId, _taker, newMakerQty);
+            _reduceRestingOrder(_makerOrderId, _makerOrder, newMakerQty);
         }
 
         return _remainingQty > 0 ? int256(remainingAbs - cancelAmt) : -int256(remainingAbs - cancelAmt);
     }
 
     /// @notice Execute a single order match
-    function _executeMatch(address _taker, bytes32 _makerOrderId, Order storage _makerOrder, int256 _remainingQty)
+    function _executeMatch(
+        address _taker,
+        bytes32 _makerOrderId,
+        Order storage _makerOrder,
+        int256 _remainingQty,
+        IPointsHook _pointsHook,
+        uint256 _refPrice
+    )
         internal
         returns (int256)
     {
@@ -485,21 +576,45 @@ abstract contract HashPowerPerpsDEXBase is
         int256 takerFee = int256(notionalValue) * int256(takerFeeBps) / int256(BPS);
         int256 makerFee = int256(notionalValue) * int256(makerFeeBps) / int256(BPS);
 
-        _createPosition(_makerOrderId, makerParticipant, _taker, makerPrice, takerQty, takerFee, makerFee);
+        _createPosition(makerParticipant, _taker, makerPrice, takerQty);
 
-        _transferFee(_taker, takerFee);
-        _transferFee(makerParticipant, makerFee);
+        // Collect the positive side first so a same-match rebate can use revenue
+        // earned by that match instead of depending on a pre-funded fee pot.
+        // Fee BadDebt (if any) is emitted here, before OrderUpdated / OrderMatched —
+        // same log order as Futures.
+        if (makerFee < 0) {
+            _transferFee(_taker, takerFee);
+            _transferFee(makerParticipant, makerFee);
+        } else {
+            _transferFee(makerParticipant, makerFee);
+            _transferFee(_taker, takerFee);
+        }
 
-        _notifyFill(makerParticipant, _taker, notionalValue, makerFee, takerFee, makerPrice);
+        _notifyFill(_pointsHook, makerParticipant, _taker, notionalValue, makerFee, takerFee, makerPrice, _refPrice);
 
         int256 newMakerQty = _reduceQuantity(makerQty, matchAmt);
-        _subtractOrderAggregate(makerParticipant, _remainingQty < 0, makerPrice, M.abs(makerQty), M.abs(newMakerQty));
-        _makerOrder.quantity = newMakerQty;
-
-        emit OrderUpdated(_makerOrderId, makerParticipant, newMakerQty);
         if (newMakerQty == 0) {
-            _removeOrder(_makerOrderId, makerParticipant, makerPrice, _remainingQty < 0);
+            _removeRestingOrder(_makerOrderId, makerParticipant, makerPrice, makerQty);
+            emit OrderUpdated(_makerOrderId, makerParticipant, 0);
+        } else {
+            _reduceRestingOrder(_makerOrderId, _makerOrder, newMakerQty);
         }
+
+        Position storage makerPos = positions[makerParticipant];
+        Position storage takerPos = positions[_taker];
+        _emitOrderMatched(
+            _makerOrderId,
+            makerParticipant,
+            _taker,
+            makerPrice,
+            takerQty,
+            makerFee,
+            takerFee,
+            makerPos.netQuantity,
+            takerPos.netQuantity,
+            _averageEntryPrice(makerPos),
+            _averageEntryPrice(takerPos)
+        );
 
         unchecked {
             return _remainingQty - takerQty;
@@ -576,57 +691,44 @@ abstract contract HashPowerPerpsDEXBase is
         userOrderAggregate[_user] = aggregate;
     }
 
-    /// @notice Remove an order from the book (internal)
-    /// @dev Callers are responsible for updating the aggregate before this call.
-    function _removeOrder(bytes32 _orderId, address _participant, uint256 _price, bool _isBid) internal {
-        _priceOrderIds(_price, _isBid).remove(uint256(_orderId));
+    /// @dev Remove one canonical resting order from every per-order accounting structure.
+    ///      Price-ladder cleanup stays with the caller because matching and reset walk a whole
+    ///      level and deliberately remove that level only after its queue traversal finishes.
+    ///      Callers emit `OrderUpdated` / `OrderCancelled` themselves (matches Futures).
+    function _removeRestingOrder(bytes32 _orderId, address _participant, uint256 _price, int256 _quantity)
+        internal
+    {
+        bool isBid = _quantity > 0;
+        _subtractOrderAggregate(_participant, isBid, _price, M.abs(_quantity), 0);
+        _priceOrderIds(_price, isBid).remove(uint256(_orderId));
         participantOrderIdsIndex[_participant].remove(_orderId);
         delete orders[_orderId];
+    }
+
+    /// @dev Shrink one canonical resting order in place, preserving its queue/FIFO position.
+    function _reduceRestingOrder(bytes32 _orderId, Order storage _order, int256 _newQuantity) internal {
+        int256 oldQuantity = _order.quantity;
+        address participant = _order.participant;
+        _subtractOrderAggregate(
+            participant, oldQuantity > 0, _order.price, M.abs(oldQuantity), M.abs(_newQuantity)
+        );
+        _order.quantity = _newQuantity;
+        emit OrderUpdated(_orderId, participant, _newQuantity);
     }
 
     // ── Internal helpers: position accounting ─────────────────────────────────
 
     /// @notice Update net positions when orders match
     /// @param taker Address of the taker whose funding was already settled before the matching loop
-    function _createPosition(
-        bytes32 matchedOrderId,
-        address makerParticipant,
-        address taker,
-        uint256 _price,
-        int256 _takerQty,
-        int256 _takerFee,
-        int256 _makerFee
-    ) internal {
-        // Determine buyer and seller based on taker quantity sign
-        // Positive = taker is buying, negative = taker is selling
-        (address buyer, address seller) = _takerQty > 0 ? (taker, makerParticipant) : (makerParticipant, taker);
-
-        // Use absolute quantity for position updates
-        // Buyer always gets positive (long), seller always gets negative (short)
-        int256 absQty = int256(M.abs(_takerQty));
-
-        // Skip funding settlement for the taker — already settled once before the loop.
-        if (buyer != taker) _settleFunding(buyer);
-        _updateUserPosition(buyer, absQty, _price);
-
-        if (seller != taker) _settleFunding(seller);
-        _updateUserPosition(seller, -absQty, _price);
-
-        Position storage makerPos = positions[makerParticipant];
-        Position storage takerPos = positions[taker];
-        _emitOrderMatched(
-            matchedOrderId,
-            makerParticipant,
-            taker,
-            _price,
-            _takerQty,
-            _makerFee,
-            _takerFee,
-            makerPos.netQuantity,
-            takerPos.netQuantity,
-            makerPos.aggregatedEntryPrice,
-            takerPos.aggregatedEntryPrice
-        );
+    /// @dev Settles maker then taker so insurance-fund shortfall allocation is role-deterministic
+    ///      (matches Futures). `OrderMatched` is emitted by {_executeMatch} after fees/updates.
+    function _createPosition(address makerParticipant, address taker, uint256 _price, int256 _takerQty)
+        internal
+    {
+        // Maker takes the opposite of the taker fill. Skip taker funding — settled once pre-loop.
+        if (makerParticipant != taker) _settleFunding(makerParticipant);
+        _updateUserPosition(makerParticipant, -_takerQty, _price);
+        _updateUserPosition(taker, _takerQty, _price);
     }
 
     function _emitOrderMatched(
@@ -657,160 +759,172 @@ abstract contract HashPowerPerpsDEXBase is
         );
     }
 
-    /// @notice Update a user's net position with aggregated entry price
+    function _averageEntryPrice(Position memory _position) internal pure returns (uint256) {
+        if (_position.netQuantity == 0) return 0;
+        return (M.abs(_position.netEntryValue) * (10 ** QUANTITY_DECIMALS)) / M.abs(_position.netQuantity);
+    }
+
+    function _signedValue(uint256 _price, int256 _quantity) internal pure returns (int256) {
+        return (_quantity * int256(_price)) / int256(10 ** QUANTITY_DECIMALS);
+    }
+
+    /// @notice Update a user's net position with exact signed entry value
     function _updateUserPosition(address _user, int256 _quantity, uint256 _tradePrice) internal {
         Position storage position = positions[_user];
+        int256 entryValue = position.netEntryValue;
+        int256 tradeValue = _signedValue(_tradePrice, _quantity);
 
         // If no existing position, initialize it
         if (position.netQuantity == 0) {
             position.netQuantity = _quantity;
-            position.aggregatedEntryPrice = _tradePrice;
-            usersWithPositions.add(_user);
+            position.netEntryValue = tradeValue;
             userFundingSnapshot[_user] = cumulativeFundingPerUnit;
             return;
         }
 
-        // Same direction - add to position with weighted average entry price
+        // Same direction - add exact signed entry values.
         if (M.isSameSign(position.netQuantity, _quantity)) {
-            uint256 oldValue = M.abs(position.netQuantity) * position.aggregatedEntryPrice;
-            uint256 newValue = M.abs(_quantity) * _tradePrice;
-            int256 newNet = position.netQuantity + _quantity;
-            position.aggregatedEntryPrice = (oldValue + newValue) / M.abs(newNet);
-            position.netQuantity = newNet;
+            position.netQuantity += _quantity;
+            position.netEntryValue = entryValue + tradeValue;
             return;
         }
 
         // Opposite direction: settle the reduced part, then open remainder (if any)
-        _settleOpposite(_user, _quantity, _tradePrice);
+        _settleOpposite(_user, _quantity, _tradePrice, entryValue);
     }
 
     /// @notice Handle opposite-direction trade (partial/full close or flip)
-    function _settleOpposite(address _user, int256 _quantity, uint256 _tradePrice) internal {
+    function _settleOpposite(address _user, int256 _quantity, uint256 _tradePrice, int256 _entryValue) internal {
         Position storage position = positions[_user];
         uint256 absQuantity = M.abs(_quantity);
         uint256 oldAbsQuantity = M.abs(position.netQuantity);
         uint256 settledAbs = absQuantity < oldAbsQuantity ? absQuantity : oldAbsQuantity;
-        _settleReducedPosition(
-            _user,
-            int256(_tradePrice) - int256(position.aggregatedEntryPrice),
-            _toSignedQuantity(settledAbs, position.netQuantity)
-        );
+        int256 signedSettled = _toSignedQuantity(settledAbs, position.netQuantity);
+        int256 remainingEntryValue;
+        if (settledAbs < oldAbsQuantity) {
+            remainingEntryValue =
+                (_entryValue * int256(oldAbsQuantity - settledAbs)) / int256(oldAbsQuantity);
+        }
+        _settleReducedPosition(_user, _tradePrice, signedSettled, _entryValue - remainingEntryValue);
 
         if (absQuantity > oldAbsQuantity) {
             // Flip: close old position and open opposite
             int256 openQty = _toSignedQuantity(absQuantity - oldAbsQuantity, _quantity);
             position.netQuantity = openQty;
-            position.aggregatedEntryPrice = _tradePrice;
+            position.netEntryValue = _signedValue(_tradePrice, openQty);
             userFundingSnapshot[_user] = cumulativeFundingPerUnit;
         } else if (position.netQuantity + _quantity == 0) {
             position.netQuantity = 0;
-            usersWithPositions.remove(_user);
+            position.netEntryValue = 0;
         } else {
             position.netQuantity += _quantity;
+            position.netEntryValue = remainingEntryValue;
         }
     }
 
     // ── Internal helpers: margin / liquidation ────────────────────────────────
 
     /// @dev Closes `_closeAbs` (< |netQuantity|) of a verified-underwater user's position at the
-    ///      mark, realizes PnL on the closed slice via {_settleReducedPosition}, and reduces
-    ///      `netQuantity` toward zero (entry price unchanged). Does NOT pay the fee and does NOT
+    ///      mark, realizes PnL on the closed slice via {_settleReducedPosition}, and scales
+    ///      the exact entry value with `netQuantity`. Does NOT pay the fee and does NOT
     ///      emit — the caller applies the incentive gate and emits `PositionLiquidated`.
     ///      Returns the realized `pnl` on the closed slice and the SIGNED closed quantity (same
     ///      sign as the position). Callers MUST have already checked the underwater / orders-clear
     ///      / partial invariants.
-    function _doPartialLiquidatePosition(address _user, Position memory _position, uint256 _closeAbs)
+    function _doPartialLiquidatePosition(
+        address _user,
+        Position memory _position,
+        uint256 _closeAbs,
+        uint256 _currentPrice
+    )
         internal
         returns (int256 pnl, int256 signedClose)
     {
-        uint256 currentPrice = _marketPrice();
-        int256 priceDiff = int256(currentPrice) - int256(_position.aggregatedEntryPrice);
-
         bool isLong = _position.netQuantity > 0;
         signedClose = M.toSigned(isLong, _closeAbs);
+        int256 entryValue = _position.netEntryValue;
+        uint256 absNet = M.abs(_position.netQuantity);
+        int256 remainingEntryValue = (entryValue * int256(absNet - _closeAbs)) / int256(absNet);
 
-        pnl = _settleReducedPosition(_user, priceDiff, signedClose);
+        pnl = _settleReducedPosition(_user, _currentPrice, signedClose, entryValue - remainingEntryValue);
 
-        // Reduce magnitude toward zero; aggregatedEntryPrice is unchanged by a reducing close.
         // signedClose has the position's sign, so subtracting it moves netQuantity toward zero.
-        positions[_user].netQuantity = _position.netQuantity - signedClose;
+        Position storage position = positions[_user];
+        position.netQuantity = _position.netQuantity - signedClose;
+        position.netEntryValue = remainingEntryValue;
     }
 
     /// @dev Closes the user's position and settles PnL against the insurance fund. Caller must
     ///      have verified all predicates. Charges a liquidation fee on the closed notional
     ///      (computed as `currentPrice * |closedQuantity| / 10^QUANTITY_DECIMALS`).
-    function _doLiquidatePosition(address _user) internal {
+    ///      Does NOT emit — caller runs the over-liquidation guard, then emits/notifies.
+    function _doLiquidatePosition(address _user, uint256 _currentPrice)
+        internal
+        returns (int256 pnl, int256 closedQuantity, uint256 liqFee)
+    {
         Position memory position = positions[_user];
-        uint256 currentPrice = _marketPrice();
+        int256 entryValue = position.netEntryValue;
+        closedQuantity = position.netQuantity;
+        pnl = _signedValue(_currentPrice, closedQuantity) - entryValue;
 
-        int256 pnl = _calculatePositionPnl(position, currentPrice);
+        _transferPnl(_insuranceFundAccount(), _user, pnl);
 
-        // Settle PnL
-        if (pnl < 0) {
-            uint256 loss = uint256(-pnl);
-            uint256 userBalance = vault.balanceOf(_user);
-            uint256 transferAmount = loss < userBalance ? loss : userBalance;
-            if (transferAmount > 0) {
-                _move(_user, _insuranceFundAccount(), transferAmount);
-            }
-            if (transferAmount < loss) {
-                emit BadDebt(_user, loss - transferAmount);
-            }
-        } else if (pnl > 0) {
-            uint256 profit = uint256(pnl);
-            if (vault.balanceOf(_insuranceFundAccount()) >= profit) {
-                _move(_insuranceFundAccount(), _user, profit);
-            }
-        }
-
-        int256 closedQuantity = position.netQuantity;
-        uint256 closedNotional = _calculateValue(currentPrice, M.abs(closedQuantity));
-        uint256 liqFee = _chargeLiquidationFee(_user, closedNotional);
+        uint256 closedNotional = _calculateValue(_currentPrice, M.abs(closedQuantity));
+        liqFee = _chargeLiquidationFee(_user, closedNotional);
 
         delete positions[_user];
-        usersWithPositions.remove(_user);
-
-        emit PositionLiquidated(_user, _msgSender(), closedQuantity, pnl, liqFee);
-        _notifyLiquidation(_msgSender(), liqFee);
     }
 
     /// @notice Settle a reduced portion of a position (when offsetting)
     /// @param _user User address
-    /// @param _priceDiff Price difference (tradePrice - entryPrice)
+    /// @param _price Execution/mark price in collateral units
     /// @param _quantity Quantity being closed (positive = long, negative = short)
+    /// @param _entryValue Signed entry value allocated to the closed quantity
     /// @return pnl The PnL realized from reducing this position
-    function _settleReducedPosition(address _user, int256 _priceDiff, int256 _quantity) internal returns (int256 pnl) {
-        // Calculate PnL: priceDiff * quantity / QUANTITY_DECIMALS
-        // Long (positive qty): profit when price goes up (positive priceDiff)
-        // Short (negative qty): profit when price goes down (negative priceDiff)
-        pnl = (_priceDiff * _quantity) / int256(10 ** QUANTITY_DECIMALS);
+    function _settleReducedPosition(address _user, uint256 _price, int256 _quantity, int256 _entryValue)
+        internal
+        returns (int256 pnl)
+    {
+        pnl = _signedValue(_price, _quantity) - _entryValue;
+        _transferPnl(_insuranceFundAccount(), _user, pnl);
+    }
 
-        // Transfer PnL to/from user
-        if (pnl > 0) {
-            uint256 profit = uint256(pnl);
-            if (vault.balanceOf(_insuranceFundAccount()) < profit) {
-                revert InsufficientReservePool();
-            }
-            _move(_insuranceFundAccount(), _user, profit);
-        } else if (pnl < 0) {
-            uint256 loss = uint256(-pnl);
-            uint256 available = vault.balanceOf(_user);
-            if (available >= loss) {
-                _move(_user, _insuranceFundAccount(), loss);
-            } else {
-                if (available > 0) {
-                    _move(_user, _insuranceFundAccount(), available);
-                }
-                emit BadDebt(_user, loss - available);
-            }
+    /// @dev Settle signed PnL from `_from` to `_to` without blocking position reduction.
+    ///      The payer contributes everything available and every shortfall is surfaced
+    ///      immediately as bad debt; no deferred claim is created. Callers pass
+    ///      `(insuranceFund, user, pnl)` so positive PnL credits the user.
+    function _transferPnl(address _from, address _to, int256 _pnl) internal {
+        if (_pnl == 0) return;
+        address payer;
+        address receiver;
+        uint256 amount;
+        if (_pnl > 0) {
+            payer = _from;
+            receiver = _to;
+            amount = uint256(_pnl);
+        } else {
+            payer = _to;
+            receiver = _from;
+            amount = uint256(-_pnl);
         }
+
+        uint256 available = vault.balanceOf(payer);
+        if (available >= amount) {
+            _internalTransfer(payer, receiver, amount);
+            return;
+        }
+
+        if (available > 0) {
+            _internalTransfer(payer, receiver, available);
+        }
+        emit BadDebt(payer, amount - available);
     }
 
     /// @notice Charge a liquidation fee on the closed notional value, split between
-    ///         liquidator (msg.sender) and insurance fund according to `liquidatorShareBps`.
+    ///         liquidator (msg.sender) and venue revenue according to `liquidatorShareBps`.
     /// @dev Fee is `_notionalValue * liquidationFeeBps / 10000`, capped at the user's
     ///      actual vault balance. The liquidator receives `fee * liquidatorShareBps / 10000`
-    ///      (also capped at available balance), and the remainder goes to the insurance fund.
+    ///      (also capped at available balance), and the remainder becomes venue revenue.
     /// @param _user The liquidated user (fee source)
     /// @param _notionalValue Notional value of the liquidated position/order
     /// @return totalFee Total fee actually collected (may be less than computed if balance insufficient)
@@ -822,18 +936,18 @@ abstract contract HashPowerPerpsDEXBase is
         if (computedFee == 0) return 0;
 
         uint256 userBal = vault.balanceOf(_user);
-        totalFee = computedFee < userBal ? computedFee : userBal;
+        totalFee = M.min(computedFee, userBal);
         if (totalFee == 0) return 0;
 
         address liquidator = _msgSender();
-        address insurance = _insuranceFundAccount();
-
         uint16 liqShareBps = liquidatorShareBps;
         uint256 liquidatorShare = totalFee * uint256(liqShareBps) / BPS;
-        uint256 insuranceShare = totalFee - liquidatorShare;
+        uint256 exchangeShare = totalFee - liquidatorShare;
 
-        _move(_user, liquidator, liquidatorShare);
-        _move(_user, insurance, insuranceShare);
+        if (liquidatorShare != 0) _internalTransfer(_user, liquidator, liquidatorShare);
+        if (exchangeShare != 0) {
+            _internalTransfer(_user, address(this), exchangeShare);
+        }
     }
 
     /// @notice Calculate PnL for a position at a given price
@@ -842,16 +956,15 @@ abstract contract HashPowerPerpsDEXBase is
     /// @return pnl The unrealized PnL (positive = profit, negative = loss)
     function _calculatePositionPnl(Position memory _position, uint256 _currentPrice) internal pure returns (int256) {
         if (_position.netQuantity == 0) return 0;
-        int256 priceDiff = int256(_currentPrice) - int256(_position.aggregatedEntryPrice);
-        // PnL = priceDiff * quantity / QUANTITY_DECIMALS (sign of quantity handles long/short)
-        return (priceDiff * _position.netQuantity) / int256(10 ** QUANTITY_DECIMALS);
+        return _signedValue(_currentPrice, _position.netQuantity) - _position.netEntryValue;
     }
 
-    /// @notice Ensure user meets initial margin requirement.
-    ///         Delegates to the cross-product PortfolioMarginEngine.
-    function _ensureInitialMargin(address _user) internal view {
-        if (vault.balanceOf(_user) < portfolioMargin.computePortfolioIM(_user)) {
-            revert InsufficientMargin();
+    /// @notice Ensure the account is not short of portfolio IM (or, when `_maxAllowedIm` is
+    ///         set, that IM did not increase past that ceiling). Delegates to the PME.
+    function _ensureNoCollateralDeficit(address _user, uint256 _maxAllowedIm) internal view {
+        uint256 required = portfolioMargin.computePortfolioIM(_user);
+        if (vault.balanceOf(_user) < required && required > _maxAllowedIm) {
+            revert InsufficientMarginBalance();
         }
     }
 
@@ -861,8 +974,20 @@ abstract contract HashPowerPerpsDEXBase is
         if (uint8(_tif) > uint8(TimeInForce.FOK)) revert InvalidTimeInForce();
     }
 
+    function _validateOrderIntent(uint256 _price, int256 _quantity, TimeInForce _tif) internal pure {
+        _validateTIF(_tif);
+        _validatePrice(_price);
+        _validateQty(_quantity);
+    }
+
+    function _isLocallyReducing(address _participant, int256 _quantity) internal view returns (bool) {
+        int256 position = positions[_participant].netQuantity;
+        if (position == 0 || (position > 0 ? _quantity >= 0 : _quantity <= 0)) return false;
+        return M.abs(_quantity) + _restingReduceAbs(_participant, position) <= M.abs(position);
+    }
+
     function _validateQty(int256 _quantity) internal pure {
-        if (_quantity == 0) revert InvalidSize();
+        if (_quantity == 0) revert InvalidQty();
     }
 
     function _validatePrice(uint256 _price) internal pure {
@@ -879,10 +1004,10 @@ abstract contract HashPowerPerpsDEXBase is
         }
     }
 
-    /// @notice Add a price level to the sorted price list if not already present
+    /// @notice Add a new price level to the sorted price list.
     function _addPriceLevel(uint256 _price, bool _isBid) internal {
         StructuredLinkedList.List storage priceList = _isBid ? activeBidPrices : activeAskPrices;
-        PriceLadderLib.insertPrice(priceList, _price, _isBid, MAX_PRICE_LEVELS_PER_SIDE);
+        PriceLadderLib.insertNewPrice(priceList, _price, _isBid, MAX_PRICE_LEVELS_PER_SIDE);
     }
 
     /// @notice Remove a price level from the sorted price list if order queue is empty
@@ -893,51 +1018,61 @@ abstract contract HashPowerPerpsDEXBase is
         PriceLadderLib.removeIfEmpty(orderQueue, priceList, _price);
     }
 
-    /// @dev Body of {getBestBidPrice}: best (highest) bid, or 0 if empty.
+    /// @dev Best (highest) bid, or 0 if empty.
     function _bestBidPrice() internal view returns (uint256) {
         if (activeBidPrices.sizeOf() == 0) return 0;
         (, uint256 bestBid) = activeBidPrices.getNextNode(0);
         return bestBid;
     }
 
-    /// @dev Body of {getBestAskPrice}: best (lowest) ask, or 0 if empty.
+    /// @dev Best (lowest) ask, or 0 if empty.
     function _bestAskPrice() internal view returns (uint256) {
         if (activeAskPrices.sizeOf() == 0) return 0;
         (, uint256 bestAsk) = activeAskPrices.getNextNode(0);
         return bestAsk;
     }
 
-    /// @notice Transfer a pre-calculated fee between participant and reserve pool
-    /// @param _participant Address of the participant
-    /// @param _fee Signed fee amount (positive = participant pays, negative = rebate)
-    /// @dev Both directions clamp, matching {_settleFunding} and {_chargeLiquidationFee}.
-    ///      The hazard is an ordering one inside the fill, not keeper latency:
-    ///      {_executeMatch} calls {_createPosition}, which settles the maker's funding —
-    ///      clamping to balance and emitting `BadDebt` — and only then charges the maker
-    ///      fee against whatever settlement left behind. An unclamped debit would let a
-    ///      maker whose balance the same transaction just drained revert a stranger's
-    ///      taker order. Coverage of the fee itself rests on the MM floor (`mmSpotShock`
-    ///      on the full resting notional against a fee bounded by `MAX_FEE_BPS`), so this
-    ///      clamp only bites for an account already below MM, where it costs the
-    ///      insurance fund a few bps rather than blocking the book.
+    /// @notice Fee pot size: the venue's vault balance (match + liquidation exchange share).
+    function collectedFeesBalance() public view returns (uint256) {
+        return vault.balanceOf(address(this));
+    }
+
+    /// @dev Move a signed trading fee between a participant and the fee pot
+    ///      (this contract's vault account — see {collectedFeesBalance}).
+    ///
+    ///      Both directions clamp, matching {_transferPnl} and {_chargeLiquidationFee}. The
+    ///      hazard is an ordering one inside the fill, not keeper latency: {_executeMatch}
+    ///      calls {_createPosition}, which settles the maker's funding — clamping to balance
+    ///      and emitting `BadDebt` — and only then charges the maker fee against whatever
+    ///      settlement left behind. An unclamped debit would let a maker whose balance the
+    ///      same transaction just drained revert a stranger's taker order. Coverage of the
+    ///      fee itself rests on the MM floor (`mmSpotShock` on the full resting notional
+    ///      against a fee bounded by `MAX_FEE_BPS`), so the clamp only bites for an account
+    ///      already below MM, where it costs the fee pot a few bps rather than blocking the
+    ///      book.
+    ///
+    ///      A rebate is capped at the pot, so rebates can only ever pay out fees already
+    ///      collected — `makerFeeBps + takerFeeBps >= 0` keeps a single match from being a
+    ///      net outflow, and this keeps a run of them from overdrawing the pot.
     function _transferFee(address _participant, int256 _fee) internal {
-        if (_fee >= 0) {
+        if (_fee == 0) return;
+
+        if (_fee > 0) {
             uint256 owed = uint256(_fee);
             uint256 available = vault.balanceOf(_participant);
-            uint256 paid = owed < available ? owed : available;
+            uint256 paid = M.min(owed, available);
             if (paid > 0) {
-                _move(_participant, _insuranceFundAccount(), paid);
+                _internalTransfer(_participant, address(this), paid);
             }
             if (paid < owed) {
                 emit BadDebt(_participant, owed - paid);
             }
-        } else {
-            uint256 rebate = uint256(-_fee);
-            uint256 reserveBalance = vault.balanceOf(_insuranceFundAccount());
-            uint256 payout = rebate < reserveBalance ? rebate : reserveBalance;
-            if (payout > 0) {
-                _move(_insuranceFundAccount(), _participant, payout);
-            }
+            return;
+        }
+
+        uint256 rebate = M.min(uint256(-_fee), vault.balanceOf(address(this)));
+        if (rebate > 0) {
+            _internalTransfer(address(this), _participant, rebate);
         }
     }
 
@@ -946,8 +1081,9 @@ abstract contract HashPowerPerpsDEXBase is
     /// @notice Compute the current cumulative funding per unit without writing state
     /// @dev Uses the order-book mid-price as mark price and the oracle as index price.
     ///      If either side of the book is empty, no additional funding accrues.
+    /// @dev Reuses `_indexPrice` when already loaded by a caller; zero loads it lazily.
     /// @return currentCumFunding The theoretical cumulative funding as of block.timestamp
-    function _getCurrentCumulativeFunding() internal view returns (int256 currentCumFunding) {
+    function _getCurrentCumulativeFunding(uint256 _indexPrice) internal view returns (int256 currentCumFunding) {
         currentCumFunding = cumulativeFundingPerUnit;
 
         if (lastFundingUpdateTime == 0 || fundingPeriod == 0) return currentCumFunding;
@@ -961,7 +1097,10 @@ abstract contract HashPowerPerpsDEXBase is
         if (bestBid == 0 || bestAsk == 0) return currentCumFunding;
 
         uint256 markPrice = (bestBid + bestAsk) / 2;
-        uint256 indexPrice = _marketPrice();
+        // Soft-load index when the caller did not supply one. A stale/unusable oracle must
+        // not revert funding views or cancel/reduce paths — skip accrual instead.
+        uint256 indexPrice = _indexPrice == 0 ? _softMarketPrice() : _indexPrice;
+        if (indexPrice == 0) return currentCumFunding;
 
         // fundingRate (scaled by 10^FUNDING_DECIMALS) = (mark - index) * 10^FUNDING_DECIMALS / index
         int256 priceDiff = int256(markPrice) - int256(indexPrice);
@@ -980,11 +1119,24 @@ abstract contract HashPowerPerpsDEXBase is
     }
 
     /// @notice Update the global cumulative funding rate (writes state)
-    /// @dev Called before any position-affecting operation.
+    /// @dev Called before position-affecting ops and cancel/reduce paths. When the book is
+    ///      two-sided but the oracle round is unusable, skip entirely (do not advance
+    ///      `lastFundingUpdateTime`) so a later live update can catch up the elapsed window.
     function _updateGlobalFunding() internal {
         if (lastFundingUpdateTime == 0 || fundingPeriod == 0) return;
 
-        int256 newCumFunding = _getCurrentCumulativeFunding();
+        // Accrual needs a mid and an index. Empty book → no accrual but still bump the
+        // timestamp (existing policy). Unusable oracle → abort without bumping so cancels
+        // stay ungated and funding is not permanently dropped for the stale window.
+        uint256 bestBid = _bestBidPrice();
+        uint256 bestAsk = _bestAskPrice();
+        uint256 indexPrice;
+        if (bestBid != 0 && bestAsk != 0) {
+            indexPrice = _softMarketPrice();
+            if (indexPrice == 0) return;
+        }
+
+        int256 newCumFunding = _getCurrentCumulativeFunding(indexPrice);
 
         if (newCumFunding != cumulativeFundingPerUnit) {
             // Derive the effective rate for the event
@@ -1027,10 +1179,10 @@ abstract contract HashPowerPerpsDEXBase is
             uint256 owed = uint256(pendingFunding);
             uint256 userBalance = vault.balanceOf(_user);
             if (userBalance >= owed) {
-                _move(_user, _insuranceFundAccount(), owed);
+                _internalTransfer(_user, _insuranceFundAccount(), owed);
             } else {
                 if (userBalance > 0) {
-                    _move(_user, _insuranceFundAccount(), userBalance);
+                    _internalTransfer(_user, _insuranceFundAccount(), userBalance);
                 }
                 emit BadDebt(_user, owed - userBalance);
             }
@@ -1039,7 +1191,7 @@ abstract contract HashPowerPerpsDEXBase is
             uint256 reserveBalance = vault.balanceOf(_insuranceFundAccount());
             uint256 payout = owed < reserveBalance ? owed : reserveBalance;
             if (payout > 0) {
-                _move(_insuranceFundAccount(), _user, payout);
+                _internalTransfer(_insuranceFundAccount(), _user, payout);
             }
         }
 
@@ -1048,11 +1200,12 @@ abstract contract HashPowerPerpsDEXBase is
 
     /// @dev Body of {getPendingFunding}: pending (unsettled) funding for a user.
     ///      Positive = user owes, negative = user receives (in collateral token units).
-    function _pendingFunding(address _user) internal view returns (int256) {
+    /// @dev Reuses `_indexPrice` when already loaded by a caller; zero loads it lazily.
+    function _pendingFunding(address _user, uint256 _indexPrice) internal view returns (int256) {
         Position memory position = positions[_user];
         if (position.netQuantity == 0) return 0;
 
-        int256 currentCumFunding = _getCurrentCumulativeFunding();
+        int256 currentCumFunding = _getCurrentCumulativeFunding(_indexPrice);
         int256 delta = currentCumFunding - userFundingSnapshot[_user];
         if (delta == 0) return 0;
 
@@ -1061,20 +1214,29 @@ abstract contract HashPowerPerpsDEXBase is
 
     // ── Internal helpers: admin ───────────────────────────────────────────────
 
-    /// @notice Clear all orders at a single price level and remove them from participant indexes
-    function _clearPriceLevelOrders(uint256 _price, bool _isBid) internal {
-        StructuredLinkedList.List storage queue = _priceOrderIds(_price, _isBid);
-        (, uint256 orderIdUint) = queue.getNextNode(0);
-        while (orderIdUint != 0) {
-            (, uint256 nextOrderIdUint) = queue.getNextNode(orderIdUint);
-            bytes32 orderId = bytes32(orderIdUint);
+    /// @dev Clear one explicitly supplied participant without touching global funding or
+    ///      the monotonic order nonce. Duplicate participants are safe because every cleanup
+    ///      operation is idempotent once the participant has no remaining state.
+    function _resetStateForParticipant(address _participant) internal {
+        // Historical orders can predate the aggregate cache. Rebuild before subtracting
+        // each order so an atomic upgrade reset cannot underflow on legacy state.
+        _rebuildOrderAggregateCache(_participant);
+        bytes32[] memory orderIds = participantOrderIdsIndex[_participant].values();
+        uint256 len = orderIds.length;
+        for (uint256 i = 0; i < len; i++) {
+            bytes32 orderId = orderIds[i];
             Order storage order = orders[orderId];
-            address participant = order.participant;
-            _subtractOrderAggregate(participant, _isBid, _price, M.abs(order.quantity), 0);
-            participantOrderIdsIndex[participant].remove(orderId);
-            delete orders[orderId];
-            queue.remove(orderIdUint);
-            orderIdUint = nextOrderIdUint;
+            uint256 price = order.price;
+            int256 quantity = order.quantity;
+            bool isBid = quantity > 0;
+            StructuredLinkedList.List storage queue = _priceOrderIds(price, isBid);
+            _removeRestingOrder(orderId, _participant, price, quantity);
+            _removePriceLevelIfEmpty(queue, price, isBid);
         }
+
+        delete userOrderAggregate[_participant];
+        delete positions[_participant];
+        delete userFundingSnapshot[_participant];
     }
+
 }
