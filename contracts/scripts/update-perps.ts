@@ -18,7 +18,12 @@ import { verifyContract } from "../lib/verify.ts";
 import { txUrl, addrUrl } from "../lib/explorer.ts";
 import { logTitle, logInfo, logStep, logSuccess, logPrompt } from "../lib/log.ts";
 
-const REQUIRED_CURRENT_INIT_VERSION = 3n;
+// `resetState` is not an initializer, so the proxy stays on whatever version it
+// is already on. Proxies deployed before `deploy-perps.ts` consumed version 3 at
+// deployment sit on 2; the dead `__gap3` slot that `initializeV3` would clear is
+// read by no live path, so either version is a valid starting point.
+const MIN_CURRENT_INIT_VERSION = 2n;
+const MAX_CURRENT_INIT_VERSION = 3n;
 const TARGET_CODE_VERSION = "6.5.0";
 const UPGRADE_CONFIRMATIONS = 5;
 const DEFAULT_EVENT_CHUNK_SIZE = 50_000n;
@@ -236,7 +241,7 @@ async function main() {
   const vaultAddress = getAddress(env.VAULT_ADDRESS);
   const deploymentBlock = readNonNegativeBigInt("PERPS_DEPLOYMENT_BLOCK");
 
-  const { viem } = await network.connect();
+  const { viem } = await network.getOrCreate();
   const [deployer] = await viem.getWalletClients();
   const pc = await viem.getPublicClient();
   const snapshotBlock = await pc.getBlockNumber();
@@ -252,9 +257,12 @@ async function main() {
   if (getAddress(currentOwner) !== getAddress(deployer.account.address)) {
     throw new Error(`Deployer ${deployer.account.address} is not proxy owner ${currentOwner}`);
   }
-  if (currentInitVersion !== REQUIRED_CURRENT_INIT_VERSION) {
+  if (
+    currentInitVersion < MIN_CURRENT_INIT_VERSION ||
+    currentInitVersion > MAX_CURRENT_INIT_VERSION
+  ) {
     throw new Error(
-      `Atomic reset upgrade requires init version ${REQUIRED_CURRENT_INIT_VERSION}; found ${currentInitVersion}`,
+      `Atomic reset upgrade requires init version ${MIN_CURRENT_INIT_VERSION}-${MAX_CURRENT_INIT_VERSION}; found ${currentInitVersion}`,
     );
   }
 
