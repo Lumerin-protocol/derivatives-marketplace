@@ -142,6 +142,7 @@ describe("handleOrderMatched", () => {
     assert.fieldEquals("Trade", takerTradeId, "tradeQuantity", qty.toString());
     assert.fieldEquals("Trade", takerTradeId, "tradingFee", "0");
     assert.fieldEquals("Trade", takerTradeId, "realizedPnl", "0");
+    assert.fieldEquals("Trade", takerTradeId, "cumulativeRealizedPnl", "0");
     assert.fieldEquals("Trade", takerTradeId, "netQuantityAfter", qty.toString());
     assert.fieldEquals("Trade", takerTradeId, "aggregatedEntryPriceAfter", price.toString());
     assert.fieldEquals("Trade", takerTradeId, "fillCount", "1");
@@ -165,6 +166,7 @@ describe("handleOrderMatched", () => {
     assert.fieldEquals("Trade", makerTradeId, "tradeQuantity", qty.neg().toString());
     assert.fieldEquals("Trade", makerTradeId, "tradingFee", "0");
     assert.fieldEquals("Trade", makerTradeId, "realizedPnl", "0");
+    assert.fieldEquals("Trade", makerTradeId, "cumulativeRealizedPnl", "0");
     assert.fieldEquals("Trade", makerTradeId, "netQuantityAfter", qty.neg().toString());
     assert.fieldEquals("Trade", makerTradeId, "aggregatedEntryPriceAfter", price.toString());
 
@@ -477,6 +479,7 @@ describe("handleOrderMatched", () => {
     ).toHexString();
     assert.fieldEquals("Trade", closeTradeId, "positionSession", sessionId);
     assert.fieldEquals("Trade", closeTradeId, "realizedPnl", "100000");
+    assert.fieldEquals("Trade", closeTradeId, "cumulativeRealizedPnl", "100000");
     assert.fieldEquals("Trade", closeTradeId, "tradeQuantity", qty.neg().toString());
   });
 
@@ -542,6 +545,7 @@ describe("handleOrderMatched", () => {
       sessionId,
     ).toHexString();
     assert.fieldEquals("Trade", closeTradeId, "realizedPnl", "100000");
+    assert.fieldEquals("Trade", closeTradeId, "cumulativeRealizedPnl", "100000");
 
     assert.fieldEquals("PositionSession", sessionId, "realizedPnl", "100000");
     assert.fieldEquals("PositionSession", sessionId, "status", "CLOSE");
@@ -606,6 +610,7 @@ describe("handleOrderMatched", () => {
       sessionId,
     ).toHexString();
     assert.fieldEquals("Trade", closeTradeId, "realizedPnl", "-100000");
+    assert.fieldEquals("Trade", closeTradeId, "cumulativeRealizedPnl", "-100000");
 
     assert.fieldEquals("PositionSession", sessionId, "realizedPnl", "-100000");
   });
@@ -757,9 +762,11 @@ describe("handleOrderMatched", () => {
     assert.fieldEquals("Trade", closeTradeId, "realizedPnl", "100000");
     assert.fieldEquals("Trade", closeTradeId, "fillCount", "1");
     assert.fieldEquals("Trade", closeTradeId, "positionSession", oldSessionId);
+    assert.fieldEquals("Trade", closeTradeId, "cumulativeRealizedPnl", "100000");
     assert.fieldEquals("Trade", openTradeId, "realizedPnl", "0");
     assert.fieldEquals("Trade", openTradeId, "fillCount", "1");
     assert.fieldEquals("Trade", openTradeId, "positionSession", newSessionId);
+    assert.fieldEquals("Trade", openTradeId, "cumulativeRealizedPnl", "100000");
   });
 
   test("accumulates realized PnL across multiple round-trips", () => {
@@ -920,6 +927,7 @@ describe("handleOrderMatched", () => {
     const closeTradeId = tradeId(closeTxHash, trader, sessionId).toHexString();
     assert.fieldEquals("Trade", closeTradeId, "realizedPnl", "300000");
     assert.fieldEquals("Trade", closeTradeId, "fillCount", "2");
+    assert.fieldEquals("Trade", closeTradeId, "cumulativeRealizedPnl", "300000");
     assert.fieldEquals("User", trader.toHexString(), "realizedPnl", "300000");
   });
 
@@ -972,5 +980,81 @@ describe("handleOrderMatched", () => {
 
     assert.fieldEquals("PositionSession", takerSessionId, "tradingFees", takerFee.toString());
     assert.fieldEquals("PositionSession", makerSessionId, "tradingFees", makerFee.toString());
+  });
+});
+
+describe("Trade.cumulativeRealizedPnl sequential sessions", () => {
+  beforeEach(() => {
+    clearStore();
+    setupDataSourceMock();
+    setupPerps();
+  });
+
+  test("second close snapshots lifetime total including the first session", () => {
+    const maker1 = userAddress(1);
+    const maker2 = userAddress(2);
+    const maker3 = userAddress(3);
+    const maker4 = userAddress(4);
+    const trader = userAddress(5);
+    const entryPrice = BigInt.fromI32(3000000);
+    const exitPrice = BigInt.fromI32(3100000);
+    const qty = BigInt.fromI32(1000000);
+
+    const open1 = createOrderMatchedEvent(
+      orderId(1), maker1, trader, entryPrice, qty,
+      BigInt.zero(), BigInt.zero(),
+      qty.neg(), qty, entryPrice, entryPrice,
+    );
+    open1.logIndex = BigInt.fromI32(1);
+    open1.transaction.hash = orderId(100);
+    handleOrderMatched(open1);
+    const session1 = positionSessionId(open1.block.number, open1.logIndex, 0);
+
+    const close1 = createOrderMatchedEvent(
+      orderId(2), maker2, trader, exitPrice, qty.neg(),
+      BigInt.zero(), BigInt.zero(),
+      qty, BigInt.zero(), exitPrice, BigInt.zero(),
+    );
+    close1.logIndex = BigInt.fromI32(2);
+    close1.transaction.hash = orderId(101);
+    handleOrderMatched(close1);
+    assert.fieldEquals(
+      "Trade",
+      tradeId(close1.transaction.hash, trader, session1).toHexString(),
+      "cumulativeRealizedPnl",
+      "100000",
+    );
+
+    const open2 = createOrderMatchedEvent(
+      orderId(3), maker3, trader, entryPrice, qty,
+      BigInt.zero(), BigInt.zero(),
+      qty.neg(), qty, entryPrice, entryPrice,
+    );
+    open2.logIndex = BigInt.fromI32(3);
+    open2.transaction.hash = orderId(102);
+    handleOrderMatched(open2);
+    const session2 = positionSessionId(open2.block.number, open2.logIndex, 0);
+    assert.fieldEquals(
+      "Trade",
+      tradeId(open2.transaction.hash, trader, session2).toHexString(),
+      "cumulativeRealizedPnl",
+      "100000",
+    );
+
+    const close2 = createOrderMatchedEvent(
+      orderId(4), maker4, trader, exitPrice, qty.neg(),
+      BigInt.zero(), BigInt.zero(),
+      qty, BigInt.zero(), exitPrice, BigInt.zero(),
+    );
+    close2.logIndex = BigInt.fromI32(4);
+    close2.transaction.hash = orderId(103);
+    handleOrderMatched(close2);
+    assert.fieldEquals(
+      "Trade",
+      tradeId(close2.transaction.hash, trader, session2).toHexString(),
+      "cumulativeRealizedPnl",
+      "200000",
+    );
+    assert.fieldEquals("User", trader.toHexString(), "realizedPnl", "200000");
   });
 });

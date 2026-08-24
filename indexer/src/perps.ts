@@ -593,6 +593,7 @@ function getOrCreateTrade(
     trade.tradeQuantity = BigInt.zero();
     trade.tradingFee = BigInt.zero();
     trade.realizedPnl = BigInt.zero();
+    trade.cumulativeRealizedPnl = user.realizedPnl;
     trade.netQuantityAfter = BigInt.zero();
     trade.aggregatedEntryPriceAfter = BigInt.zero();
     trade.fillCount = 0;
@@ -635,6 +636,12 @@ function updateTradeAggregate(
   trade.netQuantityAfter = netQtyAfter;
   trade.aggregatedEntryPriceAfter = entryPriceAfter;
   trade.fillCount++;
+}
+
+/** Persist a Trade with `cumulativeRealizedPnl` equal to the user's lifetime total after this trade. */
+function saveTrade(trade: Trade, user: User): void {
+  trade.cumulativeRealizedPnl = user.realizedPnl;
+  trade.save();
 }
 
 /**
@@ -866,11 +873,14 @@ function handleFlip(
         zero,
         oldEntryPrice,
       );
-      trade.save();
+      user.realizedPnl = user.realizedPnl.plus(realizedPnl);
+      saveTrade(trade, user);
+    } else {
+      user.realizedPnl = user.realizedPnl.plus(realizedPnl);
     }
+  } else {
+    user.realizedPnl = user.realizedPnl.plus(realizedPnl);
   }
-
-  user.realizedPnl = user.realizedPnl.plus(realizedPnl);
 
   // 2. Open new session
   const newSessionId = positionSessionId(blockNumber, logIndex, sideIndex);
@@ -930,7 +940,7 @@ function handleFlip(
     newNetQuantity,
     newEntryPrice,
   );
-  trade.save();
+  saveTrade(trade, user);
 }
 
 /** Non-flip: single session + single trade (open, scale-in, partial close, or full close). */
@@ -1069,7 +1079,7 @@ function handleNonFlip(
     newNetQuantity,
     newEntryPrice,
   );
-  trade.save();
+  saveTrade(trade, user);
 }
 
 export function handlePositionLiquidated(event: PositionLiquidated): void {
@@ -1167,8 +1177,13 @@ export function handlePositionLiquidated(event: PositionLiquidated): void {
       trade.isLiquidation = true;
       trade.liquidator = event.params.liquidator;
       trade.liquidationFee = liquidatorFee;
-      trade.save();
+      user.realizedPnl = user.realizedPnl.plus(pnl);
+      saveTrade(trade, user);
+    } else {
+      user.realizedPnl = user.realizedPnl.plus(pnl);
     }
+  } else {
+    user.realizedPnl = user.realizedPnl.plus(pnl);
   }
 
   // Update user position state. Full close → reset; partial close → reduce
@@ -1183,7 +1198,6 @@ export function handlePositionLiquidated(event: PositionLiquidated): void {
     // aggregatedEntryPrice unchanged (reducing close doesn't re-average);
     // currentSessionId stays pointed at the open session.
   }
-  user.realizedPnl = user.realizedPnl.plus(pnl);
   user.lastActivityAt = event.block.timestamp;
   user.save();
 

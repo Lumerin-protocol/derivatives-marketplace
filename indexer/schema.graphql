@@ -164,6 +164,8 @@ type Trade @entity(immutable: false) {
   tradeQuantity: BigInt! # signed sum of all fill quantities
   tradingFee: BigInt! # sum of all trading fees
   realizedPnl: BigInt! # sum of all fill PnLs
+  "User.realizedPnl after this trade was applied, including this trade. Opens snapshot the prior total (usually 0). 30-day realized PnL is current User.realizedPnl minus the latest Trade.cumulativeRealizedPnl with timestamp before the window."
+  cumulativeRealizedPnl: BigInt!
   netQuantityAfter: BigInt! # position after the last fill
   aggregatedEntryPriceAfter: BigInt! # entry price after the last fill
   fillCount: Int!
