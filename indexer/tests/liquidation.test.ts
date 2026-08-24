@@ -190,12 +190,6 @@ describe("handlePositionLiquidated", () => {
     assert.fieldEquals("PositionSession", sessionId, "closedQuantity", closed.toString());
     assert.fieldEquals("PositionSession", sessionId, "liquidatedQuantity", closed.toString());
 
-    // The forced liquidation Trade reports the residual position afterwards.
-    const tradeId = liqEvent.transaction.hash
-      .concatI32(1) // logIndex bucket used by getOrCreateTrade
-      .toHexString();
-    void tradeId; // Trade id derivation is asserted structurally via the session link.
-
     assert.fieldEquals("Perps", "0", "totalLiquidations", "1");
   });
 
