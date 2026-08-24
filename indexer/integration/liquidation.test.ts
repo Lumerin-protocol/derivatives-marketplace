@@ -108,6 +108,13 @@ describe("liquidatePosition: forced Trade with isLiquidation + session liquidate
       pnl.toString(),
       "Trade.realizedPnl must equal the event pnl",
     );
+    const sellerUser = snap.entity("User", sellerAddr);
+    assert.ok(sellerUser);
+    assert.equal(
+      String(liqTrade.cumulativeRealizedPnl),
+      String(sellerUser.realizedPnl),
+      "liquidation Trade.cumulativeRealizedPnl matches User.realizedPnl",
+    );
     assert.equal(
       String(liqTrade.netQuantityAfter),
       "0",

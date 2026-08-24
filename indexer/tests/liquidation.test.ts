@@ -14,7 +14,7 @@ import {
   setupDataSourceMock,
   setupPerps,
 } from "./helpers";
-import { positionSessionId } from "../src/ids";
+import { positionSessionId, tradeId } from "../src/ids";
 
 function openLongPosition(
   trader: Address,
@@ -107,6 +107,12 @@ describe("handlePositionLiquidated", () => {
     assert.fieldEquals("User", trader.toHexString(), "currentSessionId", "");
     assert.fieldEquals("User", trader.toHexString(), "realizedPnl", pnl.toString());
     assert.fieldEquals(
+      "Trade",
+      tradeId(liqEvent.transaction.hash, trader, sessionId).toHexString(),
+      "cumulativeRealizedPnl",
+      pnl.toString(),
+    );
+    assert.fieldEquals(
       "User",
       trader.toHexString(),
       "lastActivityAt",
@@ -171,6 +177,12 @@ describe("handlePositionLiquidated", () => {
     assert.fieldEquals("User", trader.toHexString(), "aggregatedEntryPrice", entryPrice.toString());
     assert.fieldEquals("User", trader.toHexString(), "currentSessionId", sessionId);
     assert.fieldEquals("User", trader.toHexString(), "realizedPnl", pnl.toString());
+    assert.fieldEquals(
+      "Trade",
+      tradeId(liqEvent.transaction.hash, trader, sessionId).toHexString(),
+      "cumulativeRealizedPnl",
+      pnl.toString(),
+    );
 
     // Session stays OPEN and records the partially-closed / liquidated slice.
     assert.fieldEquals("PositionSession", sessionId, "status", "OPEN");
