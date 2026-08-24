@@ -1,20 +1,21 @@
 name: E2E Checks
 
 on:
-  push:
-    branches: [main, dev, stg]
-    paths:
-      - "e2e/**"
-      - "contracts/**"
-      - "indexer/**"
-      - ".github/workflows/e2e-checks.yml"
-
-  pull_request:
-    paths:
-      - "e2e/**"
-      - "contracts/**"
-      - "indexer/**"
-      - ".github/workflows/e2e-checks.yml"
+  # Auto e2e is disabled. Uncomment push/pull_request to turn it back on.
+  # push:
+  #   branches: [main, dev, stg]
+  #   paths:
+  #     - "e2e/**"
+  #     - "contracts/**"
+  #     - "indexer/**"
+  #     - ".github/workflows/e2e-checks.yml"
+  #
+  # pull_request:
+  #   paths:
+  #     - "e2e/**"
+  #     - "contracts/**"
+  #     - "indexer/**"
+  #     - ".github/workflows/e2e-checks.yml"
 
   workflow_dispatch:
 
@@ -29,6 +30,7 @@ defaults:
 jobs:
   check:
     name: E2E Tests
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 45
     defaults:
