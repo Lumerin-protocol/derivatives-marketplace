@@ -121,18 +121,29 @@ runs:
             VTAG=v${VFULL}
             VERSION="v${VFULL}"
         else
-            # Non-production - use commit count as patch for uniqueness
-            if git rev-parse refs/remotes/origin/main &>/dev/null; then
-              MB=$(git merge-base refs/remotes/origin/main HEAD)
-              VPAT=$(git rev-list --count --no-merges ${MB}..HEAD 2>/dev/null || echo "0")
+            # Non-production — unique per build
+            if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+              # Manual re-deploy (e.g. changed START_BLOCK): the source tree may be
+              # unchanged, so the commit count is not unique. Use the run number and
+              # the target environment (not the branch) to guarantee a fresh version.
+              RUN_NUM=${{ github.run_number }}
+              VFULL=${VMAJ}.${VMIN}.0
+              VTAG=v${VFULL}-${ENV}-run${RUN_NUM}
+              VERSION="v${VFULL}-${ENV}-run${RUN_NUM}"
             else
-              VPAT=$(git rev-list --count --no-merges HEAD 2>/dev/null || echo "0")
+              # push/PR — use commit count as patch for uniqueness
+              if git rev-parse refs/remotes/origin/main &>/dev/null; then
+                MB=$(git merge-base refs/remotes/origin/main HEAD)
+                VPAT=$(git rev-list --count --no-merges ${MB}..HEAD 2>/dev/null || echo "0")
+              else
+                VPAT=$(git rev-list --count --no-merges HEAD 2>/dev/null || echo "0")
+              fi
+              VFULL=${VMAJ}.${VMIN}.${VPAT}
+              RNAME=${GITHUB_REF_NAME##*/}
+              [ "$GITHUB_EVENT_NAME" = "pull_request" ] && RNAME=pr${GITHUB_REF_NAME%/merge}
+              VTAG=v${VFULL}-${RNAME}
+              VERSION="v${VFULL}-${RNAME}"
             fi
-            VFULL=${VMAJ}.${VMIN}.${VPAT}
-            RNAME=${GITHUB_REF_NAME##*/}
-            [ "$GITHUB_EVENT_NAME" = "pull_request" ] && RNAME=pr${GITHUB_REF_NAME%/merge}
-            VTAG=v${VFULL}-${RNAME}
-            VERSION="v${VFULL}-${RNAME}"
         fi
 
         # Output variables
