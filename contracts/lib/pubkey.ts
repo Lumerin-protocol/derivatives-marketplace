@@ -1,7 +1,7 @@
 import { fromHex, fromBytes, type SignMessageReturnType } from "viem";
 import { secp256k1 } from "@noble/curves/secp256k1";
 import { hexToBytes, bytesToHex } from "@noble/curves/abstract/utils";
-import { type Account, keccak256, toBytes, recoverPublicKey, type WalletActions } from "viem";
+import { keccak256, toBytes, recoverPublicKey } from "viem";
 
 type Signer = {
   signMessage?: (arg: { message: string }) => Promise<SignMessageReturnType>;

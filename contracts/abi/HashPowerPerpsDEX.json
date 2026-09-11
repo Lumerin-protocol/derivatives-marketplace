@@ -2,9 +2,9 @@
   {
     "inputs": [
       {
-        "internalType": "uint256",
-        "name": "_minimumPriceIncrement",
-        "type": "uint256"
+        "internalType": "contract ICollateralVault",
+        "name": "_vault",
+        "type": "address"
       }
     ],
     "stateMutability": "nonpayable",
@@ -38,89 +38,8 @@
     "type": "error"
   },
   {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "spender",
-        "type": "address"
-      },
-      {
-        "internalType": "uint256",
-        "name": "allowance",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "needed",
-        "type": "uint256"
-      }
-    ],
-    "name": "ERC20InsufficientAllowance",
-    "type": "error"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "sender",
-        "type": "address"
-      },
-      {
-        "internalType": "uint256",
-        "name": "balance",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "needed",
-        "type": "uint256"
-      }
-    ],
-    "name": "ERC20InsufficientBalance",
-    "type": "error"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "approver",
-        "type": "address"
-      }
-    ],
-    "name": "ERC20InvalidApprover",
-    "type": "error"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "receiver",
-        "type": "address"
-      }
-    ],
-    "name": "ERC20InvalidReceiver",
-    "type": "error"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "sender",
-        "type": "address"
-      }
-    ],
-    "name": "ERC20InvalidSender",
-    "type": "error"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "spender",
-        "type": "address"
-      }
-    ],
-    "name": "ERC20InvalidSpender",
+    "inputs": [],
+    "name": "EmptyBatch",
     "type": "error"
   },
   {
@@ -130,17 +49,22 @@
   },
   {
     "inputs": [],
-    "name": "InsufficientCollateral",
+    "name": "InsufficientMarginBalance",
     "type": "error"
   },
   {
     "inputs": [],
-    "name": "InsufficientMargin",
+    "name": "InsuranceFundNotConfigured",
     "type": "error"
   },
   {
     "inputs": [],
-    "name": "InsufficientReservePool",
+    "name": "InvalidDependency",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidFee",
     "type": "error"
   },
   {
@@ -155,11 +79,6 @@
   },
   {
     "inputs": [],
-    "name": "InvalidMarginPercent",
-    "type": "error"
-  },
-  {
-    "inputs": [],
     "name": "InvalidOracle",
     "type": "error"
   },
@@ -170,12 +89,27 @@
   },
   {
     "inputs": [],
-    "name": "InvalidSize",
+    "name": "InvalidQty",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidReduceQuantity",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidTimeInForce",
     "type": "error"
   },
   {
     "inputs": [],
     "name": "MaxOrdersPerParticipantReached",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "MaxPriceLevelsReached",
     "type": "error"
   },
   {
@@ -209,6 +143,26 @@
     "type": "error"
   },
   {
+    "inputs": [],
+    "name": "OrderNotBelongToUser",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "OrderNotExists",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "OrdersStillOpen",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "OverLiquidation",
+    "type": "error"
+  },
+  {
     "inputs": [
       {
         "internalType": "address",
@@ -231,14 +185,8 @@
     "type": "error"
   },
   {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "token",
-        "type": "address"
-      }
-    ],
-    "name": "SafeERC20FailedOperation",
+    "inputs": [],
+    "name": "TimeInForceNotFilled",
     "type": "error"
   },
   {
@@ -258,29 +206,35 @@
     "type": "error"
   },
   {
-    "anonymous": false,
+    "inputs": [],
+    "name": "UnsupportedTokenDecimals",
+    "type": "error"
+  },
+  {
     "inputs": [
       {
-        "indexed": true,
-        "internalType": "address",
-        "name": "owner",
-        "type": "address"
+        "internalType": "int256",
+        "name": "min",
+        "type": "int256"
       },
       {
-        "indexed": true,
-        "internalType": "address",
-        "name": "spender",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "value",
-        "type": "uint256"
+        "internalType": "int256",
+        "name": "max",
+        "type": "int256"
       }
     ],
-    "name": "Approval",
-    "type": "event"
+    "name": "ValueOutOfRange",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "VaultMismatch",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ZeroAddress",
+    "type": "error"
   },
   {
     "anonymous": false,
@@ -299,44 +253,6 @@
       }
     ],
     "name": "BadDebt",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "user",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "amount",
-        "type": "uint256"
-      }
-    ],
-    "name": "CollateralAdded",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "user",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "amount",
-        "type": "uint256"
-      }
-    ],
-    "name": "CollateralRemoved",
     "type": "event"
   },
   {
@@ -406,6 +322,19 @@
     "anonymous": false,
     "inputs": [
       {
+        "indexed": true,
+        "internalType": "address",
+        "name": "hook",
+        "type": "address"
+      }
+    ],
+    "name": "HookUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
         "indexed": false,
         "internalType": "uint64",
         "name": "version",
@@ -420,12 +349,12 @@
     "inputs": [
       {
         "indexed": false,
-        "internalType": "uint256",
-        "name": "newLiquidationFee",
-        "type": "uint256"
+        "internalType": "uint16",
+        "name": "newLiquidationFeeBps",
+        "type": "uint16"
       }
     ],
-    "name": "LiquidationFeeUpdated",
+    "name": "LiquidationFeeBpsUpdated",
     "type": "event"
   },
   {
@@ -433,36 +362,17 @@
     "inputs": [
       {
         "indexed": false,
-        "internalType": "uint8",
-        "name": "newMaintenanceMarginPercent",
-        "type": "uint8"
+        "internalType": "uint16",
+        "name": "newLiquidatorShareBps",
+        "type": "uint16"
       }
     ],
-    "name": "MaintenanceMarginPercentUpdated",
+    "name": "LiquidatorShareBpsUpdated",
     "type": "event"
   },
   {
     "anonymous": false,
     "inputs": [
-      {
-        "indexed": false,
-        "internalType": "uint8",
-        "name": "newMarginPercent",
-        "type": "uint8"
-      }
-    ],
-    "name": "MarginPercentUpdated",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": false,
-        "internalType": "int16",
-        "name": "newTakerFeeBps",
-        "type": "int16"
-      },
       {
         "indexed": false,
         "internalType": "int16",
@@ -470,7 +380,7 @@
         "type": "int16"
       }
     ],
-    "name": "MatchFeeUpdated",
+    "name": "MakerFeeBpsUpdated",
     "type": "event"
   },
   {
@@ -484,6 +394,19 @@
       }
     ],
     "name": "MinimumMarginPerOrderUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "newOracle",
+        "type": "address"
+      }
+    ],
+    "name": "OracleUpdated",
     "type": "event"
   },
   {
@@ -534,6 +457,37 @@
       }
     ],
     "name": "OrderCreated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "orderId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "liquidator",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "fee",
+        "type": "uint256"
+      }
+    ],
+    "name": "OrderLiquidated",
     "type": "event"
   },
   {
@@ -657,6 +611,19 @@
     "anonymous": false,
     "inputs": [
       {
+        "indexed": false,
+        "internalType": "address",
+        "name": "newPortfolioMargin",
+        "type": "address"
+      }
+    ],
+    "name": "PortfolioMarginUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
         "indexed": true,
         "internalType": "address",
         "name": "user",
@@ -671,7 +638,7 @@
       {
         "indexed": false,
         "internalType": "int256",
-        "name": "positionSize",
+        "name": "closedQuantity",
         "type": "int256"
       },
       {
@@ -694,25 +661,13 @@
     "anonymous": false,
     "inputs": [
       {
-        "indexed": true,
-        "internalType": "address",
-        "name": "from",
-        "type": "address"
-      },
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "to",
-        "type": "address"
-      },
-      {
         "indexed": false,
-        "internalType": "uint256",
-        "name": "value",
-        "type": "uint256"
+        "internalType": "int16",
+        "name": "newTakerFeeBps",
+        "type": "int16"
       }
     ],
-    "name": "Transfer",
+    "name": "TakerFeeBpsUpdated",
     "type": "event"
   },
   {
@@ -730,12 +685,38 @@
   },
   {
     "inputs": [],
+    "name": "CONTRACT_SIZE_HPS_DAY",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "FUNDING_DECIMALS",
     "outputs": [
       {
         "internalType": "uint8",
         "name": "",
         "type": "uint8"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "MAX_ORACLE_STALENESS",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
       }
     ],
     "stateMutability": "view",
@@ -794,113 +775,13 @@
     "type": "function"
   },
   {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "_amount",
-        "type": "uint256"
-      }
-    ],
-    "name": "addCollateral",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "_amount",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "_deadline",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint8",
-        "name": "_v",
-        "type": "uint8"
-      },
-      {
-        "internalType": "bytes32",
-        "name": "_r",
-        "type": "bytes32"
-      },
-      {
-        "internalType": "bytes32",
-        "name": "_s",
-        "type": "bytes32"
-      }
-    ],
-    "name": "addCollateralWithPermit",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "owner",
-        "type": "address"
-      },
-      {
-        "internalType": "address",
-        "name": "spender",
-        "type": "address"
-      }
-    ],
-    "name": "allowance",
+    "inputs": [],
+    "name": "VERSION",
     "outputs": [
       {
-        "internalType": "uint256",
+        "internalType": "string",
         "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "spender",
-        "type": "address"
-      },
-      {
-        "internalType": "uint256",
-        "name": "value",
-        "type": "uint256"
-      }
-    ],
-    "name": "approve",
-    "outputs": [
-      {
-        "internalType": "bool",
-        "name": "",
-        "type": "bool"
-      }
-    ],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "account",
-        "type": "address"
-      }
-    ],
-    "name": "balanceOf",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
+        "type": "string"
       }
     ],
     "stateMutability": "view",
@@ -921,12 +802,12 @@
   },
   {
     "inputs": [],
-    "name": "collateralToken",
+    "name": "collectedFeesBalance",
     "outputs": [
       {
-        "internalType": "contract IERC20",
+        "internalType": "uint256",
         "name": "",
-        "type": "address"
+        "type": "uint256"
       }
     ],
     "stateMutability": "view",
@@ -943,9 +824,44 @@
         "internalType": "int256",
         "name": "_quantity",
         "type": "int256"
+      },
+      {
+        "internalType": "enum HashPowerPerpsDEXBase.TimeInForce",
+        "name": "_tif",
+        "type": "uint8"
       }
     ],
     "name": "createOrder",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "price",
+            "type": "uint256"
+          },
+          {
+            "internalType": "int256",
+            "name": "quantity",
+            "type": "int256"
+          },
+          {
+            "internalType": "enum HashPowerPerpsDEXBase.TimeInForce",
+            "name": "timeInForce",
+            "type": "uint8"
+          }
+        ],
+        "internalType": "struct HashPowerPerpsDEXBase.OrderIntent[]",
+        "name": "_intents",
+        "type": "tuple[]"
+      }
+    ],
+    "name": "createOrders",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -965,32 +881,6 @@
   },
   {
     "inputs": [],
-    "name": "decimals",
-    "outputs": [
-      {
-        "internalType": "uint8",
-        "name": "",
-        "type": "uint8"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "_amount",
-        "type": "uint256"
-      }
-    ],
-    "name": "depositReservePool",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [],
     "name": "fundingPeriod",
     "outputs": [
       {
@@ -1005,70 +895,6 @@
   {
     "inputs": [],
     "name": "fundingRateMaxBps",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "getBestAskPrice",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "getBestBidPrice",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "_user",
-        "type": "address"
-      }
-    ],
-    "name": "getInitialMargin",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "_user",
-        "type": "address"
-      }
-    ],
-    "name": "getMaintenanceMargin",
     "outputs": [
       {
         "internalType": "uint256",
@@ -1120,8 +946,49 @@
             "type": "int256"
           }
         ],
-        "internalType": "struct HashPowerPerpsDEX.Order",
+        "internalType": "struct HashPowerPerpsDEXBase.Order",
         "name": "",
+        "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      }
+    ],
+    "name": "getOrderAggregate",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "buyQty",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "sellQty",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "buyValue",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "sellValue",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct HashPowerPerpsDEXBase.OrderAggregate",
+        "name": "aggregate_",
         "type": "tuple"
       }
     ],
@@ -1140,12 +1007,12 @@
     "outputs": [
       {
         "internalType": "uint256[]",
-        "name": "bidPrices",
+        "name": "bids",
         "type": "uint256[]"
       },
       {
         "internalType": "uint256[]",
-        "name": "askPrices",
+        "name": "asks",
         "type": "uint256[]"
       }
     ],
@@ -1188,7 +1055,7 @@
     "outputs": [
       {
         "internalType": "uint256",
-        "name": "totalQuantity",
+        "name": "",
         "type": "uint256"
       }
     ],
@@ -1203,12 +1070,49 @@
         "type": "address"
       }
     ],
-    "name": "getRequiredMargin",
+    "name": "getRiskView",
     "outputs": [
       {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
+        "components": [
+          {
+            "internalType": "int256",
+            "name": "netPositionDelta",
+            "type": "int256"
+          },
+          {
+            "internalType": "int256",
+            "name": "unrealizedPnl",
+            "type": "int256"
+          },
+          {
+            "internalType": "int256",
+            "name": "pendingFunding",
+            "type": "int256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "buyOrderDelta",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "sellOrderDelta",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "buyOrderFillLoss",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "sellOrderFillLoss",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct ILinearMarket.RiskView",
+        "name": "view_",
+        "type": "tuple"
       }
     ],
     "stateMutability": "view",
@@ -1245,7 +1149,7 @@
     "outputs": [
       {
         "internalType": "bytes32[]",
-        "name": "",
+        "name": "orderIds",
         "type": "bytes32[]"
       }
     ],
@@ -1270,58 +1174,17 @@
             "type": "int256"
           },
           {
-            "internalType": "uint256",
-            "name": "aggregatedEntryPrice",
-            "type": "uint256"
+            "internalType": "int256",
+            "name": "netEntryValue",
+            "type": "int256"
           }
         ],
-        "internalType": "struct HashPowerPerpsDEX.Position",
+        "internalType": "struct HashPowerPerpsDEXBase.Position",
         "name": "",
         "type": "tuple"
       }
     ],
     "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "getUsersWithPositions",
-    "outputs": [
-      {
-        "internalType": "address[]",
-        "name": "",
-        "type": "address[]"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "contract IERC20Metadata",
-        "name": "_collateralToken",
-        "type": "address"
-      },
-      {
-        "internalType": "contract AggregatorV3Interface",
-        "name": "_priceOracle",
-        "type": "address"
-      },
-      {
-        "internalType": "uint8",
-        "name": "_marginPercent",
-        "type": "uint8"
-      },
-      {
-        "internalType": "uint8",
-        "name": "_maintenanceMarginPercent",
-        "type": "uint8"
-      }
-    ],
-    "name": "initialize",
-    "outputs": [],
-    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -1332,7 +1195,7 @@
         "type": "address"
       }
     ],
-    "name": "isLiquidatable",
+    "name": "hasRestingOrderDelta",
     "outputs": [
       {
         "internalType": "bool",
@@ -1341,6 +1204,62 @@
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "hook",
+    "outputs": [
+      {
+        "internalType": "contract IPointsHook",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "contract AggregatorV3Interface",
+        "name": "_priceOracle",
+        "type": "address"
+      },
+      {
+        "internalType": "contract ICollateralVault",
+        "name": "_vault",
+        "type": "address"
+      }
+    ],
+    "name": "initialize",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "contract ICollateralVault",
+        "name": "_vault",
+        "type": "address"
+      },
+      {
+        "internalType": "contract IPortfolioMarginEngine",
+        "name": "_pm",
+        "type": "address"
+      }
+    ],
+    "name": "initializeV2",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "initializeV3",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -1359,24 +1278,65 @@
   {
     "inputs": [
       {
-        "internalType": "address[]",
-        "name": "_users",
-        "type": "address[]"
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "_orderId",
+        "type": "bytes32"
       }
     ],
-    "name": "liquidateBatch",
+    "name": "liquidateOrder",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      },
+      {
+        "internalType": "bytes32[]",
+        "name": "_orderIds",
+        "type": "bytes32[]"
+      }
+    ],
+    "name": "liquidateOrders",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "_closeQty",
+        "type": "uint256"
+      }
+    ],
+    "name": "liquidatePosition",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
   },
   {
     "inputs": [],
-    "name": "liquidationFee",
+    "name": "liquidationFeeBps",
     "outputs": [
       {
-        "internalType": "uint256",
+        "internalType": "uint16",
         "name": "",
-        "type": "uint256"
+        "type": "uint16"
       }
     ],
     "stateMutability": "view",
@@ -1384,12 +1344,12 @@
   },
   {
     "inputs": [],
-    "name": "maintenanceMarginPercent",
+    "name": "liquidatorShareBps",
     "outputs": [
       {
-        "internalType": "uint8",
+        "internalType": "uint16",
         "name": "",
-        "type": "uint8"
+        "type": "uint16"
       }
     ],
     "stateMutability": "view",
@@ -1403,19 +1363,6 @@
         "internalType": "int16",
         "name": "",
         "type": "int16"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "marginPercent",
-    "outputs": [
-      {
-        "internalType": "uint8",
-        "name": "",
-        "type": "uint8"
       }
     ],
     "stateMutability": "view",
@@ -1448,32 +1395,13 @@
     "type": "function"
   },
   {
-    "inputs": [
-      {
-        "internalType": "bytes[]",
-        "name": "data",
-        "type": "bytes[]"
-      }
-    ],
-    "name": "multicall",
-    "outputs": [
-      {
-        "internalType": "bytes[]",
-        "name": "results",
-        "type": "bytes[]"
-      }
-    ],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
     "inputs": [],
-    "name": "name",
+    "name": "owner",
     "outputs": [
       {
-        "internalType": "string",
+        "internalType": "address",
         "name": "",
-        "type": "string"
+        "type": "address"
       }
     ],
     "stateMutability": "view",
@@ -1481,10 +1409,10 @@
   },
   {
     "inputs": [],
-    "name": "owner",
+    "name": "portfolioMargin",
     "outputs": [
       {
-        "internalType": "address",
+        "internalType": "contract IPortfolioMarginEngine",
         "name": "",
         "type": "address"
       }
@@ -1521,12 +1449,30 @@
   {
     "inputs": [
       {
-        "internalType": "uint256",
-        "name": "_amount",
-        "type": "uint256"
+        "internalType": "address[]",
+        "name": "_users",
+        "type": "address[]"
       }
     ],
-    "name": "removeCollateral",
+    "name": "rebuildOrderAggregateCache",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "_orderId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "int256",
+        "name": "_newQuantity",
+        "type": "int256"
+      }
+    ],
+    "name": "reduceOrderSize",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -1539,7 +1485,13 @@
     "type": "function"
   },
   {
-    "inputs": [],
+    "inputs": [
+      {
+        "internalType": "address[]",
+        "name": "_participants",
+        "type": "address[]"
+      }
+    ],
     "name": "resetState",
     "outputs": [],
     "stateMutability": "nonpayable",
@@ -1566,12 +1518,12 @@
   {
     "inputs": [
       {
-        "internalType": "uint256",
-        "name": "_liquidationFee",
-        "type": "uint256"
+        "internalType": "address",
+        "name": "_hook",
+        "type": "address"
       }
     ],
-    "name": "setLiquidationFee",
+    "name": "setHook",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -1579,12 +1531,12 @@
   {
     "inputs": [
       {
-        "internalType": "uint8",
-        "name": "_maintenanceMarginPercent",
-        "type": "uint8"
+        "internalType": "uint16",
+        "name": "_bps",
+        "type": "uint16"
       }
     ],
-    "name": "setMaintenanceMarginPercent",
+    "name": "setLiquidationFeeBps",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -1592,30 +1544,25 @@
   {
     "inputs": [
       {
-        "internalType": "uint8",
-        "name": "_marginPercent",
-        "type": "uint8"
+        "internalType": "uint16",
+        "name": "_bps",
+        "type": "uint16"
       }
     ],
-    "name": "setMarginPercent",
+    "name": "setLiquidatorShareBps",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
   },
   {
     "inputs": [
-      {
-        "internalType": "int16",
-        "name": "_takerFeeBps",
-        "type": "int16"
-      },
       {
         "internalType": "int16",
         "name": "_makerFeeBps",
         "type": "int16"
       }
     ],
-    "name": "setMatchFee",
+    "name": "setMakerFeeBps",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -1642,6 +1589,32 @@
       }
     ],
     "name": "setOracle",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "contract IPortfolioMarginEngine",
+        "name": "_pm",
+        "type": "address"
+      }
+    ],
+    "name": "setPortfolioMargin",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "int16",
+        "name": "_takerFeeBps",
+        "type": "int16"
+      }
+    ],
+    "name": "setTakerFeeBps",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -1682,19 +1655,6 @@
   },
   {
     "inputs": [],
-    "name": "symbol",
-    "outputs": [
-      {
-        "internalType": "string",
-        "name": "",
-        "type": "string"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
     "name": "takerFeeBps",
     "outputs": [
       {
@@ -1704,72 +1664,6 @@
       }
     ],
     "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "totalSupply",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "to",
-        "type": "address"
-      },
-      {
-        "internalType": "uint256",
-        "name": "value",
-        "type": "uint256"
-      }
-    ],
-    "name": "transfer",
-    "outputs": [
-      {
-        "internalType": "bool",
-        "name": "",
-        "type": "bool"
-      }
-    ],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "from",
-        "type": "address"
-      },
-      {
-        "internalType": "address",
-        "name": "to",
-        "type": "address"
-      },
-      {
-        "internalType": "uint256",
-        "name": "value",
-        "type": "uint256"
-      }
-    ],
-    "name": "transferFrom",
-    "outputs": [
-      {
-        "internalType": "bool",
-        "name": "",
-        "type": "bool"
-      }
-    ],
-    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -1795,6 +1689,58 @@
   {
     "inputs": [
       {
+        "internalType": "bytes32[]",
+        "name": "_cancelIds",
+        "type": "bytes32[]"
+      },
+      {
+        "components": [
+          {
+            "internalType": "bytes32",
+            "name": "orderId",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "int256",
+            "name": "newQuantity",
+            "type": "int256"
+          }
+        ],
+        "internalType": "struct HashPowerPerpsDEXBase.ReduceIntent[]",
+        "name": "_reduces",
+        "type": "tuple[]"
+      },
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "price",
+            "type": "uint256"
+          },
+          {
+            "internalType": "int256",
+            "name": "quantity",
+            "type": "int256"
+          },
+          {
+            "internalType": "enum HashPowerPerpsDEXBase.TimeInForce",
+            "name": "timeInForce",
+            "type": "uint8"
+          }
+        ],
+        "internalType": "struct HashPowerPerpsDEXBase.OrderIntent[]",
+        "name": "_intents",
+        "type": "tuple[]"
+      }
+    ],
+    "name": "updateOrders",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "address",
         "name": "newImplementation",
         "type": "address"
@@ -1811,14 +1757,21 @@
     "type": "function"
   },
   {
-    "inputs": [
+    "inputs": [],
+    "name": "vault",
+    "outputs": [
       {
-        "internalType": "uint256",
-        "name": "_amount",
-        "type": "uint256"
+        "internalType": "contract ICollateralVault",
+        "name": "",
+        "type": "address"
       }
     ],
-    "name": "withdrawReservePool",
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "withdrawCollectedFees",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"

@@ -2,13 +2,13 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
 import { parseUnits } from "viem";
+import { getAverageEntryPrice } from "./lib/viewHelpers.ts";
 import {
   deployPerpsWithCollateralFixture,
   deployPerpsWithPositionsFixture,
-  deployPerpsWithLiquidatablePositionFixture,
 } from "./fixtures.ts";
 
-const { viem, networkHelpers } = await network.connect();
+const { networkHelpers } = await network.getOrCreate();
 
 describe("HashPowerPerpsDEX - getUnrealizedPnl", function () {
   it("should return 0 when user has no position", async function () {
@@ -36,7 +36,7 @@ describe("HashPowerPerpsDEX - getUnrealizedPnl", function () {
 
     const currentPrice = await perps.read.getMarketPrice();
     const newPrice = (currentPrice * 110n) / 100n;
-    await priceOracle.write.setPrice([newPrice, 6n]);
+    await priceOracle.write.setPrice([newPrice, 6]);
 
     const pnl = await perps.read.getUnrealizedPnl([buyer.account.address]);
     assert.ok(pnl > 0n);
@@ -49,7 +49,7 @@ describe("HashPowerPerpsDEX - getUnrealizedPnl", function () {
 
     const currentPrice = await perps.read.getMarketPrice();
     const newPrice = (currentPrice * 90n) / 100n;
-    await priceOracle.write.setPrice([newPrice, 6n]);
+    await priceOracle.write.setPrice([newPrice, 6]);
 
     const pnl = await perps.read.getUnrealizedPnl([buyer.account.address]);
     assert.ok(pnl < 0n);
@@ -62,7 +62,7 @@ describe("HashPowerPerpsDEX - getUnrealizedPnl", function () {
 
     const currentPrice = await perps.read.getMarketPrice();
     const newPrice = (currentPrice * 90n) / 100n;
-    await priceOracle.write.setPrice([newPrice, 6n]);
+    await priceOracle.write.setPrice([newPrice, 6]);
 
     const pnl = await perps.read.getUnrealizedPnl([seller.account.address]);
     assert.ok(pnl > 0n);
@@ -75,7 +75,7 @@ describe("HashPowerPerpsDEX - getUnrealizedPnl", function () {
 
     const currentPrice = await perps.read.getMarketPrice();
     const newPrice = (currentPrice * 110n) / 100n;
-    await priceOracle.write.setPrice([newPrice, 6n]);
+    await priceOracle.write.setPrice([newPrice, 6]);
 
     const pnl = await perps.read.getUnrealizedPnl([seller.account.address]);
     assert.ok(pnl < 0n);
@@ -88,7 +88,7 @@ describe("HashPowerPerpsDEX - getUnrealizedPnl", function () {
 
     const currentPrice = await perps.read.getMarketPrice();
     const newPrice = (currentPrice * 105n) / 100n;
-    await priceOracle.write.setPrice([newPrice, 6n]);
+    await priceOracle.write.setPrice([newPrice, 6]);
 
     const buyerPnl = await perps.read.getUnrealizedPnl([buyer.account.address]);
     const sellerPnl = await perps.read.getUnrealizedPnl([seller.account.address]);
@@ -104,12 +104,12 @@ describe("HashPowerPerpsDEX - getUnrealizedPnl", function () {
     const { buyer } = accounts;
 
     const position = await perps.read.getUserPosition([buyer.account.address]);
-    const entryPrice = position.aggregatedEntryPrice;
+    const entryPrice = await getAverageEntryPrice(perps, buyer.account.address);
     const quantity = position.netQuantity;
 
     const priceDiff = parseUnits("1000", 6);
     const newPrice = entryPrice + priceDiff;
-    await priceOracle.write.setPrice([newPrice, 6n]);
+    await priceOracle.write.setPrice([newPrice, 6]);
 
     const pnl = await perps.read.getUnrealizedPnl([buyer.account.address]);
 

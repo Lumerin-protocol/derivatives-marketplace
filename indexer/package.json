@@ -16,22 +16,38 @@
     "remove-local": "graph remove --node http://localhost:8020/ perps",
     "deploy-local": "graph deploy --node http://localhost:8020/ --ipfs http://localhost:5001 --version-label 0 perps",
     "setup-local": "pnpm prepare-local && pnpm codegen && pnpm build && pnpm create-local && pnpm deploy-local",
-    "test": "graph test",
+    "test": "pnpm test:integration",
+    "test:integration": "hardhat test nodejs",
+    "test:integration:debug": "MATCHSTICK_VERBOSE=true hardhat test nodejs",
+    "test:unit": "graph test",
     "indexer": "docker compose --env-file ../.env up",
     "test:smoke": "node --test tests/queries.smoke.ts",
-    "graph:api": "open http://localhost:8030/graphql/playground"
+    "graph:api": "open http://localhost:8030/graphql/playground",
+    "typecheck": "tsgo --noEmit -p integration/tsconfig.json",
+    "lint": "biome lint .",
+    "lint:fix": "biome check --write ."
   },
   "dependencies": {
     "@graphprotocol/graph-ts": "0.37.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.4.13",
     "@graphprotocol/graph-cli": "^0.98.1",
+    "@nomicfoundation/hardhat-network-helpers": "^3.0.8",
+    "@nomicfoundation/hardhat-node-test-runner": "^3.0.8",
+    "@nomicfoundation/hardhat-viem": "^3.0.7",
     "@types/node": "^25.3.0",
+    "@typescript/native-preview": "7.0.0-dev.20260707.2",
     "assemblyscript": "^0.19.23",
+    "derivatives-contracts": "link:../contracts",
     "graphql": "^16.11.0",
     "graphql-request": "^7.2.0",
+    "hardhat": "^3.9.1",
+    "hardhat-matchstick-ts": "github:lsheva/matchstick-ts#v0.4.2&path:packages/hardhat-matchstick-ts",
     "matchstick-as": "0.6.0",
-    "typescript": "^5.9.3"
+    "matchstick-ts": "github:lsheva/matchstick-ts#v0.4.2&path:packages/matchstick-ts",
+    "typescript": "^5.9.3",
+    "viem": "^2.48.8"
   },
-  "packageManager": "pnpm@10.28.1+sha512.7d7dbbca9e99447b7c3bf7a73286afaaf6be99251eb9498baefa7d406892f67b879adb3a1d7e687fc4ccc1a388c7175fbaae567a26ab44d1067b54fcb0d6a316"
+  "packageManager": "pnpm@11.22.0"
 }

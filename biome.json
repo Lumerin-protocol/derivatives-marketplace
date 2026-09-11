@@ -3,27 +3,33 @@
   "files": {
     "includes": [
       "**",
-      "!!**/generated",
-      "!!**/build",
-      "!!**/node_modules",
-      "!!**/coverage",
-      "!!**/artifacts",
-      "!!**/cache"
+      "!**/generated",
+      "!**/build",
+      "!**/node_modules",
+      "!**/coverage",
+      "!**/artifacts",
+      "!**/cache",
+      "!**/dist"
     ]
   },
   "overrides": [
     {
       "includes": [
-        "indexer/src/**",
-        "indexer/tests/**"
+        "**/indexer/src/**",
+        "**/indexer/tests/**",
+        "**/types/**"
       ],
       "linter": {
         "rules": {
           "complexity": {
-            "noForEach": "off"
+            "noForEach": "off",
+            "noBannedTypes": "off"
           },
           "correctness": {
-            "noUnusedImports": "warn"
+            "noConstantCondition": "off",
+            "noUnusedImports": "warn",
+            "noUnusedVariables": "warn",
+            "noUnusedFunctionParameters": "warn"
           },
           "style": {
             "useImportType": "off",
@@ -32,6 +38,18 @@
           "suspicious": {
             "noShadowRestrictedNames": "off",
             "noDoubleEquals": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "**/*.css"
+      ],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noUnknownAtRules": "off"
           }
         }
       }

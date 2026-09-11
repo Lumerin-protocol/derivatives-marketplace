@@ -1,9 +1,20 @@
-import type { Account, Chain, PublicClient, Transport, WalletClient } from "viem";
+import type { Account, Chain, Transport, WalletClient } from "viem";
 import { getAddress } from "viem/utils";
 import { sepolia, mainnet, arbitrum } from "viem/chains";
-import SafeApiKit from "@safe-global/api-kit";
-import Safe from "@safe-global/protocol-kit";
+import SafeApiKitImport from "@safe-global/api-kit";
+import SafeImport from "@safe-global/protocol-kit";
 import type { MetaTransactionData } from "@safe-global/types-kit";
+
+// `@safe-global/api-kit` and `@safe-global/protocol-kit` ship dual ESM/CJS builds
+// without type-versioned `exports`, so under `nodenext` the default import's
+// inferred type is the CJS module namespace rather than the class. Runtime
+// values are correct; recover the class types via `import(...)` queries.
+type SafeApiKitCtor = typeof import("@safe-global/api-kit").default;
+type SafeCtor = typeof import("@safe-global/protocol-kit").default;
+const SafeApiKit = SafeApiKitImport as unknown as SafeApiKitCtor;
+const Safe = SafeImport as unknown as SafeCtor;
+type SafeApiKit = InstanceType<SafeApiKitCtor>;
+type Safe = InstanceType<SafeCtor>;
 
 export class SafeWallet {
   private readonly safeApiKit: SafeApiKit;

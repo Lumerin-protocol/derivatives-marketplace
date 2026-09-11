@@ -59,8 +59,18 @@ describe("handleOrderCancelled", () => {
     handleOrderCancelled(cancelEvent);
 
     assert.fieldEquals("Order", id.toHexString(), "status", "CANCELLED");
+    assert.fieldEquals("Order", id.toHexString(), "quantity", "0");
+    assert.fieldEquals("Order", id.toHexString(), "filledQuantity", "0");
+    // Nothing matched, so the whole original size is cancelled.
+    assert.fieldEquals("Order", id.toHexString(), "cancelledQuantity", qty.toString());
     assert.fieldEquals("Order", id.toHexString(), "closedAt", cancelEvent.block.timestamp.toString());
     assert.fieldEquals("Order", id.toHexString(), "updatedAt", cancelEvent.block.timestamp.toString());
+    assert.fieldEquals(
+      "Order",
+      id.toHexString(),
+      "closedByTx",
+      cancelEvent.transaction.from.toHexString(),
+    );
 
     assert.fieldEquals("PriceLevel", priceLevel(price, true), "totalQuantity", "0");
     assert.fieldEquals("PriceLevel", priceLevel(price, true), "orderCount", "0");

@@ -1,7 +1,0 @@
-node_modules
-tests
-Dockerfile
-.dockerignore
-.git
-.env
-*.md
