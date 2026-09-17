@@ -1,10 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { network } from "hardhat";
-import { parseUnits } from "viem";
 import { deployPerpsWithCollateralFixture, deployPerpsWithOrdersFixture } from "./fixtures.ts";
+import { TimeInForce } from "../fixtures/timeInForce.ts";
 
-const { viem, networkHelpers } = await network.connect();
+const { networkHelpers } = await network.getOrCreate();
 
 describe("HashPowerPerpsDEX - getUserOrders", function () {
   it("should return empty array when user has no orders", async function () {
@@ -49,7 +49,7 @@ describe("HashPowerPerpsDEX - getUserOrders", function () {
     const sellerOrdersBefore = await perps.read.getUserOrders([seller.account.address]);
     assert.equal(sellerOrdersBefore.length, 3);
 
-    await perps.write.createOrder([marketPrice + tick, BigInt(qty)], { account: buyer2.account });
+    await perps.write.createOrder([marketPrice + tick, BigInt(qty), TimeInForce.GTC], { account: buyer2.account });
 
     const sellerOrdersAfter = await perps.read.getUserOrders([seller.account.address]);
     assert.equal(sellerOrdersAfter.length, 2);

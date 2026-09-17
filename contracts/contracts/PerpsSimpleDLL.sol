@@ -11,7 +11,7 @@ import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/I
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import { ERC20Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
-import { AggregatorV3Interface } from "./AggregatorV3Interface.sol";
+import { AggregatorV3Interface } from "./interfaces/AggregatorV3Interface.sol";
 
 /// @title Alternative implementation of HashPowerPerpsDEX using DLL for linked list (untested)
 /// @dev Do not update this contract, it's just a reference

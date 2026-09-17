@@ -8,7 +8,7 @@ ecs_cluster = {
 
 # Configure Market Maker Lambda
 perpskeeper_service = {
-  create                      = true
+  create                      = false
   ghcr_repo                   = "ghcr.io/lumerin-protocol/perps-keeper"
   ghcr_imagetag               = "stg-latest"
   svc_name                    = "perps-keeper"

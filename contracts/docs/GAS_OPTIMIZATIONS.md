@@ -161,7 +161,7 @@ Applied worktree optimisations without swapping the linked-list implementation.
    Resolve `address sender = _msgSender()` once; reuse throughout.
 
 3. **Validation inlining**  
-   Inline `_quantity == 0` and `_price` checks at function start instead of calling `_validateQuantity` / `_validatePrice`.
+   Inline `_quantity == 0` and `_price` checks at function start instead of calling `_validateQty` / `_validatePrice`.
 
 4. **`_executeMatch` micro-opts**  
    Cache `makerQty`, compute `newMakerQty` once, use `unchecked { return _remainingQty - matchQty }`.

@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { network } from "hardhat";
 import { parseUnits, getAddress, zeroHash } from "viem";
 import { deployPerpsWithCollateralFixture, deployPerpsWithOrdersFixture } from "./fixtures.ts";
+import { TimeInForce } from "../fixtures/timeInForce.ts";
 
-const { viem, networkHelpers } = await network.connect();
+const { networkHelpers } = await network.getOrCreate();
 
 describe("HashPowerPerpsDEX - getOrder", function () {
   it("should return order details", async function () {
@@ -42,7 +43,7 @@ describe("HashPowerPerpsDEX - getOrder", function () {
     const price = marketPrice - config.minimumPriceIncrement;
     const quantity = parseUnits("1", 6);
 
-    await perps.write.createOrder([price, BigInt(quantity)], { account: buyer.account });
+    await perps.write.createOrder([price, BigInt(quantity), TimeInForce.GTC], { account: buyer.account });
 
     const orders = await perps.read.getUserOrders([buyer.account.address]);
     const order = await perps.read.getOrder([orders[0]]);
@@ -59,7 +60,7 @@ describe("HashPowerPerpsDEX - getOrder", function () {
     const price = marketPrice + config.minimumPriceIncrement;
     const quantity = parseUnits("1", 6);
 
-    await perps.write.createOrder([price, -BigInt(quantity)], { account: seller.account });
+    await perps.write.createOrder([price, -BigInt(quantity), TimeInForce.GTC], { account: seller.account });
 
     const orders = await perps.read.getUserOrders([seller.account.address]);
     const order = await perps.read.getOrder([orders[0]]);

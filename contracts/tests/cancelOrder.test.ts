@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { network } from "hardhat";
 import { parseUnits, zeroAddress, zeroHash } from "viem";
 import { deployPerpsWithCollateralFixture, deployPerpsWithOrdersFixture } from "./fixtures.ts";
+import { TimeInForce } from "../fixtures/timeInForce.ts";
 
 const { viem, networkHelpers } = await network.connect();
 
@@ -64,16 +65,20 @@ describe("HashPowerPerpsDEX - cancelOrder", function () {
     const price = marketPrice - config.minimumPriceIncrement;
     const quantity = parseUnits("1", 6);
 
-    await perps.write.createOrder([price, BigInt(quantity)], { account: buyer.account });
+    await perps.write.createOrder([price, BigInt(quantity), TimeInForce.GTC], { account: buyer.account });
 
-    const marginBefore = await perps.read.getMaintenanceMargin([buyer.account.address]);
-    assert.ok(marginBefore > 0n);
+    const aggregateBefore = await perps.read.getOrderAggregate([buyer.account.address]);
+    assert.ok(aggregateBefore.buyValue > 0n);
+    assert.equal(await perps.read.hasRestingOrderDelta([buyer.account.address]), true);
+    assert.ok((await perps.read.getRiskView([buyer.account.address])).buyOrderDelta > 0n);
 
     const orders = await perps.read.getUserOrders([buyer.account.address]);
     await perps.write.cancelOrder([orders[0]], { account: buyer.account });
 
-    const marginAfter = await perps.read.getMaintenanceMargin([buyer.account.address]);
-    assert.ok(marginAfter < marginBefore);
+    const aggregateAfter = await perps.read.getOrderAggregate([buyer.account.address]);
+    assert.equal(aggregateAfter.buyValue, 0n);
+    assert.equal(await perps.read.hasRestingOrderDelta([buyer.account.address]), false);
+    assert.equal((await perps.read.getRiskView([buyer.account.address])).buyOrderDelta, 0n);
   });
 
   it("should remove order from price level tracking", async function () {
@@ -85,7 +90,7 @@ describe("HashPowerPerpsDEX - cancelOrder", function () {
     const price = marketPrice - config.minimumPriceIncrement;
     const quantity = parseUnits("1", 6);
 
-    await perps.write.createOrder([price, BigInt(quantity)], { account: buyer.account });
+    await perps.write.createOrder([price, BigInt(quantity), TimeInForce.GTC], { account: buyer.account });
 
     const [bidsBefore] = await perps.read.getOrderBookPrices([10n]);
     assert.ok(bidsBefore.includes(price));

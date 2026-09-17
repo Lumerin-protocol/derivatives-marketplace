@@ -1,0 +1,57 @@
+name: Options UI Checks
+
+on:
+  push:
+    branches: [main, dev, stg]
+    paths:
+      - "options-ui/**"
+      - ".github/workflows/options-ui-checks.yml"
+
+  pull_request:
+    paths:
+      - "options-ui/**"
+      - ".github/workflows/options-ui-checks.yml"
+
+  workflow_dispatch:
+
+concurrency:
+  group: options-ui-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    name: Options UI Lint & Typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: ./options-ui
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "pnpm"
+          cache-dependency-path: options-ui/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck

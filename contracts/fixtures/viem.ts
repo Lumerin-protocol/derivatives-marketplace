@@ -1,7 +1,17 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { type Address, encodeFunctionData, getContract, maxUint256, parseUnits } from "viem";
-import { hashPowerPerpsDexAbi, usdcMockAbi, priceOracleMockAbi } from "../abi/abi.ts";
+import {
+  type Abi,
+  type Address,
+  encodeFunctionData,
+  getContract,
+  maxUint256,
+  parseUnits,
+} from "viem";
+import { HashPowerPerpsDEXAbi as hashPowerPerpsDexAbi } from "../abi/HashPowerPerpsDEX.ts";
+import { USDCMockAbi as usdcMockAbi } from "../abi/USDCMock.ts";
+import { PriceOracleMockAbi as priceOracleMockAbi } from "../abi/PriceOracleMock.ts";
+import { CollateralVaultAbi as collateralVaultAbi } from "../abi/CollateralVault.ts";
 import {
   HARDHAT_ACCOUNTS,
   createTestPublicClient,
@@ -9,13 +19,18 @@ import {
   createTestClientInstance,
   hardhat,
 } from "./helpers.ts";
+import { TimeInForce } from "./timeInForce.ts";
 
 const ARTIFACTS_DIR = resolve(import.meta.dirname, "../artifacts");
 
 function loadArtifact(contractPath: string) {
   const raw = readFileSync(resolve(ARTIFACTS_DIR, contractPath), "utf-8");
   const json = JSON.parse(raw);
-  return { abi: json.abi, bytecode: json.bytecode, deployedBytecode: json.deployedBytecode };
+  return {
+    abi: json.abi as Abi,
+    bytecode: json.bytecode as `0x${string}`,
+    deployedBytecode: json.deployedBytecode as `0x${string}`,
+  };
 }
 
 // ── Contract deployment helper ───────────────────────────────────────────────
@@ -32,11 +47,23 @@ async function deploy(
     args,
   });
   const receipt = await publicClient.waitForTransactionReceipt({ hash });
-  if (!receipt.contractAddress) throw new Error("Deployment failed — no contract address");
+  if (!receipt.contractAddress)
+    throw new Error("Deployment failed — no contract address");
   return receipt.contractAddress;
 }
 
 // ── Base deployment fixture ──────────────────────────────────────────────────
+//
+// Mirrors `contracts/tests/fixtures.ts::deployPerpsFixture` but operates over a
+// real JSON-RPC node via raw viem clients (used by keeper / market-maker / e2e
+// suites which run as standalone `node --test` processes).
+//
+// Architecture (post collateral-vault refactor):
+//   USDC ─┐
+//         ├─► CollateralVault ◄── PortfolioMarginEngine ──► OptionsEngineMock
+//         │                                  ▲
+//         │                                  │
+//         └────► HashPowerPerpsDEX ──────────┘ (setPortfolioMargin)
 
 export async function deployPerpsFixture() {
   const publicClient = createTestPublicClient();
@@ -48,18 +75,35 @@ export async function deployPerpsFixture() {
   const keeperWallet = createTestWalletClient(HARDHAT_ACCOUNTS[3].privateKey);
   const seller2Wallet = createTestWalletClient(HARDHAT_ACCOUNTS[4].privateKey);
 
-  // Deploy Multicall3 at the well-known address so viem's multicall works
-  const multicall3Artifact = loadArtifact("contracts/Multicall3.sol/Multicall3.json");
+  // Multicall3 at the well-known address so viem's multicall works
+  const multicall3Artifact = loadArtifact(
+    "contracts/Multicall3.sol/Multicall3.json",
+  );
   await testClient.setCode({
     address: hardhat.contracts.multicall3.address,
     bytecode: multicall3Artifact.deployedBytecode,
   });
 
-  const usdcArtifact = loadArtifact("contracts/USDCMock.sol/USDCMock.json");
-  const oracleArtifact = loadArtifact("contracts/PriceOracleMock.sol/PriceOracleMock.json");
-  const perpsArtifact = loadArtifact("contracts/HashPowerPerpsDEX.sol/HashPowerPerpsDEX.json");
+  const usdcArtifact = loadArtifact(
+    "contracts/mocks/USDCMock.sol/USDCMock.json",
+  );
+  const oracleArtifact = loadArtifact(
+    "contracts/mocks/PriceOracleMock.sol/PriceOracleMock.json",
+  );
+  const perpsArtifact = loadArtifact(
+    "contracts/HashPowerPerpsDEX.sol/HashPowerPerpsDEX.json",
+  );
   const proxyArtifact = loadArtifact(
     "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol/ERC1967Proxy.json",
+  );
+  const vaultArtifact = loadArtifact(
+    "collateral-margin/contracts/contracts/CollateralVault.sol/CollateralVault.json",
+  );
+  const pmeArtifact = loadArtifact(
+    "collateral-margin/contracts/contracts/PortfolioMarginEngine.sol/PortfolioMarginEngine.json",
+  );
+  const optionsMockArtifact = loadArtifact(
+    "collateral-margin/contracts/contracts/mocks/OptionsEngineMock.sol/OptionsEngineMock.json",
   );
 
   const usdcAddress = await deploy(ownerWallet, publicClient, usdcArtifact);
@@ -74,10 +118,12 @@ export async function deployPerpsFixture() {
 
   const oracleDecimals = 6;
   const initialPrice = parseUnits("2.9976357", oracleDecimals);
-  const oracleAddress = await deploy(ownerWallet, publicClient, oracleArtifact, [
-    initialPrice,
-    oracleDecimals,
-  ]);
+  const oracleAddress = await deploy(
+    ownerWallet,
+    publicClient,
+    oracleArtifact,
+    [initialPrice, oracleDecimals],
+  );
 
   await usdc.write.transfer([HARDHAT_ACCOUNTS[1].address, topUpBalanceUSDC]);
   await usdc.write.transfer([HARDHAT_ACCOUNTS[2].address, topUpBalanceUSDC]);
@@ -86,55 +132,124 @@ export async function deployPerpsFixture() {
 
   const marginPercent = 10;
   const maintenanceMarginPercent = 5;
-  const liquidationFee = parseUnits("1", tokenDecimals);
+  const liquidationFeeBps = 50; // 0.5% of notional
   const minimumPriceIncrement = parseUnits("0.01", tokenDecimals);
   const takerFeeBps = 5;
   const makerFeeBps = 0;
   const collateralAmount = parseUnits("100000", tokenDecimals);
 
-  const perpsImplAddress = await deploy(ownerWallet, publicClient, perpsArtifact, [
-    minimumPriceIncrement,
-  ]);
-
-  const initData = encodeFunctionData({
-    abi: hashPowerPerpsDexAbi,
+  // CollateralVault behind a UUPS proxy
+  const vaultImplAddress = await deploy(
+    ownerWallet,
+    publicClient,
+    vaultArtifact,
+  );
+  const vaultInitData = encodeFunctionData({
+    abi: vaultArtifact.abi,
     functionName: "initialize",
-    args: [usdcAddress, oracleAddress, marginPercent, maintenanceMarginPercent],
+    args: [usdcAddress],
+  });
+  const vaultAddress = await deploy(
+    ownerWallet,
+    publicClient,
+    proxyArtifact,
+    [vaultImplAddress, vaultInitData],
+  );
+  const vault = getContract({
+    address: vaultAddress,
+    abi: collateralVaultAbi,
+    client: { public: publicClient, wallet: ownerWallet },
   });
 
-  const perpsProxyAddress = await deploy(ownerWallet, publicClient, proxyArtifact, [
-    perpsImplAddress,
-    initData,
-  ]);
-
+  // HashPowerPerpsDEX behind a UUPS proxy — initialise with (oracle, vault)
+  const perpsImplAddress = await deploy(
+    ownerWallet,
+    publicClient,
+    perpsArtifact,
+    [minimumPriceIncrement],
+  );
+  const perpsInitData = encodeFunctionData({
+    abi: hashPowerPerpsDexAbi,
+    functionName: "initialize",
+    args: [oracleAddress, vaultAddress],
+  });
+  const perpsProxyAddress = await deploy(
+    ownerWallet,
+    publicClient,
+    proxyArtifact,
+    [perpsImplAddress, perpsInitData],
+  );
   const perps = getContract({
     address: perpsProxyAddress,
     abi: hashPowerPerpsDexAbi,
     client: { public: publicClient, wallet: ownerWallet },
   });
-
   const quantityDecimals = await perps.read.QUANTITY_DECIMALS();
 
-  await perps.write.setMatchFee([takerFeeBps, makerFeeBps]);
-  await perps.write.setLiquidationFee([liquidationFee]);
+  // PME (with options-engine mock) behind a UUPS proxy
+  const optionsMockAddress = await deploy(
+    ownerWallet,
+    publicClient,
+    optionsMockArtifact,
+  );
+  const pmeImplAddress = await deploy(ownerWallet, publicClient, pmeArtifact);
+  const pmeInitData = encodeFunctionData({
+    abi: pmeArtifact.abi,
+    functionName: "initialize",
+    args: [vaultAddress],
+  });
+  const pmeAddress = await deploy(ownerWallet, publicClient, proxyArtifact, [
+    pmeImplAddress,
+    pmeInitData,
+  ]);
+  const pme = getContract({
+    address: pmeAddress,
+    abi: pmeArtifact.abi,
+    client: { public: publicClient, wallet: ownerWallet },
+  });
+  // The PME pins each product to its own vault at registration.
+  const optionsMock = getContract({
+    address: optionsMockAddress,
+    abi: optionsMockArtifact.abi,
+    client: { public: publicClient, wallet: ownerWallet },
+  });
+  await optionsMock.write.setVault([vaultAddress]);
+  await pme.write.addLinearMarket([perpsProxyAddress]);
+  await pme.write.setOptions([optionsMockAddress]);
+  await pme.write.setOracle([oracleAddress]);
 
-  for (const wallet of [sellerWallet, buyerWallet, buyer2Wallet, ownerWallet, seller2Wallet]) {
+  // Wire vault ↔ perps ↔ PME
+  await vault.write.setMarginEngine([pmeAddress]);
+  await vault.write.setAuthorizedCaller([perpsProxyAddress, true]);
+  await perps.write.setPortfolioMargin([pmeAddress]);
+
+  await perps.write.setTakerFeeBps([takerFeeBps]);
+  await perps.write.setMakerFeeBps([makerFeeBps]);
+  await perps.write.setLiquidationFeeBps([liquidationFeeBps]);
+
+  // Users approve the VAULT (not the perps DEX) — collateral lives in the vault.
+  for (const wallet of [
+    sellerWallet,
+    buyerWallet,
+    buyer2Wallet,
+    ownerWallet,
+    seller2Wallet,
+  ]) {
     const usdcForWallet = getContract({
       address: usdcAddress,
       abi: usdcMockAbi,
       client: { wallet },
     });
-    await usdcForWallet.write.approve([perpsProxyAddress, maxUint256]);
+    await usdcForWallet.write.approve([vaultAddress, maxUint256]);
   }
 
-  await perps.write.depositReservePool([collateralAmount]);
+  await vault.write.depositInsuranceFund([collateralAmount]);
   const startBlock = await publicClient.getBlockNumber();
 
   const getMinimumCollateral = (price: bigint, absQuantity: bigint) => {
     const orderValue = (price * absQuantity) / 10n ** BigInt(quantityDecimals);
     const requiredMargin = (orderValue * BigInt(marginPercent)) / 100n;
-    const bpsFee = (orderValue * BigInt(takerFeeBps)) / 10000n;
-    const fee = bpsFee > liquidationFee ? bpsFee : liquidationFee;
+    const fee = (orderValue * BigInt(takerFeeBps)) / 10000n;
     return requiredMargin + fee;
   };
 
@@ -149,12 +264,21 @@ export async function deployPerpsFixture() {
       keeperWallet,
       seller2Wallet,
     },
-    contracts: { perpsAddress: perpsProxyAddress, usdcAddress, oracleAddress, perps },
+    contracts: {
+      perpsAddress: perpsProxyAddress,
+      usdcAddress,
+      oracleAddress,
+      vaultAddress,
+      pmeAddress,
+      optionsMockAddress,
+      perps,
+      vault,
+    },
     config: {
       oracle: { price: initialPrice, decimals: oracleDecimals },
       marginPercent,
       maintenanceMarginPercent,
-      liquidationFee,
+      liquidationFeeBps,
       minimumPriceIncrement,
       takerFeeBps,
       makerFeeBps,
@@ -175,13 +299,18 @@ export async function deployWithCollateralFixture() {
 
   const collateralPerUser = parseUnits("1000", config.tokenDecimals);
 
-  for (const wallet of [clients.sellerWallet, clients.buyerWallet, clients.buyer2Wallet, clients.seller2Wallet]) {
-    const perps = getContract({
-      address: contracts.perpsAddress,
-      abi: hashPowerPerpsDexAbi,
+  for (const wallet of [
+    clients.sellerWallet,
+    clients.buyerWallet,
+    clients.buyer2Wallet,
+    clients.seller2Wallet,
+  ]) {
+    const vault = getContract({
+      address: contracts.vaultAddress,
+      abi: collateralVaultAbi,
       client: { public: clients.publicClient, wallet },
     });
-    await perps.write.addCollateral([collateralPerUser]);
+    await vault.write.deposit([collateralPerUser]);
   }
 
   return {
@@ -202,6 +331,12 @@ export async function deployWithLiquidatablePositionFixture() {
       abi: hashPowerPerpsDexAbi,
       client: { public: clients.publicClient, wallet },
     });
+  const makeVault = (wallet: typeof clients.ownerWallet) =>
+    getContract({
+      address: contracts.vaultAddress,
+      abi: collateralVaultAbi,
+      client: { public: clients.publicClient, wallet },
+    });
 
   const perpsOwner = makePerps(clients.ownerWallet);
   const perpsSeller = makePerps(clients.sellerWallet);
@@ -212,13 +347,13 @@ export async function deployWithLiquidatablePositionFixture() {
   const qty = parseUnits("1", config.quantityDecimals);
 
   const minCollateral = getMinimumCollateral(initialPrice, qty);
-  await perpsSeller.write.addCollateral([minCollateral]);
-  await perpsSeller2.write.addCollateral([minCollateral]);
-  await perpsBuyer.write.addCollateral([minCollateral * 3n]);
+  await makeVault(clients.sellerWallet).write.deposit([minCollateral]);
+  await makeVault(clients.seller2Wallet).write.deposit([minCollateral]);
+  await makeVault(clients.buyerWallet).write.deposit([minCollateral * 3n]);
 
-  await perpsSeller.write.createOrder([initialPrice, -qty]);
-  await perpsSeller2.write.createOrder([initialPrice, -qty]);
-  await perpsBuyer.write.createOrder([initialPrice, qty * 2n]);
+  await perpsSeller.write.createOrder([initialPrice, -qty, TimeInForce.GTC]);
+  await perpsSeller2.write.createOrder([initialPrice, -qty, TimeInForce.GTC]);
+  await perpsBuyer.write.createOrder([initialPrice, qty * 2n, TimeInForce.GTC]);
 
   const makeLiquidatable = async (): Promise<bigint> => {
     const newPrice = initialPrice * 2n;
