@@ -9,6 +9,7 @@ on:
       - "cicd/**"
     paths:
       - "indexer/**"
+      - "config/*.env"
       - ".github/workflows/update-derivatives-oracle.yml"
   workflow_dispatch:
     inputs:
@@ -73,6 +74,7 @@ jobs:
       goldsky_subgraph_name: ${{ steps.env.outputs.goldsky_subgraph_name }}
       goldsky_rolling_tag: ${{ steps.env.outputs.goldsky_rolling_tag }}
       goldsky_endpoint: ${{ steps.env.outputs.goldsky_endpoint }}
+      config_env: ${{ steps.env.outputs.config_env }}
       is_cicd_branch: ${{ needs.setup.outputs.is_cicd_branch }}
 
     steps:
@@ -106,19 +108,28 @@ jobs:
           fi
           echo "goldsky_subgraph_name=$GS_NAME" >> $GITHUB_OUTPUT
 
-          # Rolling tag and public endpoint per environment
+          # Rolling tag, public endpoint, and the config/<name>.env to load.
+          # GitHub `main` and `stg` both use config/prd.env (same contracts);
+          # only the Goldsky rolling tag differs.
           case $ENV in
             dev)
               echo "goldsky_rolling_tag=dev-latest" >> $GITHUB_OUTPUT
               echo "goldsky_endpoint=${{ vars.DEV_GS_DERIVATIVES }}" >> $GITHUB_OUTPUT
+              echo "config_env=dev" >> $GITHUB_OUTPUT
               ;;
             stg)
               echo "goldsky_rolling_tag=stg-latest" >> $GITHUB_OUTPUT
               echo "goldsky_endpoint=${{ vars.STG_GS_DERIVATIVES }}" >> $GITHUB_OUTPUT
+              echo "config_env=prd" >> $GITHUB_OUTPUT
               ;;
             main)
               echo "goldsky_rolling_tag=lmn-latest" >> $GITHUB_OUTPUT
               echo "goldsky_endpoint=${{ vars.LMN_GS_DERIVATIVES }}" >> $GITHUB_OUTPUT
+              echo "config_env=prd" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "::error::Unknown environment '$ENV' (expected dev, stg, or main)"
+              exit 1
               ;;
           esac
 
@@ -135,29 +146,20 @@ jobs:
           pnpm hardhat compile
           echo "✅ Contracts compiled and ABIs generated"
 
+      # Addresses, start block and NETWORK all come from config/<env>.env.
       - name: Prepare subgraph configuration
         working-directory: ./indexer
         env:
-          COLLATERAL_TOKEN_ADDRESS: ${{ vars.COLLATERAL_TOKEN_ADDRESS }}
-          LIQUIDATION_FEE: ${{ vars.LIQUIDATION_FEE }}
-          MAINTENANCE_MARGIN_PERCENT: ${{ vars.MAINTENANCE_MARGIN_PERCENT }}
-          MARGIN_PERCENT: ${{ vars.MARGIN_PERCENT }}
-          MINIMUM_PRICE_INCREMENT: ${{ vars.MINIMUM_PRICE_INCREMENT }}
-          NETWORK: ${{ vars.NETWORK }}
-          ORDER_FEE: ${{ vars.ORDER_FEE }}
-          PERPS_ADDRESS: ${{ vars.PERPS_ADDRESS }}
-          PERPS_START_BLOCK: ${{ vars.PERPS_START_BLOCK }}
-          PRICE_ORACLE_ADDRESS: ${{ vars.PRICE_ORACLE_ADDRESS }}
-          ETH_NODE_ADDRESS: ${{ secrets.ETH_NODE_ADDRESS }}
+          CONFIG_ENV: ${{ steps.env.outputs.config_env }}
+          DEPLOY_ENV: ${{ needs.setup.outputs.environment }}
         run: |
-          echo "⚙️ Preparing subgraph for ${{ needs.setup.outputs.environment }}..."
-          echo "   Network: ${NETWORK}"
-          echo "   Perps Address: ${PERPS_ADDRESS}"
-          echo "   Perps Start Block: ${PERPS_START_BLOCK}"
-          echo "   Price Oracle: ${PRICE_ORACLE_ADDRESS}"
-          echo "   Collateral Token: ${COLLATERAL_TOKEN_ADDRESS}"
-          pnpm prepare:env
+          set -euo pipefail
+          ENV_FILE="../config/${CONFIG_ENV}.env"
+          echo "⚙️ Preparing subgraph for ${DEPLOY_ENV} from ${ENV_FILE}..."
+          ENV_FILE="$ENV_FILE" pnpm prepare:env
           echo "✅ Configuration ready"
+          echo "--- subgraph.yaml ---"
+          cat subgraph.yaml
 
       - name: Generate code and build
         working-directory: ./indexer

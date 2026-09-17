@@ -1,6 +1,6 @@
 import type { Account, Chain, Transport, WalletClient } from "viem";
 import { getAddress } from "viem/utils";
-import { sepolia, mainnet, arbitrum } from "viem/chains";
+import { sepolia, mainnet, arbitrum, baseSepolia, base } from "viem/chains";
 import SafeApiKitImport from "@safe-global/api-kit";
 import SafeImport from "@safe-global/protocol-kit";
 import type { MetaTransactionData } from "@safe-global/types-kit";
@@ -21,10 +21,16 @@ export class SafeWallet {
   private readonly safeAddr: `0x${string}`;
   private readonly wallet: WalletClient<Transport, Chain, Account>;
   private safeSigner?: Safe;
+  private nextNonce?: number;
 
-  constructor(address: `0x${string}`, wallet: WalletClient<Transport, Chain, Account>) {
+  constructor(
+    address: `0x${string}`,
+    wallet: WalletClient<Transport, Chain, Account>,
+    apiKey: string,
+  ) {
     this.safeApiKit = new SafeApiKit({
       chainId: BigInt(wallet.chain.id),
+      apiKey,
     });
     this.safeAddr = address;
     this.wallet = wallet;
@@ -46,6 +52,14 @@ export class SafeWallet {
 
   async proposeTransaction(data: MetaTransactionData): Promise<string> {
     const signer = await this.initSigner();
+    const queuedNonce = Number(
+      await this.safeApiKit.getNextNonce(getAddress(this.safeAddr)),
+    );
+    if (!Number.isInteger(queuedNonce) || queuedNonce < 0) {
+      throw new Error(`Safe API returned an invalid next nonce: ${queuedNonce}`);
+    }
+    const nonce =
+      this.nextNonce !== undefined ? Math.max(this.nextNonce, queuedNonce) : queuedNonce;
     const safeTransaction = await signer.createTransaction({
       transactions: [
         {
@@ -53,7 +67,9 @@ export class SafeWallet {
           ...(data.to ? { to: getAddress(data.to) } : {}),
         },
       ],
+      options: { nonce },
     });
+    this.nextNonce = nonce + 1;
 
     const safeTxHash = await signer.getTransactionHash(safeTransaction);
     const signature = await signer.signHash(safeTxHash);
@@ -92,4 +108,6 @@ const chainIdSafePrefixMap = {
   [sepolia.id]: "sep",
   [mainnet.id]: "eth",
   [arbitrum.id]: "arb1",
+  [base.id]: "base",
+  [baseSepolia.id]: "base-sep",
 } as Record<number, string>;

@@ -4,15 +4,15 @@
   "type": "module",
   "private": true,
   "engines": {
-    "node": ">=22.6.0"
+    "node": ">=22.9.0"
   },
   "scripts": {
     "pretest": "cd ../contracts && pnpm hardhat compile",
     "up": "docker compose up -d --build",
     "down": "docker compose down --volumes",
     "reset": "docker compose down --volumes && rm -rf data && docker compose up -d --build",
-    "test": "node --test --test-force-exit 'tests/**/*.test.ts'",
-    "test:bail": "node --test --test-force-exit --test-reporter=@reporters/bail --test-reporter-destination=stderr  --test-reporter=spec --test-reporter-destination=stdout 'tests/**/*.test.ts'",
+    "test": "node --env-file=../config/dev.env --env-file-if-exists=../.env --env-file-if-exists=.env --test --test-force-exit 'tests/**/*.test.ts'",
+    "test:bail": "node --env-file=../config/dev.env --env-file-if-exists=../.env --env-file-if-exists=.env --test --test-force-exit --test-reporter=@reporters/bail --test-reporter-destination=stderr  --test-reporter=spec --test-reporter-destination=stdout 'tests/**/*.test.ts'",
     "typecheck": "tsgo --noEmit",
     "lint": "biome lint .",
     "lint:fix": "biome check --write ."
