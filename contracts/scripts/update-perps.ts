@@ -1,71 +1,38 @@
 import { network } from "hardhat";
 import {
+  type Account,
   type Address,
-  encodeAbiParameters,
-  encodeFunctionData,
-  getAbiItem,
-  getAddress,
+  type Chain,
   type Hex,
-  keccak256,
-  numberToHex,
   type PublicClient,
+  type Transport,
+  type WalletClient,
+  createWalletClient,
+  encodeFunctionData,
+  getAddress,
+  isAddress,
   zeroAddress,
 } from "viem";
-import { HashPowerPerpsDEXAbi } from "../abi/HashPowerPerpsDEX.ts";
+import { privateKeyToAccount } from "viem/accounts";
+import { estimateContractGas, simulateContract } from "viem/actions";
+import { OperationType } from "@safe-global/types-kit";
 import { requireEnvsSet } from "../lib/env.ts";
 import { addrUrl, txUrl } from "../lib/explorer.ts";
 import { logInfo, logPrompt, logStep, logSuccess, logTitle } from "../lib/log.ts";
+import { SafeWallet } from "../lib/safe.ts";
 import { verifyContract } from "../lib/verify.ts";
 import { writeAndWait } from "../lib/writeContract.ts";
 
-// `resetState` is not an initializer, so the proxy stays on whatever version it
-// is already on. Proxies deployed before `deploy-perps.ts` consumed version 3 at
-// deployment sit on 2; the dead `__gap3` slot that `initializeV3` would clear is
-// read by no live path, so either version is a valid starting point.
-const MIN_CURRENT_INIT_VERSION = 2n;
-const MAX_CURRENT_INIT_VERSION = 3n;
+// Initializers are versioned and must run in order: `initializeV2` (reinitializer 2)
+// then `initializeV3` (reinitializer 3). Calling V3 first from version 1 permanently
+// skips V2. Fresh proxies from `deploy-perps.ts` already sit on 3.
 const TARGET_CODE_VERSION = "6.5.0";
 const UPGRADE_CONFIRMATIONS = 5;
-const DEFAULT_EVENT_CHUNK_SIZE = 50_000n;
-const DEFAULT_MAX_PARTICIPANTS = 10;
-const POSITION_MAPPING_SLOT = 14n;
-const FUNDING_SNAPSHOT_MAPPING_SLOT = 22n;
-
-const ORDER_CREATED_EVENT = getAbiItem({
-  abi: HashPowerPerpsDEXAbi,
-  name: "OrderCreated",
-});
-
-const LEGACY_POSITION_ABI = [
-  {
-    type: "function",
-    name: "getUserPosition",
-    stateMutability: "view",
-    inputs: [{ name: "_user", type: "address" }],
-    outputs: [
-      {
-        name: "",
-        type: "tuple",
-        components: [
-          { name: "netQuantity", type: "int256" },
-          { name: "aggregatedEntryPrice", type: "uint256" },
-        ],
-      },
-    ],
-  },
-] as const;
+const DEFAULT_SAFE_GAS_OVERHEAD = 150_000n;
 
 // ERC-7201 namespaced storage slot for OpenZeppelin's `Initializable`.
 const INITIALIZABLE_STORAGE_SLOT: Hex =
   "0xf0c57e16840df040f15088dc2f81fe391c3923bec73e23a9662efc9c229c6a00";
-
-type LegacyPosition = {
-  participant: Address;
-  netQuantity: bigint;
-  legacyAverage: bigint;
-  orderCount: number;
-  pendingFunding: bigint;
-};
 
 function readNonNegativeBigInt(name: string): bigint {
   const raw = process.env[name];
@@ -75,22 +42,28 @@ function readNonNegativeBigInt(name: string): bigint {
   return value;
 }
 
-function readPositiveBigInt(name: string, fallback: bigint): bigint {
+function readOptionalBigInt(name: string): bigint | undefined {
   const raw = process.env[name];
-  if (!raw) return fallback;
-  const value = BigInt(raw);
-  if (value <= 0n) throw new Error(`${name} must be positive`);
-  return value;
+  if (raw === undefined || raw === "") return undefined;
+  return BigInt(raw);
 }
 
-function readPositiveInteger(name: string, fallback: number): number {
+function readOptionalAddress(name: string): Address | undefined {
   const raw = process.env[name];
-  if (!raw) return fallback;
-  const value = Number(raw);
-  if (!Number.isSafeInteger(value) || value <= 0) {
-    throw new Error(`${name} must be a positive integer`);
+  if (!raw || raw === zeroAddress) return undefined;
+  if (!isAddress(raw))
+    throw new Error(`${name} is not a valid address: ${raw}`);
+  return getAddress(raw);
+}
+
+function readPrivateKey(name: string): Hex | undefined {
+  const raw = process.env[name];
+  if (!raw) return undefined;
+  const key = raw.startsWith("0x") ? raw : `0x${raw}`;
+  if (!/^0x[0-9a-fA-F]{64}$/.test(key)) {
+    throw new Error(`${name} is not a valid 32-byte hex private key`);
   }
-  return value;
+  return key as Hex;
 }
 
 async function readInitializedVersion(
@@ -107,126 +80,18 @@ async function readInitializedVersion(
   return BigInt(raw) & 0xffffffffffffffffn;
 }
 
-function mappingElementSlot(participant: Address, mappingSlot: bigint): Hex {
-  const base = BigInt(
-    keccak256(
-      encodeAbiParameters(
-        [{ type: "address" }, { type: "uint256" }],
-        [participant, mappingSlot],
-      ),
-    ),
-  );
-  return numberToHex(base, { size: 32 });
-}
-
-function positionSecondSlot(participant: Address): Hex {
-  return numberToHex(
-    BigInt(mappingElementSlot(participant, POSITION_MAPPING_SLOT)) + 1n,
-    { size: 32 },
-  );
-}
-
-async function verifyDeploymentBoundary(
-  pc: PublicClient,
-  proxy: Address,
-  deploymentBlock: bigint,
-) {
-  const codeAtDeployment = await pc.getCode({
-    address: proxy,
-    blockNumber: deploymentBlock,
+function resolveProposer(
+  maybeProposer: WalletClient<Transport, Chain, Account> | undefined,
+  deployer: WalletClient<Transport, Chain, Account>,
+): WalletClient<Transport, Chain, Account> {
+  if (maybeProposer) return maybeProposer;
+  const key = readPrivateKey("PROPOSER_PRIVATEKEY");
+  if (!key) return deployer;
+  return createWalletClient({
+    account: privateKeyToAccount(key),
+    chain: deployer.chain,
+    transport: deployer.transport,
   });
-  if (!codeAtDeployment || codeAtDeployment === "0x") {
-    throw new Error(`No proxy code at PERPS_DEPLOYMENT_BLOCK=${deploymentBlock}`);
-  }
-  if (deploymentBlock === 0n) return;
-  const codeBefore = await pc.getCode({
-    address: proxy,
-    blockNumber: deploymentBlock - 1n,
-  });
-  if (codeBefore && codeBefore !== "0x") {
-    throw new Error(
-      `PERPS_DEPLOYMENT_BLOCK=${deploymentBlock} is too late; proxy code already existed one block earlier`,
-    );
-  }
-}
-
-async function discoverParticipants(
-  pc: PublicClient,
-  proxy: Address,
-  fromBlock: bigint,
-  toBlock: bigint,
-): Promise<Address[]> {
-  const participants = new Map<string, Address>();
-  const chunkSize = readPositiveBigInt(
-    "UPGRADE_EVENT_CHUNK_SIZE",
-    DEFAULT_EVENT_CHUNK_SIZE,
-  );
-  for (let start = fromBlock; start <= toBlock; start += chunkSize) {
-    const end = start + chunkSize - 1n < toBlock ? start + chunkSize - 1n : toBlock;
-    const logs = await pc.getLogs({
-      address: proxy,
-      event: ORDER_CREATED_EVENT,
-      fromBlock: start,
-      toBlock: end,
-    });
-    for (const log of logs) {
-      const participant = log.args.participant;
-      if (!participant) throw new Error(`OrderCreated missing participant in block ${log.blockNumber}`);
-      const address = getAddress(participant);
-      participants.set(address.toLowerCase(), address);
-    }
-    logStep(`index OrderCreated ${start}-${end}`, `${participants.size} participant(s)`);
-  }
-  return [...participants.values()].sort();
-}
-
-async function snapshotLegacyPositions(
-  pc: PublicClient,
-  proxy: Address,
-  participants: Address[],
-  blockNumber: bigint,
-): Promise<LegacyPosition[]> {
-  const positions: LegacyPosition[] = [];
-  for (const participant of participants) {
-    const position = await pc.readContract({
-      address: proxy,
-      abi: LEGACY_POSITION_ABI,
-      functionName: "getUserPosition",
-      args: [participant],
-      blockNumber,
-    });
-    const secondSlot = await pc.getStorageAt({
-      address: proxy,
-      slot: positionSecondSlot(participant),
-      blockNumber,
-    });
-    const rawSecondSlot = secondSlot ? BigInt(secondSlot) : 0n;
-    if (rawSecondSlot !== position.aggregatedEntryPrice) {
-      throw new Error(`Legacy position read/storage mismatch for ${participant}`);
-    }
-    const orderIds = await pc.readContract({
-      address: proxy,
-      abi: HashPowerPerpsDEXAbi,
-      functionName: "getUserOrders",
-      args: [participant],
-      blockNumber,
-    });
-    const pendingFunding = await pc.readContract({
-      address: proxy,
-      abi: HashPowerPerpsDEXAbi,
-      functionName: "getPendingFunding",
-      args: [participant],
-      blockNumber,
-    });
-    positions.push({
-      participant,
-      netQuantity: position.netQuantity,
-      legacyAverage: position.aggregatedEntryPrice,
-      orderCount: orderIds.length,
-      pendingFunding,
-    });
-  }
-  return positions;
 }
 
 async function main() {
@@ -239,6 +104,13 @@ async function main() {
   );
   const proxyAddress = getAddress(env.PERPS_ADDRESS);
   const vaultAddress = getAddress(env.VAULT_ADDRESS);
+  const pmeAddress =
+    readOptionalAddress("PME_ADDRESS") ??
+    readOptionalAddress("MARGIN_ENGINE_ADDRESS") ??
+    zeroAddress;
+  const configuredSafe = readOptionalAddress("SAFE_OWNER_ADDRESS");
+  const pointsHookAddress = readOptionalAddress("HOOK_ADDRESS");
+  const existingImpl = readOptionalAddress("PERPS_IMPL_ADDRESS");
   const deploymentBlock = readNonNegativeBigInt("PERPS_DEPLOYMENT_BLOCK");
 
   const { viem } = await network.getOrCreate();
@@ -246,179 +118,278 @@ async function main() {
   const pc = await viem.getPublicClient();
   const snapshotBlock = await pc.getBlockNumber();
   const perps = await viem.getContractAt("HashPowerPerpsDEX", proxyAddress);
-  const currentOwner = await perps.read.owner({ blockNumber: snapshotBlock });
+  const currentOwner = getAddress(
+    await perps.read.owner({ blockNumber: snapshotBlock }),
+  );
+  const deployerAddress = getAddress(deployer.account.address);
   const currentCodeVersion = await perps.read.VERSION({ blockNumber: snapshotBlock }).catch(() => "unknown");
   const currentInitVersion = await readInitializedVersion(
     pc,
     proxyAddress,
     snapshotBlock,
   );
+  const needsInitializeV2 = currentInitVersion < 2n;
+  const needsInitializeV3 = currentInitVersion < 3n;
 
-  if (getAddress(currentOwner) !== getAddress(deployer.account.address)) {
-    throw new Error(`Deployer ${deployer.account.address} is not proxy owner ${currentOwner}`);
-  }
-  if (
-    currentInitVersion < MIN_CURRENT_INIT_VERSION ||
-    currentInitVersion > MAX_CURRENT_INIT_VERSION
-  ) {
+  if (configuredSafe && configuredSafe !== currentOwner) {
     throw new Error(
-      `Atomic reset upgrade requires init version ${MIN_CURRENT_INIT_VERSION}-${MAX_CURRENT_INIT_VERSION}; found ${currentInitVersion}`,
+      `SAFE_OWNER_ADDRESS ${configuredSafe} is not proxy owner ${currentOwner}`,
     );
   }
+  const safeOwnerAddress =
+    configuredSafe ??
+    (currentOwner !== deployerAddress ? currentOwner : undefined);
+  const upgradeCaller = safeOwnerAddress ?? deployerAddress;
 
-  await verifyDeploymentBoundary(pc, proxyAddress, deploymentBlock);
-  const participants = await discoverParticipants(
-    pc,
-    proxyAddress,
-    deploymentBlock,
-    snapshotBlock,
-  );
-  const maxParticipants = readPositiveInteger(
-    "UPGRADE_MAX_PARTICIPANTS",
-    DEFAULT_MAX_PARTICIPANTS,
-  );
-  if (participants.length > maxParticipants) {
-    throw new Error(
-      `Discovered ${participants.length} participants, above safety limit ${maxParticipants}`,
-    );
+  logInfo("deployer", { Address: addrUrl(pc, deployerAddress) });
+  if (safeOwnerAddress) {
+    logInfo("safe owner", { Address: safeOwnerAddress });
   }
-  const legacyPositions = await snapshotLegacyPositions(
-    pc,
-    proxyAddress,
-    participants,
-    snapshotBlock,
-  );
 
   logInfo("preflight", {
     Proxy: addrUrl(pc, proxyAddress),
     Owner: currentOwner,
     Version: currentCodeVersion,
     InitVersion: currentInitVersion.toString(),
+    initializeV2: needsInitializeV2 ? "yes" : "skip (already >= 2)",
+    initializeV3: needsInitializeV3 ? "yes" : "skip (already >= 3)",
+    Vault: addrUrl(pc, vaultAddress),
+    PME:
+      pmeAddress === zeroAddress
+        ? "(none — wire later)"
+        : addrUrl(pc, pmeAddress),
     "Deployment block": deploymentBlock,
     "Snapshot block": snapshotBlock,
-    "Complete participant index": participants.length,
-    "Active positions": legacyPositions.filter((position) => position.netQuantity !== 0n).length,
-    "Open orders": legacyPositions.reduce((total, position) => total + position.orderCount, 0),
   });
-  for (const position of legacyPositions) {
-    console.log(
-      `  ${position.participant} qty=${position.netQuantity} legacyAvg=${position.legacyAverage} orders=${position.orderCount} pendingFunding=${position.pendingFunding}`,
+
+  if (upgradeCaller !== currentOwner) {
+    throw new Error(
+      `Configured upgrade caller ${upgradeCaller} is not HashPowerPerpsDEX owner ${currentOwner}`,
     );
   }
 
-  await logPrompt("Participant index and legacy position preflight are complete. Deploy implementation?");
-  const newImpl = await viem.deployContract(
-    "HashPowerPerpsDEX",
-    [vaultAddress],
-    { confirmations: UPGRADE_CONFIRMATIONS },
-  );
-  logStep("Deployed", addrUrl(pc, newImpl.address));
-  await verifyContract(newImpl.address, [vaultAddress]);
-  logStep("Verified", addrUrl(pc, newImpl.address));
+  await logPrompt("Preflight complete. Deploy implementation?");
+  const newImpl = existingImpl
+    ? await viem.getContractAt("HashPowerPerpsDEX", existingImpl)
+    : await viem.deployContract("HashPowerPerpsDEX", [vaultAddress], {
+        confirmations: UPGRADE_CONFIRMATIONS,
+      });
 
-  const initData = encodeFunctionData({
-    abi: newImpl.abi,
-    functionName: "resetState",
-    args: [participants],
-  });
-  const upgradeArgs = [newImpl.address, initData] as const;
-  const estimatedGas = await pc.estimateContractGas({
+  logStep(
+    existingImpl ? "Using existing implementation" : "Deployed",
+    addrUrl(pc, newImpl.address),
+  );
+  if (!existingImpl) {
+    await verifyContract(newImpl.address, [vaultAddress]);
+    logStep("Verified", addrUrl(pc, newImpl.address));
+  }
+
+  const implVersion = await newImpl.read.VERSION();
+  if (implVersion !== TARGET_CODE_VERSION) {
+    throw new Error(
+      `Implementation VERSION is ${implVersion}, expected ${TARGET_CODE_VERSION}`,
+    );
+  }
+
+  // reinitializer(n) permanently skips any lower n. If we still need V2, it
+  // must run before V3 — otherwise initializeV2 is locked out forever.
+  const upgradeCalldata = needsInitializeV2
+    ? encodeFunctionData({
+        abi: newImpl.abi,
+        functionName: "initializeV2",
+        args: [vaultAddress, pmeAddress],
+      })
+    : needsInitializeV3
+      ? encodeFunctionData({
+          abi: newImpl.abi,
+          functionName: "initializeV3",
+        })
+      : "0x";
+  const upgradeCall = needsInitializeV2
+    ? "initializeV2"
+    : needsInitializeV3
+      ? "initializeV3"
+      : "(none)";
+  const needsFollowUpInitializeV3 = needsInitializeV2 && needsInitializeV3;
+
+  const upgradeArgs = [newImpl.address, upgradeCalldata] as const;
+  await simulateContract(pc, {
     address: proxyAddress,
     abi: newImpl.abi,
     functionName: "upgradeToAndCall",
     args: upgradeArgs,
-    account: deployer.account,
+    account: upgradeCaller,
+  });
+  const estimatedUpgradeGas = await estimateContractGas(pc, {
+    address: proxyAddress,
+    abi: newImpl.abi,
+    functionName: "upgradeToAndCall",
+    args: upgradeArgs,
+    account: upgradeCaller,
   });
   const latestBlock = await pc.getBlock();
-  if (estimatedGas >= latestBlock.gasLimit) {
+  const configuredMaxAtomicGas = readOptionalBigInt("MAX_ATOMIC_UPGRADE_GAS");
+  if (configuredMaxAtomicGas !== undefined && configuredMaxAtomicGas < 0n) {
+    throw new Error("MAX_ATOMIC_UPGRADE_GAS must not be negative");
+  }
+  const maxAtomicUpgradeGas =
+    configuredMaxAtomicGas !== undefined &&
+    configuredMaxAtomicGas < latestBlock.gasLimit
+      ? configuredMaxAtomicGas
+      : latestBlock.gasLimit;
+  const safeGasOverhead = safeOwnerAddress
+    ? (readOptionalBigInt("SAFE_EXECUTION_GAS_OVERHEAD") ??
+      DEFAULT_SAFE_GAS_OVERHEAD)
+    : 0n;
+  const requiredBlockGas = estimatedUpgradeGas + safeGasOverhead;
+  if (requiredBlockGas > maxAtomicUpgradeGas) {
     throw new Error(
-      `Estimated upgrade gas ${estimatedGas} exceeds block gas limit ${latestBlock.gasLimit}`,
+      `Upgrade cannot fit: estimate ${estimatedUpgradeGas} + Safe overhead ${safeGasOverhead} ` +
+        `= ${requiredBlockGas}, limit ${maxAtomicUpgradeGas}.`,
     );
   }
-  const upgradeSimulation = await perps.simulate.upgradeToAndCall(upgradeArgs);
-  logInfo("atomic upgrade", {
+  logInfo("upgrade preflight", {
     "New implementation": addrUrl(pc, newImpl.address),
-    Call: `resetState(${participants.length} participants)`,
-    "Estimated gas": estimatedGas,
-    "Block gas limit": latestBlock.gasLimit,
+    Call: upgradeCall,
+    Simulation: "passed",
+    "Estimated upgrade gas": estimatedUpgradeGas,
+    "Safe execution overhead": safeGasOverhead,
+    "Enforced gas limit": maxAtomicUpgradeGas,
   });
-  await logPrompt("Submit the single upgradeToAndCall reset transaction?");
 
-  const receipt = await writeAndWait(
-    deployer,
-    upgradeSimulation,
-    UPGRADE_CONFIRMATIONS,
-  );
-  const atUpgradeBlock = { blockNumber: receipt.blockNumber } as const;
-  logStep(
-    "Upgraded",
-    `${txUrl(pc, receipt.transactionHash)} block ${receipt.blockNumber}`,
-  );
+  if (safeOwnerAddress) {
+    const proposer = deployer;
+    const { SAFE_API_KEY } = requireEnvsSet("SAFE_API_KEY");
+    const safe = new SafeWallet(safeOwnerAddress, proposer, SAFE_API_KEY);
 
-  const postInitVersion = await readInitializedVersion(
-    pc,
-    proxyAddress,
-    receipt.blockNumber,
-  );
-  if (postInitVersion !== currentInitVersion) {
-    throw new Error(`Reset unexpectedly changed init version to ${postInitVersion}`);
-  }
-  const postCodeVersion = await perps.read.VERSION(atUpgradeBlock);
-  if (postCodeVersion !== TARGET_CODE_VERSION) {
-    throw new Error(`Post-upgrade code version ${postCodeVersion}, expected ${TARGET_CODE_VERSION}`);
-  }
-  for (const expected of legacyPositions) {
-    const actual = await perps.read.getUserPosition(
-      [expected.participant],
-      atUpgradeBlock,
+    logInfo("Propose upgrade via Safe", { safe: safeOwnerAddress });
+    await logPrompt("Proceed?");
+    const upgradeTxData = encodeFunctionData({
+      abi: newImpl.abi,
+      functionName: "upgradeToAndCall",
+      args: upgradeArgs,
+    });
+    const upgradeTxHash = await safe.proposeTransaction({
+      data: upgradeTxData,
+      to: proxyAddress,
+      value: "0",
+      operation: OperationType.Call,
+    });
+    logStep("Safe TX hash", upgradeTxHash);
+    logStep("Safe UI URL", safe.getSafeUITxUrl(upgradeTxHash));
+
+    if (needsFollowUpInitializeV3) {
+      logInfo("Propose initializeV3 via Safe", {
+        note: "Execute after the upgrade transaction",
+      });
+      await logPrompt("Proceed?");
+      const initV3Data = encodeFunctionData({
+        abi: newImpl.abi,
+        functionName: "initializeV3",
+      });
+      const initV3TxHash = await safe.proposeTransaction({
+        data: initV3Data,
+        to: proxyAddress,
+        value: "0",
+        operation: OperationType.Call,
+      });
+      logStep("Safe TX hash", initV3TxHash);
+      logStep("Safe UI URL", safe.getSafeUITxUrl(initV3TxHash));
+    }
+
+    if (pointsHookAddress) {
+      logInfo("Propose setHook via Safe", { hook: pointsHookAddress });
+      await logPrompt("Proceed?");
+      const setHookData = encodeFunctionData({
+        abi: newImpl.abi,
+        functionName: "setHook",
+        args: [pointsHookAddress],
+      });
+      const setHookTxHash = await safe.proposeTransaction({
+        data: setHookData,
+        to: proxyAddress,
+        value: "0",
+        operation: OperationType.Call,
+      });
+      logStep("Safe TX hash", setHookTxHash);
+      logStep("Safe UI URL", safe.getSafeUITxUrl(setHookTxHash));
+    }
+  } else {
+    await logPrompt("Submit upgradeToAndCall?");
+    const upgradeSimulation =
+      await perps.simulate.upgradeToAndCall(upgradeArgs);
+    const receipt = await writeAndWait(
+      deployer,
+      upgradeSimulation,
+      UPGRADE_CONFIRMATIONS,
     );
-    if (actual.netQuantity !== 0n || actual.netEntryValue !== 0n) {
-      throw new Error(`Position was not reset for ${expected.participant}`);
+    logStep(
+      "Upgraded",
+      `${txUrl(pc, receipt.transactionHash)} block ${receipt.blockNumber}`,
+    );
+
+    let postInitVersion = await readInitializedVersion(
+      pc,
+      proxyAddress,
+      receipt.blockNumber,
+    );
+    if (needsInitializeV2 && postInitVersion < 2n) {
+      throw new Error(
+        `initializeV2 did not advance init version (still ${postInitVersion})`,
+      );
     }
-    const [orderIds, pendingFunding, fundingSnapshot] = await Promise.all([
-      perps.read.getUserOrders([expected.participant], atUpgradeBlock),
-      perps.read.getPendingFunding([expected.participant], atUpgradeBlock),
-      pc.getStorageAt({
-        address: proxyAddress,
-        slot: mappingElementSlot(
-          expected.participant,
-          FUNDING_SNAPSHOT_MAPPING_SLOT,
-        ),
-        blockNumber: receipt.blockNumber,
-      }),
-    ]);
-    if (orderIds.length !== 0) {
-      throw new Error(`Orders were not reset for ${expected.participant}`);
+
+    if (needsFollowUpInitializeV3 && postInitVersion < 3n) {
+      logInfo("initializeV3", { from: postInitVersion.toString() });
+      await logPrompt("Submit initializeV3?");
+      const initV3Simulation = await perps.simulate.initializeV3();
+      const initV3Receipt = await writeAndWait(
+        deployer,
+        initV3Simulation,
+        UPGRADE_CONFIRMATIONS,
+      );
+      logStep("initializeV3", txUrl(pc, initV3Receipt.transactionHash));
+      postInitVersion = await readInitializedVersion(
+        pc,
+        proxyAddress,
+        initV3Receipt.blockNumber,
+      );
     }
-    if (pendingFunding !== 0n || (fundingSnapshot && BigInt(fundingSnapshot) !== 0n)) {
-      throw new Error(`Funding state was not reset for ${expected.participant}`);
+
+    const expectedInitVersion = needsInitializeV3 ? 3n : currentInitVersion;
+    if (postInitVersion !== expectedInitVersion) {
+      throw new Error(
+        `Init version ${postInitVersion}, expected ${expectedInitVersion}`,
+      );
     }
-    const secondSlot = await pc.getStorageAt({
-      address: proxyAddress,
-      slot: positionSecondSlot(expected.participant),
+    const postCodeVersion = await perps.read.VERSION({
       blockNumber: receipt.blockNumber,
     });
-    if (secondSlot && BigInt(secondSlot) !== 0n) {
-      throw new Error(`Position entry slot was not zeroed for ${expected.participant}`);
+    if (postCodeVersion !== TARGET_CODE_VERSION) {
+      throw new Error(
+        `Post-upgrade code version ${postCodeVersion}, expected ${TARGET_CODE_VERSION}`,
+      );
     }
-  }
-  logStep("Init version", postInitVersion.toString());
-  logStep("Code version", postCodeVersion);
-  logStep("Reset verification", `${legacyPositions.length} participants fully clear`);
 
-  const pointsHookAddress = (process.env.HOOK_ADDRESS ?? "") as Hex;
-  if (pointsHookAddress && pointsHookAddress !== zeroAddress) {
-    const currentHook = await perps.read.hook();
-    if (currentHook.toLowerCase() !== pointsHookAddress.toLowerCase()) {
-      logInfo("setHook", { current: currentHook, new: pointsHookAddress });
-      await logPrompt("Proceed?");
-      const simulation = await perps.simulate.setHook([pointsHookAddress]);
-      const hookReceipt = await writeAndWait(deployer, simulation);
-      logStep("setHook", txUrl(pc, hookReceipt.transactionHash));
+    logStep("Init version", postInitVersion.toString());
+    logStep("Code version", postCodeVersion);
+
+    if (pointsHookAddress) {
+      const currentHook = await perps.read.hook();
+      if (currentHook.toLowerCase() !== pointsHookAddress.toLowerCase()) {
+        logInfo("setHook", { current: currentHook, new: pointsHookAddress });
+        await logPrompt("Proceed?");
+        const simulation = await perps.simulate.setHook([pointsHookAddress]);
+        const hookReceipt = await writeAndWait(deployer, simulation);
+        logStep("setHook", txUrl(pc, hookReceipt.transactionHash));
+      }
     }
   }
 
   logSuccess(addrUrl(pc, proxyAddress));
 }
 
-main();
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
