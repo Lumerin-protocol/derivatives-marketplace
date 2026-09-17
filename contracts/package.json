@@ -18,6 +18,8 @@
     "storage:baseline": "hardhat compile && node scripts/check-perps-storage-layout.mjs --write",
     "clean": "rm -rf abi artifacts cache",
     "aderyn": "aderyn",
+    "run:dev": "hardhat run --env dev",
+    "run:prod": "hardhat run --env prd",
     "deploy:perps": "hardhat run scripts/deploy-perps.ts",
     "reset:perps": "hardhat run scripts/reset-perps.ts",
     "upgrade:perps": "hardhat run scripts/update-perps.ts",

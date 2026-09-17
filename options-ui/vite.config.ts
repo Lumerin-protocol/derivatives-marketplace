@@ -1,10 +1,27 @@
 import path from "node:path";
+import { loadEnvFile } from "node:process";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
 import { validateEnv } from "./src/env.ts";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const optionsUiDir = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(optionsUiDir, "..");
+
+/** `loadEnvFile` never overwrites, so most-specific files are read first. */
+function tryLoadEnvFile(file: string): void {
+  try {
+    loadEnvFile(file);
+  } catch {
+    // optional
+  }
+}
+
+function configEnvName(mode: string): string {
+  if (mode === "hardhat") return "local";
+  if (mode === "production") return "prd";
+  return "dev";
+}
 
 /**
  * Vite passes string `define` values through as raw source (see `handleDefineValue` in Vite).
@@ -18,6 +35,10 @@ function importMetaEnvDefineLiteral(value: unknown): string {
 }
 
 export default defineConfig(({ mode }) => {
+  tryLoadEnvFile(path.resolve(optionsUiDir, ".env"));
+  tryLoadEnvFile(path.resolve(repoRoot, ".env.local"));
+  tryLoadEnvFile(path.resolve(repoRoot, ".env"));
+  tryLoadEnvFile(path.resolve(repoRoot, `config/${configEnvName(mode)}.env`));
   const loaded = loadEnv(mode, repoRoot, "");
 
   const validated = validateEnv(loaded);

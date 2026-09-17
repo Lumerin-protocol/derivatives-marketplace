@@ -1,5 +1,3 @@
-import { loadEnvFile } from "node:process";
-
 /** Returns true if all specified env variables are set */
 export function requireEnvsSet<T extends string>(...envs:[T, ...T[]]): Record<typeof envs[number], string> {
   for (const envName of envs){
@@ -8,13 +6,4 @@ export function requireEnvsSet<T extends string>(...envs:[T, ...T[]]): Record<ty
     }
   }
   return process.env as Record<typeof envs[number], string>;
-}
-
-/** Load an env file if present; log and continue on failure. */
-export function tryLoadEnvFile(path: string): void {
-  try {
-    loadEnvFile(path);
-  } catch (err: unknown) {
-    console.info(`Failed to load env file ${path}:\n${(err as Error).message}`);
-  }
 }

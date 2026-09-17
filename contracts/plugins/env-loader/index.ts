@@ -6,6 +6,7 @@ import "./type-extensions.ts";
 /**
  * For `--env <name>`, loads `envLoader.overrideEnvFiles` then `<name>.env`
  * from `envLoader.configDir`, and connects to the network named by its `NETWORK`.
+ * `NETWORK=base` is canonical for mainnet; `base-mainnet` remains a Hardhat alias.
  */
 const envLoaderPlugin: HardhatPlugin = {
   id: "env-loader",

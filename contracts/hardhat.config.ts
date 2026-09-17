@@ -119,6 +119,15 @@ export default defineConfig({
       url: configVariable("ALCHEMY_API_KEY", "https://base-sepolia.g.alchemy.com/v2/{variable}"),
       accounts: [configVariable("PRIVATE_KEY")],
     },
+    // `base` is the canonical Graph / viem / config-file name. `base-mainnet`
+    // is a deprecated alias for already-deployed scripts and env files.
+    base: {
+      type: "http",
+      chainType: "l1",
+      chainId: 8453,
+      url: configVariable("ALCHEMY_API_KEY", "https://base-mainnet.g.alchemy.com/v2/{variable}"),
+      accounts: [configVariable("PRIVATE_KEY")],
+    },
     "base-mainnet": {
       type: "http",
       chainType: "l1",
