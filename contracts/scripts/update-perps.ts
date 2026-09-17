@@ -1,19 +1,13 @@
 import { network } from "hardhat";
 import {
-  type Account,
   type Address,
-  type Chain,
   type Hex,
   type PublicClient,
-  type Transport,
-  type WalletClient,
-  createWalletClient,
   encodeFunctionData,
   getAddress,
   isAddress,
   zeroAddress,
 } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
 import { estimateContractGas, simulateContract } from "viem/actions";
 import { OperationType } from "@safe-global/types-kit";
 import { requireEnvsSet } from "../lib/env.ts";
@@ -56,16 +50,6 @@ function readOptionalAddress(name: string): Address | undefined {
   return getAddress(raw);
 }
 
-function readPrivateKey(name: string): Hex | undefined {
-  const raw = process.env[name];
-  if (!raw) return undefined;
-  const key = raw.startsWith("0x") ? raw : `0x${raw}`;
-  if (!/^0x[0-9a-fA-F]{64}$/.test(key)) {
-    throw new Error(`${name} is not a valid 32-byte hex private key`);
-  }
-  return key as Hex;
-}
-
 async function readInitializedVersion(
   pc: PublicClient,
   proxy: Address,
@@ -78,20 +62,6 @@ async function readInitializedVersion(
   });
   if (!raw || raw === "0x" || raw === "0x0") return 0n;
   return BigInt(raw) & 0xffffffffffffffffn;
-}
-
-function resolveProposer(
-  maybeProposer: WalletClient<Transport, Chain, Account> | undefined,
-  deployer: WalletClient<Transport, Chain, Account>,
-): WalletClient<Transport, Chain, Account> {
-  if (maybeProposer) return maybeProposer;
-  const key = readPrivateKey("PROPOSER_PRIVATEKEY");
-  if (!key) return deployer;
-  return createWalletClient({
-    account: privateKeyToAccount(key),
-    chain: deployer.chain,
-    transport: deployer.transport,
-  });
 }
 
 async function main() {
@@ -258,9 +228,8 @@ async function main() {
   });
 
   if (safeOwnerAddress) {
-    const proposer = deployer;
     const { SAFE_API_KEY } = requireEnvsSet("SAFE_API_KEY");
-    const safe = new SafeWallet(safeOwnerAddress, proposer, SAFE_API_KEY);
+    const safe = new SafeWallet(safeOwnerAddress, deployer, SAFE_API_KEY);
 
     logInfo("Propose upgrade via Safe", { safe: safeOwnerAddress });
     await logPrompt("Proceed?");
