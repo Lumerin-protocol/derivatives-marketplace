@@ -1,13 +1,15 @@
 import { configVariable, defineConfig } from "hardhat/config";
 import hardhatToolboxViem from "@nomicfoundation/hardhat-toolbox-viem";
 import hardhatViemAbi from "hardhat-viem-abi";
-import { tryLoadEnvFile } from "./lib/env.ts";
-
-tryLoadEnvFile("./../.env");
-tryLoadEnvFile(".env");
+import envLoader from "./plugins/env-loader/index.ts";
 
 export default defineConfig({
-  plugins: [hardhatToolboxViem, hardhatViemAbi],
+  plugins: [hardhatToolboxViem, hardhatViemAbi, envLoader],
+  envLoader: {
+    configDir: "../config",
+    // Machine/secret values; win over the named env file for overlapping keys.
+    overrideEnvFiles: ["../.env", ".env"],
+  },
   codegen: {
     // Keepers and the UI install `abi/` as this package name; do not rename casually.
     packageJson: { name: "derivatives-marketplace-abi" },
@@ -93,7 +95,6 @@ export default defineConfig({
       "collateral-margin/contracts/contracts/mocks/OptionsEngineMock.sol",
     ],
   },
-
   verify: {
     etherscan: {
       apiKey: configVariable("ETHERSCAN_API_KEY"),
