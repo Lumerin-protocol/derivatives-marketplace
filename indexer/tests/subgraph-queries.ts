@@ -5,11 +5,11 @@ export const PerpsStatsQuery = gql`
   query PerpsStats {
     perps(id: 0) {
       contractAddress
-      collateralToken
+      collateralVault
       priceOracle
-      marginPercent
-      maintenanceMarginPercent
-      liquidationFee
+      portfolioMargin
+      liquidationFeeBps
+      liquidatorShareBps
       minimumPriceIncrement
       takerFeeBps
       makerFeeBps
@@ -32,9 +32,6 @@ export const UserQuery = gql`
   query User($address: ID!) {
     user(id: $address) {
       address
-      collateralBalance
-      totalDeposited
-      totalWithdrawn
       netQuantity
       aggregatedEntryPrice
       orderCount
@@ -139,24 +136,9 @@ export const OrdersAtPriceQuery = gql`
   }
 `;
 
-// Get recent liquidations
-export const RecentLiquidationsQuery = gql`
-  query RecentLiquidations($first: Int!, $skip: Int!) {
-    liquidations(first: $first, skip: $skip, orderBy: timestamp, orderDirection: desc) {
-      id
-      user {
-        address
-      }
-      liquidator {
-        address
-      }
-      positionSize
-      pnl
-      liquidatorFee
-      timestamp
-    }
-  }
-`;
+// Per-user / global liquidation lists now ride the flagged Trade feed, e.g.
+// `trades(where: { isLiquidation: true })` / `trades(where: { liquidator: $addr })`,
+// since the dedicated Liquidation entity was dropped (superseded by the Trade).
 
 // Get top traders by realized PnL
 export const TopTradersQuery = gql`
@@ -166,7 +148,6 @@ export const TopTradersQuery = gql`
       realizedPnl
       tradeCount
       netQuantity
-      collateralBalance
     }
   }
 `;
@@ -184,7 +165,6 @@ export const OpenPositionsQuery = gql`
       address
       netQuantity
       aggregatedEntryPrice
-      collateralBalance
       realizedPnl
     }
   }

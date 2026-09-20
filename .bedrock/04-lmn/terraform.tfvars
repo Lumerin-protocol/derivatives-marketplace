@@ -7,6 +7,7 @@ ecs_cluster = {
 }
 
 # Configure Market Maker Lambda
+# Already false — legacy perps keeper fully off in LMN.
 perpskeeper_service = {
   create                      = false
   ghcr_repo                   = "ghcr.io/lumerin-protocol/perps-keeper"

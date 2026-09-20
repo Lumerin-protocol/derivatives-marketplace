@@ -6,9 +6,10 @@ ecs_cluster = {
   protect = false
 }
 
-# Configure PerpsKeeper Service
+# PerpsKeeper deprecated — unified liquidation keeper runs from collateral-margin
+# (svc-col-mar-keeper-*). Set create=false before apply to tear down ECS/ALB/DNS.
 perpskeeper_service = {
-  create                    = true
+  create                    = false
   ghcr_repo                 = "ghcr.io/lumerin-protocol/perps-keeper"
   ghcr_imagetag             = "dev-latest"
   svc_name                  = "perps-keeper"
@@ -23,7 +24,7 @@ perpskeeper_service = {
 
 # Configure MarketMaker Service
 marketmaker_service = {
-  create                   = true
+  create                   = false
   ghcr_repo                = "ghcr.io/lumerin-protocol/perps-market-maker"
   ghcr_imagetag            = "dev-latest"
   svc_name                 = "perps-mktmkr"

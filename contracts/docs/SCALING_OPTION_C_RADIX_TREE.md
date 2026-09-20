@@ -168,17 +168,29 @@ N = total number of orders in the tree. The 64-bit key limits tree height to 64.
 
 With 32 bits for price and `minimumPriceIncrement = 0.01 USDC`:
 
-- Max representable price: 2^32 \* 0.01 = 42,949,672.96 USDC
+- Max representable price: 2^32 0.01 = 42,949,672.96 USDC
 - More than sufficient for most assets
 
 With 40 bits for price and 24 bits for order sequence:
 
-- Max price: 2^40 \* 0.01 = ~10.99 trillion (effectively unlimited)
+- Max price: 2^40 0.01 = ~10.99 trillion (effectively unlimited)
 - Max orders per price: 16.7 million
 
 ### Aggregated Entry Price for Batch Fills
 
 When a subtree is removed atomically, the taker gets a weighted average price across all orders in the subtree. The `sumValue / sumQty` gives this directly from the node's aggregates.
+
+### Settlement vs Matching
+
+**Matching** (navigation, subtree decisions, updating aggregates on the path) is **O(log N)** in tree height — bounded by the 64-bit key — and **batch subtree removal** avoids a linear scan of every resting order when deciding what to fill.
+
+**Settlement** (per-user state) is a separate axis. If each filled order must update **maker positions, margin, collateral, or per-user balances** in storage, that work is still **Θ(k)** in the number of **fills or distinct makers** touched in the same transaction, unless the protocol introduces a different settlement shape (e.g. aggregate pool + later claim, merkle batch, or fewer materialized writes per fill).
+
+So the radix tree caps **book-structure** work; it does **not** automatically cap **accounting** work. The `sumValue` / subtree removal story describes **notional and tree edits**; a production perps contract must still specify how maker outcomes are realized on-chain without exceeding gas limits — same fundamental constraint as a FIFO queue when many small orders fill at once.
+
+### Hanji reference implementation
+
+The published **Hanji** LOB (`hanji-source-code.sol` in this folder) follows that split: **matching** is done in the trie via `**executeRight`** on `bidTrie` / `askTrie` from `_placeOrder` (aggressive side only — no maker loop in the outer contract). **Maker proceeds** are taken in a separate tx via `**claimOrder`**, which calls `**claimExecuted**`/`**removeOrder**`on the trie and then pays out through`**\_handleTokenTransfer**`. That is the **same settlement shape** as Option E (taker match vs maker claim), but **not** the same mechanism as LOBSTER (no Clober claim-range / segmented segment tree / octopus heap — different trie accounting and price indexing).
 
 ### Self-Trade Prevention
 
@@ -213,3 +225,4 @@ During tree traversal, leaf nodes belonging to the taker must be skipped. This i
 
 - [Hanji Matching Engine Docs](https://docs.hanji.io/architecture/matching-engine)
 - Hanji achieves 6-digit price precision with max 127 matching steps on Etherlink
+- Source code: [Hanji](https://explorer.etherlink.com/address/0xB09CC4Db522d8fB7C23399E7A49dAf1357c72d5F?tab=contract)

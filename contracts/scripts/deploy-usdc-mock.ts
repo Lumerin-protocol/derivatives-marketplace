@@ -1,11 +1,12 @@
-import { viem } from "hardhat";
-import { logTitle, logInfo, logSuccess } from "../lib/log";
-import { addrUrl } from "../lib/explorer";
-import { verifyContract } from "../lib/verify";
+import hre from "hardhat";
+import { logTitle, logInfo, logSuccess } from "../lib/log.ts";
+import { addrUrl } from "../lib/explorer.ts";
+import { verifyContract } from "../lib/verify.ts";
 
 async function main() {
   logTitle("USDCMock Deployment");
 
+  const { viem } = await hre.network.connect();
   const [deployer] = await viem.getWalletClients();
   const pc = await viem.getPublicClient();
   logInfo("deployer", { Address: addrUrl(pc, deployer.account.address) });

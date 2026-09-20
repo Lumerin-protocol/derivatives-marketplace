@@ -3,8 +3,13 @@ import assert from "node:assert/strict";
 import { network } from "hardhat";
 import { parseUnits } from "viem";
 import { deployPerpsWithCollateralFixture, deployPerpsWithOrdersFixture } from "./fixtures.ts";
+import { TimeInForce } from "../fixtures/timeInForce.ts";
+import {
+  getBestBidPrice,
+  getBestAskPrice,
+} from "./lib/viewHelpers.ts";
 
-const { viem, networkHelpers } = await network.connect();
+const { networkHelpers } = await network.getOrCreate();
 
 describe("HashPowerPerpsDEX - Order Book View Functions", function () {
   describe("getOrderBookPrices", function () {
@@ -84,7 +89,7 @@ describe("HashPowerPerpsDEX - Order Book View Functions", function () {
       const { contracts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
       const { perps } = contracts;
 
-      const bestBid = await perps.read.getBestBidPrice();
+      const bestBid = await getBestBidPrice(perps);
       assert.equal(bestBid, 0n);
     });
 
@@ -94,7 +99,7 @@ describe("HashPowerPerpsDEX - Order Book View Functions", function () {
       const { marketPrice } = config;
       const tick = config.minimumPriceIncrement;
 
-      const bestBid = await perps.read.getBestBidPrice();
+      const bestBid = await getBestBidPrice(perps);
       assert.equal(bestBid, marketPrice - tick);
     });
   });
@@ -104,7 +109,7 @@ describe("HashPowerPerpsDEX - Order Book View Functions", function () {
       const { contracts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
       const { perps } = contracts;
 
-      const bestAsk = await perps.read.getBestAskPrice();
+      const bestAsk = await getBestAskPrice(perps);
       assert.equal(bestAsk, 0n);
     });
 
@@ -114,7 +119,7 @@ describe("HashPowerPerpsDEX - Order Book View Functions", function () {
       const { marketPrice } = config;
       const tick = config.minimumPriceIncrement;
 
-      const bestAsk = await perps.read.getBestAskPrice();
+      const bestAsk = await getBestAskPrice(perps);
       assert.equal(bestAsk, marketPrice + tick);
     });
   });
@@ -158,8 +163,8 @@ describe("HashPowerPerpsDEX - Order Book View Functions", function () {
       const price = marketPrice - config.minimumPriceIncrement;
       const qty = parseUnits("1", 6);
 
-      await perps.write.createOrder([price, BigInt(qty)], { account: buyer.account });
-      await perps.write.createOrder([price, BigInt(qty)], { account: buyer2.account });
+      await perps.write.createOrder([price, BigInt(qty), TimeInForce.GTC], { account: buyer.account });
+      await perps.write.createOrder([price, BigInt(qty), TimeInForce.GTC], { account: buyer2.account });
 
       const totalQty = await perps.read.getQuantityAtPrice([price, true]);
       assert.equal(totalQty, BigInt(qty) * 2n);

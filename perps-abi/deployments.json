@@ -1,0 +1,24 @@
+{
+  "package": "@hashpower/perps-abi",
+  "environments": {
+    "testnet": {
+      "chainId": 84532,
+      "network": "base-sepolia",
+      "contracts": {
+        "HashPowerPerpsDEX": "0x0d412BC34a48e434144687Aac03b9C593F5237B6",
+        "CollateralVault": "0x54A79e2a5C60ACe37b280eBbCda51b4E903d25F0",
+        "PortfolioMarginEngine": "0x3899e429Ef47140eC46c6E23F04253C24F221b69",
+        "CollateralToken": "0xDd15eED84065A58c9E9ff9E95fb996be0fff22AA"
+      },
+      "subgraphs": {
+        "perps": "https://api.goldsky.com/api/public/project_cmmz59uoa7b5201wthnkxbuqy/subgraphs/hpow-derivatives/dev-latest/gn"
+      }
+    },
+    "mainnet": {
+      "chainId": 8453,
+      "network": "base",
+      "contracts": {},
+      "subgraphs": {}
+    }
+  }
+}

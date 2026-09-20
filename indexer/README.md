@@ -1,6 +1,8 @@
 # Perps Indexer
 
-A Graph Protocol subgraph that indexes the `HashPowerPerpsDEX` contract, turning on-chain events into a queryable GraphQL API for orders, trades, positions, collateral, and liquidation data.
+A Graph Protocol subgraph that indexes the `HashPowerPerpsDEX` contract, turning on-chain events into a queryable GraphQL API for orders, trades, positions, and liquidation data.
+
+> Collateral balances and deposit/withdrawal history are not tracked here — those live on the shared `CollateralVault` and are indexed by the collateral-margin subgraph.
 
 ## Schema
 
@@ -8,25 +10,26 @@ A Graph Protocol subgraph that indexes the `HashPowerPerpsDEX` contract, turning
 
 | Entity | Mutability | Description |
 | --- | --- | --- |
-| **Perps** | mutable | Singleton (id=0). Contract config, pool balances, and global stats (total users/orders/trades/volume/liquidations). |
-| **User** | mutable | Per-address account: collateral balance, net position, order/trade counts, realized PnL, and relations to all other entities. |
-| **Order** | mutable | An order on the book. Tracks price, quantity, buy/sell side, status (`ACTIVE` / `FILLED` / `CANCELLED` / `PARTIAL`), and fill progress. |
-| **Trade** | immutable | A matched trade between a buyer and seller with price, quantity, volume, and the maker order reference. |
-| **PositionSnapshot** | immutable | Position state after each trade: trade price/quantity and resulting net position with entry price. |
-| **PositionClose** | immutable | Emitted when a position is fully or partially closed: quantity closed and realized PnL. |
-| **Liquidation** | immutable | Liquidation event: user, liquidator, position size, PnL, and liquidator fee. |
-| **CollateralEvent** | immutable | Deposit or withdrawal of collateral. |
+| **Perps** | mutable | Singleton (id=0). Contract config, pool balances, and global stats (total users/orders/trades/fills/volume/liquidations). |
+| **User** | mutable | Per-address account: net position, order/trade/fill counts, realized PnL, and relations to all other entities. |
+| **Order** | mutable | An order on the book. Tracks price, quantity, buy/sell side, status (`ACTIVE` / `PARTIALLY_FILLED` / `FILLED` / `CANCELLED` / `LIQUIDATED`), and fill progress. |
+| **Trade** | mutable | Aggregate of all fills in one transaction for a single user and position session. Keyed by tx hash + user + session, so flipping a position in one tx yields one Trade per session rather than merging both into one row. This is what trade history shows. |
+| **Fill** | immutable | One per user per `OrderMatched` leg: the individual execution against a counterparty, with both sides' orders, price, signed quantity, fee, and realized PnL. Keyed by tx hash + log index + leg suffix so a reopen leg cannot collide with the maker. A forced close has no matched counterparty order, so it produces a Trade but no Fill. |
+| **PositionSession** | mutable | One continuous position from open to flat. Carries entry price, realized PnL, and liquidated quantity; ends when net quantity returns to zero. |
 | **PriceLevel** | mutable | Aggregated order book level: total quantity and order count at a given price and side (bid/ask). |
+| **FundingUpdate** / **FundingSettlement** | immutable | Funding rate updates and their per-user settlements. |
+| **BadDebtEvent** / **ReservePoolEvent** | immutable | Bad debt socialized on a liquidation, and reserve pool inflows/outflows. |
+| **LiquidationTx** | immutable | Per-tx sentinel keyed by tx hash. Carries no data; its existence lets `Perps.totalLiquidations` count liquidation transactions rather than legs. |
 
 ### Event Handlers
 
 The subgraph listens to all `HashPowerPerpsDEX` contract events:
 
-- **Order events** — `OrderCreated`, `OrderFilled`, `OrderCancelled`, `OrderUpdated`, `OrderMatched`
-- **Position events** — `PositionTrade`, `PositionClosed`, `PositionLiquidated`
-- **Collateral events** — `CollateralAdded`, `CollateralRemoved`
-- **Config events** — `OrderFeeUpdated`, `MarginPercentUpdated`, `MaintenanceMarginPercentUpdated`, `LiquidationFeeUpdated`, `MinimumPriceIncrementUpdated`
-- **Lifecycle events** — `Initialized`
+- **Order events** — `OrderCreated`, `OrderCancelled`, `OrderLiquidated`, `OrderUpdated`, `OrderMatched`
+- **Position events** — `PositionLiquidated`
+- **Funding events** — `FundingUpdated`, `FundingSettled`, `BadDebt`
+- **Config events** — `MakerFeeBpsUpdated`, `TakerFeeBpsUpdated`, `LiquidationFeeBpsUpdated`, `LiquidatorShareBpsUpdated`, `OracleUpdated`, `PortfolioMarginUpdated`, `FundingParametersUpdated`, `MinimumMarginPerOrderUpdated`
+- **Lifecycle events** — `Initialized`, `Upgraded`
 
 On initialization, the handler also reads current contract state (addresses, config, balances) via `try_*` calls to populate the `Perps` singleton.
 
@@ -140,7 +143,6 @@ The ABI is read from `../contracts/abi/HashPowerPerpsDEX.json`, so the contracts
 ```graphql
 {
   user(id: "0x...") {
-    collateralBalance
     netQuantity
     aggregatedEntryPrice
     realizedPnl
@@ -186,7 +188,6 @@ The ABI is read from `../contracts/abi/HashPowerPerpsDEX.json`, so the contracts
     address
     netQuantity
     aggregatedEntryPrice
-    collateralBalance
     realizedPnl
   }
 }

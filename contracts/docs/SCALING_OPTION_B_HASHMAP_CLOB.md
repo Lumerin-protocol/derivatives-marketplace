@@ -66,7 +66,7 @@ function placeOrder(
 ) external {
     _updateGlobalFunding();
     _validatePrice(price);
-    _validateQuantity(size);
+    _validateQty(size);
 
     uint256 remaining = abs(size);
     bool isBuy = size > 0;

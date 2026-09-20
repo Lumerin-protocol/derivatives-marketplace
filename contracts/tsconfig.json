@@ -12,5 +12,13 @@
     "verbatimModuleSyntax": true,
     "allowImportingTsExtensions": true,
     "noEmit": true
-  }
+  },
+  "include": [
+    "./**/*.ts",
+    "./artifacts/**/*.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "abi"
+  ]
 }
