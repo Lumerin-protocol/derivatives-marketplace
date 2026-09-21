@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - dev
-      - stg
       - main
       - "cicd/**"
     paths:
@@ -14,12 +13,11 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: "Target environment (dev=DEV, stg=STG, main=LMN/PROD)"
+        description: "Target environment (dev=DEV, main=LMN/PROD)"
         required: true
         type: choice
         options:
           - dev
-          - stg
           - main
 
 concurrency:
@@ -109,18 +107,12 @@ jobs:
           echo "goldsky_subgraph_name=$GS_NAME" >> $GITHUB_OUTPUT
 
           # Rolling tag, public endpoint, and the config/<name>.env to load.
-          # GitHub `main` and `stg` both use config/prd.env (same contracts);
-          # only the Goldsky rolling tag differs.
+          # GitHub `main` uses config/prd.env. Goldsky rolling tag is lmn-latest.
           case $ENV in
             dev)
               echo "goldsky_rolling_tag=dev-latest" >> $GITHUB_OUTPUT
               echo "goldsky_endpoint=${{ vars.DEV_GS_DERIVATIVES }}" >> $GITHUB_OUTPUT
               echo "config_env=dev" >> $GITHUB_OUTPUT
-              ;;
-            stg)
-              echo "goldsky_rolling_tag=stg-latest" >> $GITHUB_OUTPUT
-              echo "goldsky_endpoint=${{ vars.STG_GS_DERIVATIVES }}" >> $GITHUB_OUTPUT
-              echo "config_env=prd" >> $GITHUB_OUTPUT
               ;;
             main)
               echo "goldsky_rolling_tag=lmn-latest" >> $GITHUB_OUTPUT
@@ -128,7 +120,7 @@ jobs:
               echo "config_env=prd" >> $GITHUB_OUTPUT
               ;;
             *)
-              echo "::error::Unknown environment '$ENV' (expected dev, stg, or main)"
+              echo "::error::Unknown environment '$ENV' (expected dev or main)"
               exit 1
               ;;
           esac
@@ -213,7 +205,7 @@ jobs:
         id: goldsky_deploy
         working-directory: ./indexer
         env:
-          GOLDSKY_API_KEY: ${{ needs.build.outputs.environment == 'dev' && secrets.DEV_GOLDSKY_API_KEY || needs.build.outputs.environment == 'stg' && secrets.STG_GOLDSKY_API_KEY || secrets.LMN_GOLDSKY_API_KEY }}
+          GOLDSKY_API_KEY: ${{ needs.build.outputs.environment == 'dev' && secrets.DEV_GOLDSKY_API_KEY || secrets.LMN_GOLDSKY_API_KEY }}
           GOLDSKY_SUBGRAPH_NAME: ${{ needs.build.outputs.goldsky_subgraph_name }}
           SUBGRAPH_VERSION: ${{ needs.build.outputs.version }}
           GOLDSKY_ROLLING_TAG: ${{ needs.build.outputs.goldsky_rolling_tag }}
@@ -340,7 +332,7 @@ jobs:
 
           if [ -z "${GOLDSKY_ENDPOINT}" ]; then
             echo "⚠️ No Goldsky endpoint URL configured — skipping verification"
-            echo "   Set DEV_GS_DERIVATIVES / STG_GS_DERIVATIVES / LMN_GS_DERIVATIVES org variable"
+            echo "   Set DEV_GS_DERIVATIVES / LMN_GS_DERIVATIVES org variable"
             exit 0
           fi
 
