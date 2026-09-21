@@ -1,8 +1,9 @@
 #Create Switches for Lumerin Marketplace and Indexer / proxy-router-ui  
 create_core = false
 
+# Collateral-margin looks up ecs-derivatives-marketplace-lmn. Keeper and MM stay off.
 ecs_cluster = {
-  create  = false
+  create  = true
   protect = false
 }
 
@@ -18,7 +19,7 @@ perpskeeper_service = {
   cnt_name                    = "perps-keeper"
   task_cpu                    = 256
   task_ram                    = 512
-  network                     = "arbitrum"
+  network                     = "base"
   keeper_log_level            = "info"
 }
 
@@ -33,7 +34,7 @@ marketmaker_service = {
   cnt_name                 = "perps-mktmkr"
   task_cpu                 = 256
   task_ram                 = 512
-  network                  = "arbitrum"
+  network                  = "base"
   maker_log_level          = "info"
 }
 
@@ -42,11 +43,17 @@ marketmaker_service = {
 ########################################
 # Note: ethereum_rpc_url is defined in secret.auto.tfvars (contains API key)
 # Contract addresses for the environment
-# DEV uses Arbitrum Sepolia testnet, STG/LMN use Arbitrum mainnet
-clone_factory_address   = "0x6b690383c0391b0cf7d20b9eb7a783030b1f3f96"
-hashrate_oracle_address = "0x6599ef8e2b4a548a86eb82e2dfbc6ceadfceacbd"
-perps_address           = "tbd"
+# Base mainnet from config/prd.env. clone_factory / multicall have no prd.env key.
+clone_factory_address   = "0xb5838586b43b50f9a739d1256a067859fe5b3234"
+hashrate_oracle_address = "0x614dCAfa33AF0705C7b4A37667eF511F400F36d0" # PRICE_ORACLE_ADDRESS
+perps_address           = "0x794f9e63b7666985256f1d2763ee24cc0b528199" # PERPS_ADDRESS
 multicall_address       = "0xcA11bde05977b3631167028862bE2a173976CA11"
+
+# Goldsky project STG-Exchange renamed LMN-Exchange (same project ID).
+gs_subgraphs = {
+  derivatives = "https://api.goldsky.com/api/public/project_cmmz5dm4l7ocp01xng61y5nwr/subgraphs/hpow-derivatives/lmn-latest/gn"
+  oracles     = "https://api.goldsky.com/api/public/project_cmmz5dm4l7ocp01xng61y5nwr/subgraphs/hpow-oracles/lmn-latest/gn"
+}
 
 ########################################
 # Monitoring Configuration
