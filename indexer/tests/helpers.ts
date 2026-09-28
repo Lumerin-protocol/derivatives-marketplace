@@ -130,7 +130,6 @@ export function setupPerps(): void {
   perps.totalVolume = BigInt.zero();
   perps.totalLiquidations = 0;
   perps.totalLiquidatedValue = BigInt.zero();
-  perps.totalBadDebt = BigInt.zero();
   perps.initializedAt = BigInt.zero();
   perps.lastUpdatedAt = BigInt.zero();
   perps.save();
