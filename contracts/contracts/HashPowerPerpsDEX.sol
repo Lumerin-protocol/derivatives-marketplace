@@ -17,8 +17,6 @@ import { HashPowerPerpsDEXAdmin } from "./HashPowerPerpsDEXAdmin.sol";
 /// @dev The permissionless surface: trading, liquidation and views. Storage and internal
 ///      helpers live in {HashPowerPerpsDEXBase}; the owner-only surface lives in
 ///      {HashPowerPerpsDEXAdmin}.
-/// @dev TODO: when not enough reserve pool, the user should be able to get revenue
-/// @dev on their collateral balance and withdraw later when collateral is added
 contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     using EnumerableSet for EnumerableSet.Bytes32Set;
     using StructuredLinkedList for StructuredLinkedList.List;
@@ -27,7 +25,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @dev Lives here rather than in {HashPowerPerpsDEXBase} so that a diff to
     ///      this file and the version it ships under stay in the same place,
     ///      mirroring {Futures}.
-    string public constant VERSION = "6.5.0";
+    string public constant VERSION = "6.6.0";
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ICollateralVault _vault) HashPowerPerpsDEXBase(_vault) { }
@@ -78,6 +76,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @param _quantity Order quantity (positive = long/buy, negative = short/sell)
     /// @param _tif Order lifetime / fill policy
     function createOrder(uint256 _price, int256 _quantity, TimeInForce _tif) external {
+        _requireTradingOpen();
         address sender = _msgSender();
         _validateOrderIntent(_price, _quantity, _tif);
         _updateGlobalFunding();
@@ -98,6 +97,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     ///      Empty input reverts so simulate-before-write callers do not submit
     ///      a no-op transaction.
     function createOrders(OrderIntent[] calldata _intents) external {
+        _requireTradingOpen();
         uint256 len = _intents.length;
         if (len == 0) revert EmptyBatch();
         address sender = _msgSender();
@@ -125,6 +125,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         ReduceIntent[] calldata _reduces,
         OrderIntent[] calldata _intents
     ) external {
+        if (_intents.length != 0) _requireTradingOpen();
         address sender = _msgSender();
         uint256 createLen = _intents.length;
         for (uint256 v = 0; v < createLen; v++) {

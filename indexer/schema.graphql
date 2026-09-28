@@ -57,7 +57,6 @@ type Perps @entity(immutable: false) {
   totalLiquidations: Int!
   "Notional closed by force, in the same units as totalVolume: sum of exitPrice * abs(closedQuantity) / 10^quantityDecimals over every PositionLiquidated."
   totalLiquidatedValue: BigInt!
-  totalBadDebt: BigInt!
 
   # Timestamps
   initializedAt: BigInt!
@@ -97,7 +96,6 @@ type User @entity(immutable: false) {
   trades: [Trade!]! @derivedFrom(field: "user")
   fills: [Fill!]! @derivedFrom(field: "user")
   fundingSettlements: [FundingSettlement!]! @derivedFrom(field: "user")
-  badDebts: [BadDebtEvent!]! @derivedFrom(field: "user")
   positionSessions: [PositionSession!]! @derivedFrom(field: "user")
 
   # Timestamps
@@ -253,17 +251,6 @@ type FundingSettlement @entity(immutable: true) {
 # existence is the dedup signal.
 type LiquidationTx @entity(immutable: true) {
   id: Bytes! # transaction hash
-}
-
-# Bad debt event when a user can't cover losses
-type BadDebtEvent @entity(immutable: true) {
-  id: Bytes! # tx hash + log index
-  user: User!
-  amount: BigInt!
-  # Metadata
-  timestamp: BigInt!
-  blockNumber: BigInt!
-  transactionHash: Bytes!
 }
 
 type ReservePoolEvent @entity(immutable: true) {

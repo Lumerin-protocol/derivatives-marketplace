@@ -8,7 +8,7 @@ import { TimeInForce } from "../fixtures/timeInForce.ts";
 const { networkHelpers } = await network.connect();
 
 describe("HashPowerPerpsDEX - realized PnL liveness", function () {
-  it("clamps both sides of a voluntary close and reports user and insurance shortfalls", async function () {
+  it("pays the winner in full from an empty fund and records the loser's shortfall", async function () {
     const data = await networkHelpers.loadFixture(deployPerpsFixture);
     const { contracts, accounts, config } = data;
     const { perps, priceOracle, vault } = contracts;
@@ -32,6 +32,9 @@ describe("HashPowerPerpsDEX - realized PnL liveness", function () {
       account: owner.account,
     });
     assert.equal(await vault.read.insuranceFundBalance(), 0n);
+    await vault.write.setInsuranceDebtCap([parseUnits("1000000", config.tokenDecimals)], {
+      account: owner.account,
+    });
 
     const exit = entry * 3n;
     const pnl = ((exit - entry) * quantity) / 10n ** BigInt(config.quantityDecimals);
@@ -49,17 +52,15 @@ describe("HashPowerPerpsDEX - realized PnL liveness", function () {
     });
     const receipt = await pc.waitForTransactionReceipt({ hash });
 
-    const debts = parseEventLogs({ logs: receipt.logs, abi: perps.abi, eventName: "BadDebt" });
-    assert.equal(debts.length, 2);
-    assert.equal(debts[0].args.user.toLowerCase(), seller.account.address.toLowerCase());
-    assert.equal(debts[0].args.amount, pnl - sellerAvailable);
-    assert.equal(
-      debts[1].args.user.toLowerCase(),
-      (await vault.read.INSURANCE_FUND_ADDR()).toLowerCase(),
+    const debts = parseEventLogs({ logs: receipt.logs, abi: vault.abi, eventName: "BadDebt" });
+    const sellerDebt = debts.filter(
+      (evt) => evt.args.payer.toLowerCase() === seller.account.address.toLowerCase(),
     );
-    assert.equal(debts[1].args.amount, pnl - sellerAvailable);
+    assert.equal(sellerDebt.length, 1);
+    assert.equal(sellerDebt[0].args.amount, pnl - sellerAvailable);
     assert.equal(await vault.read.balanceOf([seller.account.address]), 0n);
-    assert.equal(await vault.read.balanceOf([buyer.account.address]), buyerBefore + sellerAvailable);
+    assert.equal(await vault.read.balanceOf([buyer.account.address]), buyerBefore + pnl);
+    assert.equal(await vault.read.insuranceDebt(), pnl - sellerAvailable);
     assert.equal(await vault.read.insuranceFundBalance(), 0n);
     assert.equal((await perps.read.getUserPosition([seller.account.address])).netQuantity, 0n);
     assert.equal((await perps.read.getUserPosition([buyer.account.address])).netQuantity, 0n);

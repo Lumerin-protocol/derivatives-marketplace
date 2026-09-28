@@ -10,7 +10,7 @@ importers:
     dependencies:
       '@chainlink/contracts':
         specifier: ^1.3.0
-        version: 1.5.0(@types/node@22.19.11)(ethers@6.17.0)
+        version: 1.5.0(@types/node@22.19.11)(ethers@6.17.0)(supports-color@7.2.0)
       '@multicall/multicall3':
         specifier: github:mds1/multicall3
         version: https://codeload.github.com/mds1/multicall3/tar.gz/b667d67ecfa5361a81e8f110234ce242613b0012
@@ -25,10 +25,10 @@ importers:
         version: 5.1.0(@openzeppelin/contracts@5.1.0)
       '@openzeppelin/hardhat-upgrades':
         specifier: ^3.9.1
-        version: 3.9.1(@nomicfoundation/hardhat-ethers@3.1.3(ethers@6.17.0)(hardhat@3.9.1))(@nomicfoundation/hardhat-verify@3.0.17(hardhat@3.9.1))(ethers@6.17.0)(hardhat@3.9.1)
+        version: 3.9.1(@nomicfoundation/hardhat-ethers@3.1.3(ethers@6.17.0)(hardhat@3.9.1)(supports-color@7.2.0))(@nomicfoundation/hardhat-verify@3.0.17(hardhat@3.9.1))(ethers@6.17.0)(hardhat@3.9.1)(supports-color@7.2.0)
       collateral-margin:
-        specifier: github:Lumerin-protocol/collateral-margin#d6eea43b8d477d7ebf4e7bde6fba1c0f4047ca9a
-        version: https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/d6eea43b8d477d7ebf4e7bde6fba1c0f4047ca9a
+        specifier: github:Lumerin-protocol/collateral-margin#f8b9ed3a1209bae2dfb64c2dedd6ff1982e818fe
+        version: https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/f8b9ed3a1209bae2dfb64c2dedd6ff1982e818fe
       hashprice-oracle:
         specifier: github:Lumerin-protocol/hashprice-oracle.git#main
         version: https://codeload.github.com/Lumerin-protocol/hashprice-oracle/tar.gz/b65adbfeb7e6c4417747bfd3d94b6e89e162ed50
@@ -44,10 +44,10 @@ importers:
         version: 2.2.4
       '@cyfrin/aderyn':
         specifier: ^0.5.13
-        version: 0.5.13
+        version: 0.5.13(debug@4.4.3(supports-color@7.2.0))
       '@nomicfoundation/hardhat-toolbox-viem':
         specifier: ^5.0.7
-        version: 5.0.7(d108fd20ee3d0a85e2241d5da54f4cac)
+        version: 5.0.7(b578be77a2470e8df42545a62a757db7)
       '@nomicfoundation/hardhat-verify':
         specifier: ^3.0.17
         version: 3.0.17(hardhat@3.9.1)
@@ -262,24 +262,28 @@ packages:
     engines: {node: '>=14.21.3'}
     cpu: [arm64]
     os: [linux]
+    libc: [musl]
 
   '@biomejs/cli-linux-arm64@2.2.4':
     resolution: {integrity: sha512-M/Iz48p4NAzMXOuH+tsn5BvG/Jb07KOMTdSVwJpicmhN309BeEyRyQX+n1XDF0JVSlu28+hiTQ2L4rZPvu7nMw==}
     engines: {node: '>=14.21.3'}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
 
   '@biomejs/cli-linux-x64-musl@2.2.4':
     resolution: {integrity: sha512-m41nFDS0ksXK2gwXL6W6yZTYPMH0LughqbsxInSKetoH6morVj43szqKx79Iudkp8WRT5SxSh7qVb8KCUiewGg==}
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [linux]
+    libc: [musl]
 
   '@biomejs/cli-linux-x64@2.2.4':
     resolution: {integrity: sha512-orr3nnf2Dpb2ssl6aihQtvcKtLySLta4E2UcXdp7+RTa7mfJjBgIsbS0B9GC8gVu0hjOu021aU8b3/I1tn+pVQ==}
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   '@biomejs/cli-win32-arm64@2.2.4':
     resolution: {integrity: sha512-NXnfTeKHDFUWfxAefa57DiGmu9VyKi0cDqFpdI+1hJWQjGJhJutHPX0b5m+eXvTKOaf+brU+P0JrQAZMb5yYaQ==}
@@ -631,7 +635,7 @@ packages:
     resolution: {integrity: sha512-fo+QhuU3qE/2TQMQmbVMqaQ6EWbMhi4ABWP+O4AM1NqPBuy0OrApV5LO6BrrgnhtAHS2NH6RrVk9OL181tTi8A==}
 
   '@multicall/multicall3@https://codeload.github.com/mds1/multicall3/tar.gz/b667d67ecfa5361a81e8f110234ce242613b0012':
-    resolution: {tarball: https://codeload.github.com/mds1/multicall3/tar.gz/b667d67ecfa5361a81e8f110234ce242613b0012}
+    resolution: {gitHosted: true, tarball: https://codeload.github.com/mds1/multicall3/tar.gz/b667d67ecfa5361a81e8f110234ce242613b0012}
     version: 0.0.0
 
   '@noble/ciphers@1.2.1':
@@ -1449,8 +1453,8 @@ packages:
     resolution: {integrity: sha512-JQHZ2QMW6l3aH/j6xCqQThY/9OH4D/9ls34cgkUBiEeocRTU04tHfKPBsUK1PqZCUQM7GiA0IIXJSuXHI64Kbg==}
     engines: {node: '>=0.8'}
 
-  collateral-margin@https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/d6eea43b8d477d7ebf4e7bde6fba1c0f4047ca9a:
-    resolution: {tarball: https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/d6eea43b8d477d7ebf4e7bde6fba1c0f4047ca9a}
+  collateral-margin@https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/f8b9ed3a1209bae2dfb64c2dedd6ff1982e818fe:
+    resolution: {gitHosted: true, tarball: https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/f8b9ed3a1209bae2dfb64c2dedd6ff1982e818fe}
     version: 1.0.0
 
   color-convert@2.0.1:
@@ -1562,7 +1566,7 @@ packages:
     engines: {node: '>=6'}
 
   era-contracts@https://codeload.github.com/matter-labs/era-contracts/tar.gz/446d391d34bdb48255d5f8fef8a8248925fc98b9:
-    resolution: {tarball: https://codeload.github.com/matter-labs/era-contracts/tar.gz/446d391d34bdb48255d5f8fef8a8248925fc98b9}
+    resolution: {gitHosted: true, tarball: https://codeload.github.com/matter-labs/era-contracts/tar.gz/446d391d34bdb48255d5f8fef8a8248925fc98b9}
     version: 0.1.0
 
   es-define-property@1.0.1:
@@ -1741,7 +1745,7 @@ packages:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==}
 
   hardhat-viem-abi@https://codeload.github.com/lsheva/hardhat-viem-abi/tar.gz/54198ea8c9ad9b05c0c23a057ae3b1c7ab82a93a#path:packages/hardhat-viem-abi:
-    resolution: {path: packages/hardhat-viem-abi, tarball: https://codeload.github.com/lsheva/hardhat-viem-abi/tar.gz/54198ea8c9ad9b05c0c23a057ae3b1c7ab82a93a}
+    resolution: {gitHosted: true, path: packages/hardhat-viem-abi, tarball: https://codeload.github.com/lsheva/hardhat-viem-abi/tar.gz/54198ea8c9ad9b05c0c23a057ae3b1c7ab82a93a}
     version: 1.0.0-alpha.2
     engines: {node: '>=22'}
     peerDependencies:
@@ -1775,7 +1779,7 @@ packages:
     resolution: {integrity: sha512-taOaskGt4z4SOANNseOviYDvjEJinIkRgmp7LbKP2YTTmVxWBl87s/uzK9r+44BclBSp2X7K1hqeNfz9JbBeXA==}
 
   hashprice-oracle@https://codeload.github.com/Lumerin-protocol/hashprice-oracle/tar.gz/b65adbfeb7e6c4417747bfd3d94b6e89e162ed50:
-    resolution: {tarball: https://codeload.github.com/Lumerin-protocol/hashprice-oracle/tar.gz/b65adbfeb7e6c4417747bfd3d94b6e89e162ed50}
+    resolution: {gitHosted: true, tarball: https://codeload.github.com/Lumerin-protocol/hashprice-oracle/tar.gz/b65adbfeb7e6c4417747bfd3d94b6e89e162ed50}
     version: 1.0.0
 
   hasown@2.0.2:
@@ -3045,12 +3049,12 @@ snapshots:
 
   '@bytecodealliance/preview2-shim@0.17.0': {}
 
-  '@chainlink/contracts@1.5.0(@types/node@22.19.11)(ethers@6.17.0)':
+  '@chainlink/contracts@1.5.0(@types/node@22.19.11)(ethers@6.17.0)(supports-color@7.2.0)':
     dependencies:
       '@arbitrum/nitro-contracts': 3.0.0
       '@changesets/cli': 2.29.8(@types/node@22.19.11)
       '@changesets/get-github-info': 0.6.0
-      '@eslint/eslintrc': 3.3.3
+      '@eslint/eslintrc': 3.3.3(supports-color@7.2.0)
       '@eth-optimism/contracts': 0.6.0(ethers@6.17.0)
       '@openzeppelin/contracts-4.7.3': '@openzeppelin/contracts@4.7.3'
       '@openzeppelin/contracts-4.8.3': '@openzeppelin/contracts@4.8.3'
@@ -3220,9 +3224,9 @@ snapshots:
       human-id: 4.1.3
       prettier: 2.8.8
 
-  '@cyfrin/aderyn@0.5.13':
+  '@cyfrin/aderyn@0.5.13(debug@4.4.3(supports-color@7.2.0))':
     dependencies:
-      axios: 1.13.5(debug@4.4.3)
+      axios: 1.13.5(debug@4.4.3(supports-color@7.2.0))
       axios-proxy-builder: 0.1.2
       console.table: 0.10.0
       detect-libc: 2.1.2
@@ -3308,10 +3312,10 @@ snapshots:
   '@esbuild/win32-x64@0.28.1':
     optional: true
 
-  '@eslint/eslintrc@3.3.3':
+  '@eslint/eslintrc@3.3.3(supports-color@7.2.0)':
     dependencies:
       ajv: 6.14.0
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@7.2.0)
       espree: 10.4.0
       globals: 14.0.0
       ignore: 5.3.2
@@ -3654,34 +3658,34 @@ snapshots:
     dependencies:
       '@nomicfoundation/hardhat-utils': 4.1.4
 
-  '@nomicfoundation/hardhat-ethers@3.1.3(ethers@6.17.0)(hardhat@3.9.1)':
+  '@nomicfoundation/hardhat-ethers@3.1.3(ethers@6.17.0)(hardhat@3.9.1)(supports-color@7.2.0)':
     dependencies:
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@7.2.0)
       ethers: 6.17.0
       hardhat: 3.9.1
       lodash.isequal: 4.5.0
     transitivePeerDependencies:
       - supports-color
 
-  '@nomicfoundation/hardhat-ignition-viem@3.0.7(@nomicfoundation/hardhat-ignition@3.0.7(@nomicfoundation/hardhat-verify@3.0.17(hardhat@3.9.1))(hardhat@3.9.1))(@nomicfoundation/hardhat-verify@3.0.17(hardhat@3.9.1))(@nomicfoundation/hardhat-viem@3.0.9(hardhat@3.9.1)(viem@2.48.8(typescript@5.9.3)(zod@3.25.76)))(@nomicfoundation/ignition-core@3.0.7)(hardhat@3.9.1)(viem@2.48.8(typescript@5.9.3)(zod@3.25.76))':
+  '@nomicfoundation/hardhat-ignition-viem@3.0.7(@nomicfoundation/hardhat-ignition@3.0.7(@nomicfoundation/hardhat-verify@3.0.17(hardhat@3.9.1))(hardhat@3.9.1)(supports-color@7.2.0))(@nomicfoundation/hardhat-verify@3.0.17(hardhat@3.9.1))(@nomicfoundation/hardhat-viem@3.0.9(hardhat@3.9.1)(viem@2.48.8(typescript@5.9.3)(zod@3.25.76)))(@nomicfoundation/ignition-core@3.0.7(supports-color@7.2.0))(hardhat@3.9.1)(viem@2.48.8(typescript@5.9.3)(zod@3.25.76))':
     dependencies:
       '@nomicfoundation/hardhat-errors': 3.0.16
-      '@nomicfoundation/hardhat-ignition': 3.0.7(@nomicfoundation/hardhat-verify@3.0.17(hardhat@3.9.1))(hardhat@3.9.1)
+      '@nomicfoundation/hardhat-ignition': 3.0.7(@nomicfoundation/hardhat-verify@3.0.17(hardhat@3.9.1))(hardhat@3.9.1)(supports-color@7.2.0)
       '@nomicfoundation/hardhat-verify': 3.0.17(hardhat@3.9.1)
       '@nomicfoundation/hardhat-viem': 3.0.9(hardhat@3.9.1)(viem@2.48.8(typescript@5.9.3)(zod@3.25.76))
-      '@nomicfoundation/ignition-core': 3.0.7
+      '@nomicfoundation/ignition-core': 3.0.7(supports-color@7.2.0)
       hardhat: 3.9.1
       viem: 2.48.8(typescript@5.9.3)(zod@3.25.76)
 
-  '@nomicfoundation/hardhat-ignition@3.0.7(@nomicfoundation/hardhat-verify@3.0.17(hardhat@3.9.1))(hardhat@3.9.1)':
+  '@nomicfoundation/hardhat-ignition@3.0.7(@nomicfoundation/hardhat-verify@3.0.17(hardhat@3.9.1))(hardhat@3.9.1)(supports-color@7.2.0)':
     dependencies:
       '@nomicfoundation/hardhat-errors': 3.0.16
-      '@nomicfoundation/hardhat-utils': 3.0.6
+      '@nomicfoundation/hardhat-utils': 3.0.6(supports-color@7.2.0)
       '@nomicfoundation/hardhat-verify': 3.0.17(hardhat@3.9.1)
-      '@nomicfoundation/ignition-core': 3.0.7
+      '@nomicfoundation/ignition-core': 3.0.7(supports-color@7.2.0)
       '@nomicfoundation/ignition-ui': 3.1.2
       chalk: 5.6.2
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@7.2.0)
       hardhat: 3.9.1
       json5: 2.2.3
       prompts: 2.4.2
@@ -3690,24 +3694,24 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@nomicfoundation/hardhat-keystore@3.0.4(hardhat@3.9.1)':
+  '@nomicfoundation/hardhat-keystore@3.0.4(hardhat@3.9.1)(supports-color@7.2.0)':
     dependencies:
       '@noble/ciphers': 1.2.1
       '@noble/hashes': 1.7.1
       '@nomicfoundation/hardhat-errors': 3.0.16
-      '@nomicfoundation/hardhat-utils': 3.0.6
+      '@nomicfoundation/hardhat-utils': 3.0.6(supports-color@7.2.0)
       '@nomicfoundation/hardhat-zod-utils': 3.0.5(zod@3.25.76)
       chalk: 5.6.2
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@7.2.0)
       hardhat: 3.9.1
       zod: 3.25.76
     transitivePeerDependencies:
       - supports-color
 
-  '@nomicfoundation/hardhat-network-helpers@3.0.3(hardhat@3.9.1)':
+  '@nomicfoundation/hardhat-network-helpers@3.0.3(hardhat@3.9.1)(supports-color@7.2.0)':
     dependencies:
       '@nomicfoundation/hardhat-errors': 3.0.16
-      '@nomicfoundation/hardhat-utils': 3.0.6
+      '@nomicfoundation/hardhat-utils': 3.0.6(supports-color@7.2.0)
       hardhat: 3.9.1
     transitivePeerDependencies:
       - supports-color
@@ -3717,11 +3721,11 @@ snapshots:
       '@actions/core': 1.11.1
       jest-diff: 29.7.0
 
-  '@nomicfoundation/hardhat-node-test-runner@3.0.8(hardhat@3.9.1)':
+  '@nomicfoundation/hardhat-node-test-runner@3.0.8(hardhat@3.9.1)(supports-color@7.2.0)':
     dependencies:
       '@nomicfoundation/hardhat-errors': 3.0.16
       '@nomicfoundation/hardhat-node-test-reporter': 3.1.0
-      '@nomicfoundation/hardhat-utils': 3.0.6
+      '@nomicfoundation/hardhat-utils': 3.0.6(supports-color@7.2.0)
       '@nomicfoundation/hardhat-zod-utils': 3.0.5(zod@3.25.76)
       hardhat: 3.9.1
       tsx: 4.23.0
@@ -3729,24 +3733,24 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@nomicfoundation/hardhat-toolbox-viem@5.0.7(d108fd20ee3d0a85e2241d5da54f4cac)':
+  '@nomicfoundation/hardhat-toolbox-viem@5.0.7(b578be77a2470e8df42545a62a757db7)':
     dependencies:
-      '@nomicfoundation/hardhat-ignition': 3.0.7(@nomicfoundation/hardhat-verify@3.0.17(hardhat@3.9.1))(hardhat@3.9.1)
-      '@nomicfoundation/hardhat-ignition-viem': 3.0.7(@nomicfoundation/hardhat-ignition@3.0.7(@nomicfoundation/hardhat-verify@3.0.17(hardhat@3.9.1))(hardhat@3.9.1))(@nomicfoundation/hardhat-verify@3.0.17(hardhat@3.9.1))(@nomicfoundation/hardhat-viem@3.0.9(hardhat@3.9.1)(viem@2.48.8(typescript@5.9.3)(zod@3.25.76)))(@nomicfoundation/ignition-core@3.0.7)(hardhat@3.9.1)(viem@2.48.8(typescript@5.9.3)(zod@3.25.76))
-      '@nomicfoundation/hardhat-keystore': 3.0.4(hardhat@3.9.1)
-      '@nomicfoundation/hardhat-network-helpers': 3.0.3(hardhat@3.9.1)
-      '@nomicfoundation/hardhat-node-test-runner': 3.0.8(hardhat@3.9.1)
+      '@nomicfoundation/hardhat-ignition': 3.0.7(@nomicfoundation/hardhat-verify@3.0.17(hardhat@3.9.1))(hardhat@3.9.1)(supports-color@7.2.0)
+      '@nomicfoundation/hardhat-ignition-viem': 3.0.7(@nomicfoundation/hardhat-ignition@3.0.7(@nomicfoundation/hardhat-verify@3.0.17(hardhat@3.9.1))(hardhat@3.9.1)(supports-color@7.2.0))(@nomicfoundation/hardhat-verify@3.0.17(hardhat@3.9.1))(@nomicfoundation/hardhat-viem@3.0.9(hardhat@3.9.1)(viem@2.48.8(typescript@5.9.3)(zod@3.25.76)))(@nomicfoundation/ignition-core@3.0.7(supports-color@7.2.0))(hardhat@3.9.1)(viem@2.48.8(typescript@5.9.3)(zod@3.25.76))
+      '@nomicfoundation/hardhat-keystore': 3.0.4(hardhat@3.9.1)(supports-color@7.2.0)
+      '@nomicfoundation/hardhat-network-helpers': 3.0.3(hardhat@3.9.1)(supports-color@7.2.0)
+      '@nomicfoundation/hardhat-node-test-runner': 3.0.8(hardhat@3.9.1)(supports-color@7.2.0)
       '@nomicfoundation/hardhat-verify': 3.0.17(hardhat@3.9.1)
       '@nomicfoundation/hardhat-viem': 3.0.9(hardhat@3.9.1)(viem@2.48.8(typescript@5.9.3)(zod@3.25.76))
-      '@nomicfoundation/hardhat-viem-assertions': 3.0.5(@nomicfoundation/hardhat-viem@3.0.9(hardhat@3.9.1)(viem@2.48.8(typescript@5.9.3)(zod@3.25.76)))(hardhat@3.9.1)(viem@2.48.8(typescript@5.9.3)(zod@3.25.76))
-      '@nomicfoundation/ignition-core': 3.0.7
+      '@nomicfoundation/hardhat-viem-assertions': 3.0.5(@nomicfoundation/hardhat-viem@3.0.9(hardhat@3.9.1)(viem@2.48.8(typescript@5.9.3)(zod@3.25.76)))(hardhat@3.9.1)(supports-color@7.2.0)(viem@2.48.8(typescript@5.9.3)(zod@3.25.76))
+      '@nomicfoundation/ignition-core': 3.0.7(supports-color@7.2.0)
       hardhat: 3.9.1
       viem: 2.48.8(typescript@5.9.3)(zod@3.25.76)
 
-  '@nomicfoundation/hardhat-utils@3.0.6':
+  '@nomicfoundation/hardhat-utils@3.0.6(supports-color@7.2.0)':
     dependencies:
       '@streamparser/json-node': 0.0.22
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@7.2.0)
       env-paths: 2.2.1
       ethereum-cryptography: 2.2.1
       fast-equals: 5.4.0
@@ -3778,10 +3782,10 @@ snapshots:
       hardhat: 3.9.1
       zod: 3.25.76
 
-  '@nomicfoundation/hardhat-viem-assertions@3.0.5(@nomicfoundation/hardhat-viem@3.0.9(hardhat@3.9.1)(viem@2.48.8(typescript@5.9.3)(zod@3.25.76)))(hardhat@3.9.1)(viem@2.48.8(typescript@5.9.3)(zod@3.25.76))':
+  '@nomicfoundation/hardhat-viem-assertions@3.0.5(@nomicfoundation/hardhat-viem@3.0.9(hardhat@3.9.1)(viem@2.48.8(typescript@5.9.3)(zod@3.25.76)))(hardhat@3.9.1)(supports-color@7.2.0)(viem@2.48.8(typescript@5.9.3)(zod@3.25.76))':
     dependencies:
       '@nomicfoundation/hardhat-errors': 3.0.16
-      '@nomicfoundation/hardhat-utils': 3.0.6
+      '@nomicfoundation/hardhat-utils': 3.0.6(supports-color@7.2.0)
       '@nomicfoundation/hardhat-viem': 3.0.9(hardhat@3.9.1)(viem@2.48.8(typescript@5.9.3)(zod@3.25.76))
       hardhat: 3.9.1
       viem: 2.48.8(typescript@5.9.3)(zod@3.25.76)
@@ -3801,14 +3805,14 @@ snapshots:
       '@nomicfoundation/hardhat-utils': 4.1.4
       zod: 3.25.76
 
-  '@nomicfoundation/ignition-core@3.0.7':
+  '@nomicfoundation/ignition-core@3.0.7(supports-color@7.2.0)':
     dependencies:
       '@ethersproject/address': 5.6.1
       '@nomicfoundation/hardhat-errors': 3.0.16
-      '@nomicfoundation/hardhat-utils': 3.0.6
+      '@nomicfoundation/hardhat-utils': 3.0.6(supports-color@7.2.0)
       '@nomicfoundation/solidity-analyzer': 0.1.2
       cbor2: 1.12.0
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@7.2.0)
       ethers: 6.17.0
       immer: 10.0.2
       lodash-es: 4.17.21
@@ -3878,46 +3882,46 @@ snapshots:
 
   '@openzeppelin/contracts@5.1.0': {}
 
-  '@openzeppelin/defender-sdk-base-client@2.7.1(debug@4.4.3)':
+  '@openzeppelin/defender-sdk-base-client@2.7.1(debug@4.4.3(supports-color@7.2.0))':
     dependencies:
       '@aws-sdk/client-lambda': 3.995.0
       amazon-cognito-identity-js: 6.3.16
       async-retry: 1.3.3
-      axios: 1.13.5(debug@4.4.3)
+      axios: 1.13.5(debug@4.4.3(supports-color@7.2.0))
     transitivePeerDependencies:
       - aws-crt
       - debug
       - encoding
 
-  '@openzeppelin/defender-sdk-deploy-client@2.7.1(debug@4.4.3)':
+  '@openzeppelin/defender-sdk-deploy-client@2.7.1(debug@4.4.3(supports-color@7.2.0))':
     dependencies:
-      '@openzeppelin/defender-sdk-base-client': 2.7.1(debug@4.4.3)
-      axios: 1.13.5(debug@4.4.3)
+      '@openzeppelin/defender-sdk-base-client': 2.7.1(debug@4.4.3(supports-color@7.2.0))
+      axios: 1.13.5(debug@4.4.3(supports-color@7.2.0))
       lodash: 4.17.23
     transitivePeerDependencies:
       - aws-crt
       - debug
       - encoding
 
-  '@openzeppelin/defender-sdk-network-client@2.7.1(debug@4.4.3)':
+  '@openzeppelin/defender-sdk-network-client@2.7.1(debug@4.4.3(supports-color@7.2.0))':
     dependencies:
-      '@openzeppelin/defender-sdk-base-client': 2.7.1(debug@4.4.3)
-      axios: 1.13.5(debug@4.4.3)
+      '@openzeppelin/defender-sdk-base-client': 2.7.1(debug@4.4.3(supports-color@7.2.0))
+      axios: 1.13.5(debug@4.4.3(supports-color@7.2.0))
       lodash: 4.17.23
     transitivePeerDependencies:
       - aws-crt
       - debug
       - encoding
 
-  '@openzeppelin/hardhat-upgrades@3.9.1(@nomicfoundation/hardhat-ethers@3.1.3(ethers@6.17.0)(hardhat@3.9.1))(@nomicfoundation/hardhat-verify@3.0.17(hardhat@3.9.1))(ethers@6.17.0)(hardhat@3.9.1)':
+  '@openzeppelin/hardhat-upgrades@3.9.1(@nomicfoundation/hardhat-ethers@3.1.3(ethers@6.17.0)(hardhat@3.9.1)(supports-color@7.2.0))(@nomicfoundation/hardhat-verify@3.0.17(hardhat@3.9.1))(ethers@6.17.0)(hardhat@3.9.1)(supports-color@7.2.0)':
     dependencies:
-      '@nomicfoundation/hardhat-ethers': 3.1.3(ethers@6.17.0)(hardhat@3.9.1)
-      '@openzeppelin/defender-sdk-base-client': 2.7.1(debug@4.4.3)
-      '@openzeppelin/defender-sdk-deploy-client': 2.7.1(debug@4.4.3)
-      '@openzeppelin/defender-sdk-network-client': 2.7.1(debug@4.4.3)
-      '@openzeppelin/upgrades-core': 1.44.2
+      '@nomicfoundation/hardhat-ethers': 3.1.3(ethers@6.17.0)(hardhat@3.9.1)(supports-color@7.2.0)
+      '@openzeppelin/defender-sdk-base-client': 2.7.1(debug@4.4.3(supports-color@7.2.0))
+      '@openzeppelin/defender-sdk-deploy-client': 2.7.1(debug@4.4.3(supports-color@7.2.0))
+      '@openzeppelin/defender-sdk-network-client': 2.7.1(debug@4.4.3(supports-color@7.2.0))
+      '@openzeppelin/upgrades-core': 1.44.2(supports-color@7.2.0)
       chalk: 4.1.2
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@7.2.0)
       ethereumjs-util: 7.1.5
       ethers: 6.17.0
       hardhat: 3.9.1
@@ -3930,14 +3934,14 @@ snapshots:
       - encoding
       - supports-color
 
-  '@openzeppelin/upgrades-core@1.44.2':
+  '@openzeppelin/upgrades-core@1.44.2(supports-color@7.2.0)':
     dependencies:
       '@nomicfoundation/slang': 0.18.3
       bignumber.js: 9.3.1
       cbor: 10.0.11
       chalk: 4.1.2
       compare-versions: 6.1.1
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@7.2.0)
       ethereumjs-util: 7.1.5
       minimatch: 9.0.5
       minimist: 1.2.8
@@ -4481,9 +4485,9 @@ snapshots:
     dependencies:
       tunnel: 0.0.6
 
-  axios@1.13.5(debug@4.4.3):
+  axios@1.13.5(debug@4.4.3(supports-color@7.2.0)):
     dependencies:
-      follow-redirects: 1.15.11(debug@4.4.3)
+      follow-redirects: 1.15.11(debug@4.4.3(supports-color@7.2.0))
       form-data: 4.0.5
       proxy-from-env: 1.1.0
     transitivePeerDependencies:
@@ -4622,7 +4626,7 @@ snapshots:
   clone@1.0.4:
     optional: true
 
-  collateral-margin@https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/d6eea43b8d477d7ebf4e7bde6fba1c0f4047ca9a: {}
+  collateral-margin@https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/f8b9ed3a1209bae2dfb64c2dedd6ff1982e818fe: {}
 
   color-convert@2.0.1:
     dependencies:
@@ -4677,9 +4681,11 @@ snapshots:
 
   dataloader@1.4.0: {}
 
-  debug@4.4.3:
+  debug@4.4.3(supports-color@7.2.0):
     dependencies:
       ms: 2.1.3
+    optionalDependencies:
+      supports-color: 7.2.0
 
   deep-eql@4.1.4:
     dependencies:
@@ -4889,9 +4895,9 @@ snapshots:
     dependencies:
       micromatch: 4.0.8
 
-  follow-redirects@1.15.11(debug@4.4.3):
+  follow-redirects@1.15.11(debug@4.4.3(supports-color@7.2.0)):
     optionalDependencies:
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@7.2.0)
 
   for-each@0.3.5:
     dependencies:

@@ -64,7 +64,17 @@ export const contractErrors = [
   },
   {
     "inputs": [],
+    "name": "Halted",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "ZeroAmount",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "DebtAboveCap",
     "type": "error"
   },
   {
@@ -167,6 +177,16 @@ export const contractErrors = [
       }
     ],
     "name": "InvalidAccountNonce",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NotHalted",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "TradingHalted",
     "type": "error"
   },
   {
