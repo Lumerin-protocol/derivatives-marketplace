@@ -24,6 +24,7 @@ output
 .terraform
 .terraform.lock.hcl
 .terragrunt-cache
+.bedrock/.terragrunt/*.zip
 *.out
 *.plan
 secret.tfvars
