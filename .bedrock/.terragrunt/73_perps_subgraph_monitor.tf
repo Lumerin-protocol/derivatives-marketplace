@@ -5,13 +5,16 @@
 ################################################################################
 
 locals {
-  perps_env_suffix                 = substr(var.account_shortname, 8, 3)
-  perps_subgraph_namespace         = "DerivativesMarketplace/${local.perps_env_suffix}"
-  perps_subgraph_monitor_name      = "perps-subgraph-health-${local.perps_env_suffix}"
-  perps_subgraph_check_seconds     = 300
-  perps_subgraph_stale_seconds     = 900
-  perps_subgraph_eval_periods      = 3
-  perps_alerts_topic_name          = var.account_lifecycle == "prd" ? "titanio-lmn-devops-alerts" : "titanio-dev-dev-alerts"
+  perps_env_suffix             = substr(var.account_shortname, 8, 3)
+  perps_subgraph_namespace     = "DerivativesMarketplace/${local.perps_env_suffix}"
+  perps_subgraph_monitor_name  = "perps-subgraph-health-${local.perps_env_suffix}"
+  perps_subgraph_check_seconds = 300
+  perps_subgraph_stale_seconds = 900
+  # 15 minutes of Base blocks at 2 seconds. Same window as the age alarm.
+  perps_subgraph_behind_blocks = 450
+  perps_subgraph_eval_periods  = 3
+  perps_chain_id               = var.account_lifecycle == "prd" ? "8453" : "84532"
+  perps_alerts_topic_name      = var.account_lifecycle == "prd" ? "titanio-lmn-devops-alerts" : "titanio-dev-dev-alerts"
 }
 
 data "aws_sns_topic" "perps_alerts" {
@@ -85,6 +88,7 @@ resource "aws_lambda_function" "perps_subgraph_monitor" {
       ENVIRONMENT   = local.perps_env_suffix
       SUBGRAPH_NAME = "perps"
       ENTITY_KIND   = "perps"
+      CHAIN_ID      = local.perps_chain_id
     }
   }
 
@@ -173,6 +177,26 @@ resource "aws_cloudwatch_metric_alarm" "perps_subgraph_stale" {
   ok_actions    = []
 }
 
+resource "aws_cloudwatch_metric_alarm" "perps_subgraph_behind" {
+  provider            = aws.use1
+  alarm_name          = "perps-subgraph-behind-${local.perps_env_suffix}"
+  alarm_description   = "Perps subgraph is more than 15 minutes of blocks behind the chain head. The tag is still indexing or stalled, so the book the app reads is not current."
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = local.perps_subgraph_eval_periods
+  metric_name         = "subgraph_blocks_behind"
+  namespace           = local.perps_subgraph_namespace
+  period              = local.perps_subgraph_check_seconds
+  statistic           = "Maximum"
+  threshold           = local.perps_subgraph_behind_blocks
+  treat_missing_data  = "notBreaching"
+  dimensions = {
+    Environment = local.perps_env_suffix
+    Subgraph    = "perps"
+  }
+  alarm_actions = []
+  ok_actions    = []
+}
+
 resource "aws_cloudwatch_metric_alarm" "perps_subgraph_empty" {
   provider            = aws.use1
   alarm_name          = "perps-subgraph-empty-${local.perps_env_suffix}"
@@ -196,12 +220,13 @@ resource "aws_cloudwatch_metric_alarm" "perps_subgraph_empty" {
 resource "aws_cloudwatch_composite_alarm" "perps_subgraph_unhealthy" {
   provider          = aws.use1
   alarm_name        = "perps-subgraph-${local.perps_env_suffix}"
-  alarm_description = "Perps index is down, erroring, stale, or missing the Perps entity"
+  alarm_description = "Perps index is down, erroring, stale, behind the chain, or missing the Perps entity"
 
   alarm_rule = join(" OR ", [
     "ALARM(${aws_cloudwatch_metric_alarm.perps_subgraph_unavailable.alarm_name})",
     "ALARM(${aws_cloudwatch_metric_alarm.perps_subgraph_errors.alarm_name})",
     "ALARM(${aws_cloudwatch_metric_alarm.perps_subgraph_stale.alarm_name})",
+    "ALARM(${aws_cloudwatch_metric_alarm.perps_subgraph_behind.alarm_name})",
     "ALARM(${aws_cloudwatch_metric_alarm.perps_subgraph_empty.alarm_name})",
   ])
 
