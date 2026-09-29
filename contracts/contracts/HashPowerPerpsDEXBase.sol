@@ -212,7 +212,6 @@ abstract contract HashPowerPerpsDEXBase is
     /// @dev `OrderCancelled` is also emitted from the same path so order-lifecycle indexers
     ///      keep working unchanged.
     event OrderLiquidated(bytes32 indexed orderId, address indexed user, address indexed liquidator, uint256 fee);
-    event BadDebt(address indexed user, uint256 amount); // The user does not have enough collateral to cover the loss
     event FundingUpdated(int256 fundingRate, int256 cumulativeFundingPerUnit, uint256 timestamp);
     event FundingSettled(address indexed user, int256 amount);
     event FundingParametersUpdated(uint256 maxBps, uint256 period);
@@ -249,6 +248,8 @@ abstract contract HashPowerPerpsDEXBase is
     error InvalidReduceQuantity();
     error OrderNotExists();
     error EmptyBatch();
+    /// @notice New order placement is rejected while the vault has halted trading.
+    error TradingHalted();
     error ZeroAddress();
     /// @notice The margin engine aggregates a different vault than this venue settles into.
     error VaultMismatch();
@@ -580,8 +581,8 @@ abstract contract HashPowerPerpsDEXBase is
 
         // Collect the positive side first so a same-match rebate can use revenue
         // earned by that match instead of depending on a pre-funded fee pot.
-        // Fee BadDebt (if any) is emitted here, before OrderUpdated / OrderMatched —
-        // same log order as Futures.
+        // Fee shortfalls, if any, are recorded by the vault here, before OrderUpdated /
+        // OrderMatched — same log order as Futures.
         if (makerFee < 0) {
             _transferFee(_taker, takerFee);
             _transferFee(makerParticipant, makerFee);
@@ -890,9 +891,9 @@ abstract contract HashPowerPerpsDEXBase is
     }
 
     /// @dev Settle signed PnL from `_from` to `_to` without blocking position reduction.
-    ///      The payer contributes everything available and every shortfall is surfaced
-    ///      immediately as bad debt; no deferred claim is created. Callers pass
-    ///      `(insuranceFund, user, pnl)` so positive PnL credits the user.
+    ///      A trader who cannot pay is recorded as bad debt by the vault. The insurance
+    ///      fund pays a winner in full, borrowing whatever its balance does not cover.
+    ///      Callers pass `(insuranceFund, user, pnl)` so positive PnL credits the user.
     function _transferPnl(address _from, address _to, int256 _pnl) internal {
         if (_pnl == 0) return;
         address payer;
@@ -908,16 +909,12 @@ abstract contract HashPowerPerpsDEXBase is
             amount = uint256(-_pnl);
         }
 
-        uint256 available = vault.balanceOf(payer);
-        if (available >= amount) {
-            _internalTransfer(payer, receiver, amount);
-            return;
-        }
+        vault.settleTransfer(payer, receiver, amount);
+    }
 
-        if (available > 0) {
-            _internalTransfer(payer, receiver, available);
-        }
-        emit BadDebt(payer, amount - available);
+    /// @dev New orders are the only way a fill starts, so rejecting them stops new exposure.
+    function _requireTradingOpen() internal view {
+        if (vault.halted()) revert TradingHalted();
     }
 
     /// @notice Charge a liquidation fee on the closed notional value, split between
@@ -1039,34 +1036,13 @@ abstract contract HashPowerPerpsDEXBase is
 
     /// @dev Move a signed trading fee between a participant and the fee pot
     ///      (this contract's vault account — see {collectedFeesBalance}).
-    ///
-    ///      Both directions clamp, matching {_transferPnl} and {_chargeLiquidationFee}. The
-    ///      hazard is an ordering one inside the fill, not keeper latency: {_executeMatch}
-    ///      calls {_createPosition}, which settles the maker's funding — clamping to balance
-    ///      and emitting `BadDebt` — and only then charges the maker fee against whatever
-    ///      settlement left behind. An unclamped debit would let a maker whose balance the
-    ///      same transaction just drained revert a stranger's taker order. Coverage of the
-    ///      fee itself rests on the MM floor (`mmSpotShock` on the full resting notional
-    ///      against a fee bounded by `MAX_FEE_BPS`), so the clamp only bites for an account
-    ///      already below MM, where it costs the fee pot a few bps rather than blocking the
-    ///      book.
-    ///
-    ///      A rebate is capped at the pot, so rebates can only ever pay out fees already
-    ///      collected — `makerFeeBps + takerFeeBps >= 0` keeps a single match from being a
-    ///      net outflow, and this keeps a run of them from overdrawing the pot.
+    ///      A rebate is capped at the pot. `makerFeeBps + takerFeeBps >= 0` keeps one match
+    ///      from being a net outflow, and the cap keeps a run of rebates from overdrawing it.
     function _transferFee(address _participant, int256 _fee) internal {
         if (_fee == 0) return;
 
         if (_fee > 0) {
-            uint256 owed = uint256(_fee);
-            uint256 available = vault.balanceOf(_participant);
-            uint256 paid = M.min(owed, available);
-            if (paid > 0) {
-                _internalTransfer(_participant, address(this), paid);
-            }
-            if (paid < owed) {
-                emit BadDebt(_participant, owed - paid);
-            }
+            vault.settleTransfer(_participant, address(this), uint256(_fee));
             return;
         }
 
@@ -1176,23 +1152,9 @@ abstract contract HashPowerPerpsDEXBase is
         if (pendingFunding == 0) return;
 
         if (pendingFunding > 0) {
-            uint256 owed = uint256(pendingFunding);
-            uint256 userBalance = vault.balanceOf(_user);
-            if (userBalance >= owed) {
-                _internalTransfer(_user, _insuranceFundAccount(), owed);
-            } else {
-                if (userBalance > 0) {
-                    _internalTransfer(_user, _insuranceFundAccount(), userBalance);
-                }
-                emit BadDebt(_user, owed - userBalance);
-            }
+            vault.settleTransfer(_user, _insuranceFundAccount(), uint256(pendingFunding));
         } else {
-            uint256 owed = uint256(-pendingFunding);
-            uint256 reserveBalance = vault.balanceOf(_insuranceFundAccount());
-            uint256 payout = owed < reserveBalance ? owed : reserveBalance;
-            if (payout > 0) {
-                _internalTransfer(_insuranceFundAccount(), _user, payout);
-            }
+            vault.settleTransfer(_insuranceFundAccount(), _user, uint256(-pendingFunding));
         }
 
         emit FundingSettled(_user, pendingFunding);

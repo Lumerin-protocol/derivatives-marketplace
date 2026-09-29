@@ -1,3 +1,4 @@
+blockExoticSubdeps: false
 allowBuilds:
   '@arbitrum/nitro-contracts': false
   '@cyfrin/aderyn': true

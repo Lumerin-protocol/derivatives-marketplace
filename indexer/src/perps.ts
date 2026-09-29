@@ -24,7 +24,6 @@ import {
   FundingSettled,
   FundingParametersUpdated,
   MinimumMarginPerOrderUpdated,
-  BadDebt,
   HashPowerPerpsDEX as PerpsContract,
 } from "../generated/HashPowerPerpsDEX/HashPowerPerpsDEX";
 import {
@@ -36,7 +35,6 @@ import {
   PriceLevel,
   FundingUpdate,
   FundingSettlement,
-  BadDebtEvent,
   LiquidationTx,
   PositionSession,
 } from "../generated/schema";
@@ -109,7 +107,6 @@ function getOrCreatePerps(): Perps {
     perps.totalVolume = BigInt.zero();
     perps.totalLiquidations = 0;
     perps.totalLiquidatedValue = BigInt.zero();
-    perps.totalBadDebt = BigInt.zero();
     perps.initializedAt = BigInt.zero();
     perps.lastUpdatedAt = BigInt.zero();
     loadPerpsFromContract(perps);
@@ -1132,7 +1129,7 @@ export function handlePositionLiquidated(event: PositionLiquidated): void {
   // The dedicated Liquidation entity was dropped: the flagged liquidation Trade
   // below is the single source of truth (it captures closedQuantity -> signed
   // tradeQuantity, pnl -> realizedPnl, liquidatorFee -> liquidationFee, the
-  // liquidator, and tx/time). `Perps.totalLiquidations` + `BadDebtEvent` stay.
+  // liquidator, and tx/time). `Perps.totalLiquidations` stays.
 
   // Close the open session with full close stats + denormalized
   // liquidatedQuantity, and create the forced liquidation Trade linked to it
@@ -1281,29 +1278,6 @@ export function handleFundingSettled(event: FundingSettled): void {
   }
   user.lastActivityAt = event.block.timestamp;
   user.save();
-}
-
-export function handleBadDebt(event: BadDebt): void {
-  log.info("Bad debt: user {} amount {}", [
-    event.params.user.toHexString(),
-    event.params.amount.toString(),
-  ]);
-
-  const user = getOrCreateUser(event.params.user, event.block.timestamp);
-
-  const eventId = createEventId(event.transaction.hash, event.logIndex);
-  const badDebtEvent = new BadDebtEvent(eventId);
-  badDebtEvent.user = user.id;
-  badDebtEvent.amount = event.params.amount;
-  badDebtEvent.timestamp = event.block.timestamp;
-  badDebtEvent.blockNumber = event.block.number;
-  badDebtEvent.transactionHash = event.transaction.hash;
-  badDebtEvent.save();
-
-  const perps = getOrCreatePerps();
-  perps.totalBadDebt = perps.totalBadDebt.plus(event.params.amount);
-  perps.lastUpdatedAt = event.block.timestamp;
-  perps.save();
 }
 
 // ============ Config Event Handlers ============

@@ -183,7 +183,7 @@ describe("HashPowerPerpsDEX - liquidatePosition(user, closeQty) partial close", 
     const pos = await perps.read.getUserPosition([seller.account.address]);
     assert.equal(pos.netQuantity, 0n, "deep-underwater position fully closes");
 
-    const badDebt = parseEventLogs({ logs: receipt.logs, abi: perps.abi, eventName: "BadDebt" });
+    const badDebt = parseEventLogs({ logs: receipt.logs, abi: contracts.vault.abi, eventName: "BadDebt" });
     assert.ok(badDebt.length >= 1, "expected a BadDebt event on the bad-debt full close");
   });
 
@@ -202,10 +202,10 @@ describe("HashPowerPerpsDEX - liquidatePosition(user, closeQty) partial close", 
       account: buyer2.account,
     });
     const receipt = await pc.waitForTransactionReceipt({ hash });
-    const debts = parseEventLogs({ logs: receipt.logs, abi: perps.abi, eventName: "BadDebt" });
+    const debts = parseEventLogs({ logs: receipt.logs, abi: vault.abi, eventName: "BadDebt" });
 
     assert.equal(debts.length, 1);
-    assert.equal(debts[0].args.user.toLowerCase(), seller.account.address.toLowerCase());
+    assert.equal(debts[0].args.payer.toLowerCase(), seller.account.address.toLowerCase());
     assert.equal(debts[0].args.amount, loss - available);
     assert.equal(await vault.read.balanceOf([seller.account.address]), 0n);
     assert.equal(

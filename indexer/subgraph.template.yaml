@@ -32,7 +32,6 @@ dataSources:
         - LiquidationTx
         - FundingUpdate
         - FundingSettlement
-        - BadDebtEvent
         - ReservePoolEvent
       abis:
         - name: HashPowerPerpsDEX
@@ -56,8 +55,6 @@ dataSources:
           handler: handleFundingUpdated
         - event: FundingSettled(indexed address,int256)
           handler: handleFundingSettled
-        - event: BadDebt(indexed address,uint256)
-          handler: handleBadDebt
         # Config events
         - event: MakerFeeBpsUpdated(int16)
           handler: handleMakerFeeBpsUpdated
