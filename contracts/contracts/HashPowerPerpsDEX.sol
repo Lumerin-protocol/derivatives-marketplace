@@ -25,7 +25,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @dev Lives here rather than in {HashPowerPerpsDEXBase} so that a diff to
     ///      this file and the version it ships under stay in the same place,
     ///      mirroring {Futures}.
-    string public constant VERSION = "6.6.0";
+    string public constant VERSION = "6.7.0";
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ICollateralVault _vault) HashPowerPerpsDEXBase(_vault) { }
@@ -265,6 +265,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         // because settlement changes vault balances that feed the portfolio MM predicate.
         // Portfolio-wide, not just this book: a position here can be the only thing
         // offsetting resting orders at another venue. See `IPortfolioMarginEngine.hasRestingOrderDelta`.
+        if (_user == BACKSTOP) revert BackstopAccount();
         if (portfolioMargin.hasRestingOrderDelta(_user)) revert OrdersStillOpen();
         if (_closeQty == 0) revert InvalidQty();
 
@@ -284,6 +285,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         // an oversize close does not pay log/hook gas on the revert path.
         if (closeAbs == absNet) {
             (int256 pnl, int256 closedQuantity, uint256 liqFee) = _doLiquidatePosition(_user, currentPrice);
+            _handOffToBackstop(_user, closedQuantity, currentPrice);
             _revertIfOverLiquidated(_user);
             emit PositionLiquidated(_user, _msgSender(), closedQuantity, pnl, liqFee);
             _notifyLiquidation(_msgSender(), liqFee);
@@ -291,6 +293,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         }
 
         (int256 pnl, int256 signedClose) = _doPartialLiquidatePosition(_user, position, closeAbs, currentPrice);
+        _handOffToBackstop(_user, signedClose, currentPrice);
 
         // Charge liquidation fee on the closed notional
         uint256 closedNotional = _calculateValue(currentPrice, closeAbs);
@@ -302,6 +305,37 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         _notifyLiquidation(_msgSender(), liqFee);
     }
 
+    /// @notice Reduce the protocol backstop's position by up to `_qty` contracts as a taker, inside
+    ///         `mark ± backstopUnwindBandBps`, and pay the caller `backstopUnwindFeeBps` of the
+    ///         filled notional at the mark from the fee pot.
+    /// @dev Permissionless and allowed while the vault is halted: unwinding only shrinks protocol
+    ///      exposure. Reduce-only by construction. Reverts `TimeInForceNotFilled` when nothing
+    ///      inside the band fills, so callers can simulate before sending. The fee is capped at
+    ///      the fee pot balance. Funding on the backstop is settled before the fill like any taker.
+    function unwindBackstop(uint256 _qty) external {
+        if (_qty == 0) revert InvalidQty();
+        int256 net = positions[BACKSTOP].netQuantity;
+        if (net == 0) revert PositionNotExists();
+
+        bool isBuy = net < 0;
+        uint256 closeAbs = M.min(_qty, M.abs(net));
+        _updateGlobalFunding();
+        _settleFunding(BACKSTOP);
+        uint256 mark = getMarketPrice();
+        (uint16 bandBps, uint16 feeBps) = vault.backstopParams();
+        uint256 limit = _bandPrice(mark, isBuy, bandBps);
+        if (limit == 0) revert InvalidPrice();
+
+        // IOC: emits OrderCreated / OrderUpdated(0) like any taker and reverts on a zero fill.
+        _createOrder(BACKSTOP, limit, M.toSigned(isBuy, closeAbs), TimeInForce.IOC);
+        uint256 filledAbs = M.abs(net - positions[BACKSTOP].netQuantity);
+
+        uint256 fee = M.min(_calculateValue(mark, filledAbs) * feeBps / BPS, vault.balanceOf(address(this)));
+        if (fee != 0) _internalTransfer(address(this), _msgSender(), fee);
+
+        emit BackstopUnwound(_msgSender(), M.toSigned(isBuy, filledAbs), fee);
+    }
+
     /// @dev Over-liquidation guard: leftover balance must sit at/under IM when a real IM>MM
     ///      buffer remains. Runs after full and partial closes (vacuous when IM == MM == 0).
     function _revertIfOverLiquidated(address _user) internal view {
@@ -311,6 +345,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
 
     /// @notice Force-cancel a single resting order owned by an underwater user. Permissionless.
     function liquidateOrder(address _user, bytes32 _orderId) external {
+        if (_user == BACKSTOP) revert BackstopAccount();
         Order memory order = orders[_orderId];
         if (order.participant != _user) revert OrderNotBelongToUser();
         if (order.quantity == 0) revert OrderNotExists();
@@ -324,6 +359,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @notice Cancel keeper-chosen resting orders. Keeps prior cancels; skips raced/stale
     ///         ids; stops when the user is healthy.
     function liquidateOrders(address _user, bytes32[] calldata _orderIds) external {
+        if (_user == BACKSTOP) revert BackstopAccount();
         _updateGlobalFunding();
 
         uint256 cancelled = 0;

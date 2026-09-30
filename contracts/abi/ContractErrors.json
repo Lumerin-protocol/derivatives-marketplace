@@ -6,6 +6,11 @@
   },
   {
     "inputs": [],
+    "name": "BackstopParamOutOfBounds",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "OracleStale",
     "type": "error"
   },
@@ -96,6 +101,11 @@
   {
     "inputs": [],
     "name": "UnsupportedTokenDecimals",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "PositionNotExists",
     "type": "error"
   },
   {
@@ -293,6 +303,11 @@
   {
     "inputs": [],
     "name": "ERC1967NonPayable",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "BackstopAccount",
     "type": "error"
   },
   {
