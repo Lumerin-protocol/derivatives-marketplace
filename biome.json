@@ -14,11 +14,7 @@
   },
   "overrides": [
     {
-      "includes": [
-        "**/indexer/src/**",
-        "**/indexer/tests/**",
-        "**/types/**"
-      ],
+      "includes": ["**/indexer/src/**", "**/indexer/tests/**", "**/types/**"],
       "linter": {
         "rules": {
           "complexity": {
@@ -43,9 +39,7 @@
       }
     },
     {
-      "includes": [
-        "**/*.css"
-      ],
+      "includes": ["**/*.css"],
       "linter": {
         "rules": {
           "suspicious": {

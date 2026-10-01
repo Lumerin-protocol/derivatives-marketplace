@@ -29,7 +29,7 @@
     "lint:fix": "biome check --write ."
   },
   "dependencies": {
-    "@graphprotocol/graph-ts": "0.37.0"
+    "@graphprotocol/graph-ts": "0.38.2"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.13",

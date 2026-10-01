@@ -10,9 +10,9 @@ import json
 import os
 import time
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 
-import boto3
+import boto3  # type: ignore
 
 GS_URL = os.environ.get("GS_URL", "")
 CW_NAMESPACE = os.environ.get("CW_NAMESPACE", "SubgraphIndex")
@@ -73,7 +73,7 @@ def query_subgraph(url, query):
     try:
         body = post_json(url, {"query": query}, timeout=30)
         return body, int((time.time() - start) * 1000)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - best-effort network call
         print(f"query failed: {exc}")
         return None, int((time.time() - start) * 1000)
 
@@ -86,12 +86,14 @@ def rpc(method, params):
     last = None
     for url in urls:
         try:
-            body = post_json(url, {"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
+            body = post_json(
+                url, {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+            )
             if body.get("error"):
                 last = body["error"]
                 continue
             return body.get("result")
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - best-effort network call
             last = exc
             print(f"rpc {method} failed: {exc}")
     print(f"rpc {method} unavailable: {last}")
@@ -130,7 +132,9 @@ def as_int(value):
 
 
 def lambda_handler(event, context):
-    print(f"subgraph index check {SUBGRAPH_NAME} {ENVIRONMENT} {datetime.now().isoformat()}")
+    print(
+        f"subgraph index check {SUBGRAPH_NAME} {ENVIRONMENT} {datetime.now(timezone.utc).isoformat()}"
+    )
     dimensions = [
         {"Name": "Environment", "Value": ENVIRONMENT},
         {"Name": "Subgraph", "Value": SUBGRAPH_NAME},
@@ -186,7 +190,9 @@ def lambda_handler(event, context):
         ("subgraph_latest_activity_age_seconds", activity_age, dimensions, "Seconds"),
     ]
     if age_seconds is not None:
-        metrics.append(("subgraph_data_age_seconds", age_seconds, dimensions, "Seconds"))
+        metrics.append(
+            ("subgraph_data_age_seconds", age_seconds, dimensions, "Seconds")
+        )
     if blocks_behind is not None:
         metrics.append(("subgraph_blocks_behind", blocks_behind, dimensions, "Count"))
 
