@@ -22,6 +22,11 @@
     "type": "error"
   },
   {
+    "inputs": [],
+    "name": "BackstopAccount",
+    "type": "error"
+  },
+  {
     "inputs": [
       {
         "internalType": "address",
@@ -119,6 +124,11 @@
   },
   {
     "inputs": [],
+    "name": "NotHalted",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "NotInitializing",
     "type": "error"
   },
@@ -186,6 +196,11 @@
   },
   {
     "inputs": [],
+    "name": "PositionNotExists",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "TimeInForceNotFilled",
     "type": "error"
   },
@@ -240,6 +255,56 @@
     "inputs": [],
     "name": "ZeroAddress",
     "type": "error"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "int256",
+        "name": "quantity",
+        "type": "int256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "price",
+        "type": "uint256"
+      }
+    ],
+    "name": "BackstopAssigned",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "caller",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "int256",
+        "name": "filledQuantity",
+        "type": "int256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "fee",
+        "type": "uint256"
+      }
+    ],
+    "name": "BackstopUnwound",
+    "type": "event"
   },
   {
     "anonymous": false,
@@ -671,6 +736,19 @@
   },
   {
     "inputs": [],
+    "name": "BACKSTOP",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "CONTRACT_SIZE_HPS_DAY",
     "outputs": [
       {
@@ -863,6 +941,19 @@
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address[]",
+        "name": "_users",
+        "type": "address[]"
+      }
+    ],
+    "name": "forceClosePositions",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -1661,6 +1752,19 @@
       }
     ],
     "name": "transferOwnership",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_qty",
+        "type": "uint256"
+      }
+    ],
+    "name": "unwindBackstop",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"

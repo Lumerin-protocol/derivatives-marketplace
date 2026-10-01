@@ -125,11 +125,13 @@ Realized PnL is settled through a **reserve pool**: profits are paid from the po
 
 ### Liquidation
 
-Anyone can call `liquidate(user)` if the user's collateral falls below their maintenance margin. The liquidation:
+Anyone can call `liquidatePosition(user, closeQty)` if the user's portfolio balance falls below maintenance margin. The liquidation:
 
-1. Calculates PnL at the current oracle price and settles it against the reserve pool.
-2. Pays a fixed liquidation fee to the caller from the user's remaining balance.
-3. Deletes the position entirely.
+1. Settles funding, then closes `closeQty` (clamped to the position) at the current oracle price and settles the slice PnL against the insurance fund.
+2. Reduces or deletes the position (a partial close is guarded by `OverLiquidation`).
+3. Hands the closed signed quantity to the protocol backstop ledger (`BACKSTOP`, read from `vault.BACKSTOP_ADDR()`) at the same price and emits `BackstopAssigned(user, quantity, price)`. Positions therefore stay conserved: `sum(users) + backstop == 0`.
+
+The backstop cannot be liquidated or traded as a user (`BackstopAccount`). Anyone can reduce it with `unwindBackstop(qty)`: an IOC that only reduces, limited to `mark ± vault.backstopParams().unwindBandBps`, that reverts `TimeInForceNotFilled` on a zero fill and pays the caller `unwindFeeBps` of the filled notional from the fee pot (`BackstopUnwound`). The backstop pays no taker fee and participates in funding. `forceClosePositions(users)` is an owner-only, halted-only close at the mark with no hand-off, used to clear residual exposure. See `collateral-margin/docs/protocol-liquidation-exposure.md`.
 
 ### Price Oracle
 

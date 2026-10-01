@@ -12,7 +12,13 @@ import { estimateContractGas, simulateContract } from "viem/actions";
 import { OperationType } from "@safe-global/types-kit";
 import { requireEnvsSet } from "../lib/env.ts";
 import { addrUrl, txUrl } from "../lib/explorer.ts";
-import { logInfo, logPrompt, logStep, logSuccess, logTitle } from "../lib/log.ts";
+import {
+  logInfo,
+  logPrompt,
+  logStep,
+  logSuccess,
+  logTitle,
+} from "../lib/log.ts";
 import { SafeWallet } from "../lib/safe.ts";
 import { verifyContract } from "../lib/verify.ts";
 import { writeAndWait } from "../lib/writeContract.ts";
@@ -20,21 +26,13 @@ import { writeAndWait } from "../lib/writeContract.ts";
 // Initializers are versioned and must run in order: `initializeV2` (reinitializer 2)
 // then `initializeV3` (reinitializer 3). Calling V3 first from version 1 permanently
 // skips V2. Fresh proxies from `deploy-perps.ts` already sit on 3.
-const TARGET_CODE_VERSION = "6.6.0";
+const TARGET_CODE_VERSION = "6.7.0";
 const UPGRADE_CONFIRMATIONS = 5;
 const DEFAULT_SAFE_GAS_OVERHEAD = 150_000n;
 
 // ERC-7201 namespaced storage slot for OpenZeppelin's `Initializable`.
 const INITIALIZABLE_STORAGE_SLOT: Hex =
   "0xf0c57e16840df040f15088dc2f81fe391c3923bec73e23a9662efc9c229c6a00";
-
-function readNonNegativeBigInt(name: string): bigint {
-  const raw = process.env[name];
-  if (!raw) throw new Error(`Environment variable ${name} is required`);
-  const value = BigInt(raw);
-  if (value < 0n) throw new Error(`${name} must not be negative`);
-  return value;
-}
 
 function readOptionalBigInt(name: string): bigint | undefined {
   const raw = process.env[name];
@@ -65,13 +63,9 @@ async function readInitializedVersion(
 }
 
 async function main() {
-  logTitle("HashPowerPerpsDEX Atomic Upgrade and Reset");
+  logTitle("HashPowerPerpsDEX Upgrade");
 
-  const env = requireEnvsSet(
-    "PERPS_ADDRESS",
-    "VAULT_ADDRESS",
-    "PERPS_DEPLOYMENT_BLOCK",
-  );
+  const env = requireEnvsSet("PERPS_ADDRESS", "VAULT_ADDRESS");
   const proxyAddress = getAddress(env.PERPS_ADDRESS);
   const vaultAddress = getAddress(env.VAULT_ADDRESS);
   const pmeAddress =
@@ -81,7 +75,6 @@ async function main() {
   const configuredSafe = readOptionalAddress("SAFE_OWNER_ADDRESS");
   const pointsHookAddress = readOptionalAddress("HOOK_ADDRESS");
   const existingImpl = readOptionalAddress("PERPS_IMPL_ADDRESS");
-  const deploymentBlock = readNonNegativeBigInt("PERPS_DEPLOYMENT_BLOCK");
 
   const { viem } = await network.getOrCreate();
   const [deployer] = await viem.getWalletClients();
@@ -92,7 +85,9 @@ async function main() {
     await perps.read.owner({ blockNumber: snapshotBlock }),
   );
   const deployerAddress = getAddress(deployer.account.address);
-  const currentCodeVersion = await perps.read.VERSION({ blockNumber: snapshotBlock }).catch(() => "unknown");
+  const currentCodeVersion = await perps.read
+    .VERSION({ blockNumber: snapshotBlock })
+    .catch(() => "unknown");
   const currentInitVersion = await readInitializedVersion(
     pc,
     proxyAddress,
@@ -128,7 +123,6 @@ async function main() {
       pmeAddress === zeroAddress
         ? "(none — wire later)"
         : addrUrl(pc, pmeAddress),
-    "Deployment block": deploymentBlock,
     "Snapshot block": snapshotBlock,
   });
 

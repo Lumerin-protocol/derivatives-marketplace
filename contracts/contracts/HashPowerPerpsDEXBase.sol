@@ -56,6 +56,10 @@ abstract contract HashPowerPerpsDEXBase is
     ICollateralVault public immutable vault;
     /// @dev Collateral token decimals (must be 6). Distinct from QUANTITY_DECIMALS.
     uint8 internal immutable collateralDecimals;
+    /// @notice Keyless protocol backstop account (vault `BACKSTOP_ADDR`). Liquidation hands the
+    ///         closed quantity to it as an explicit position; anyone may shrink that position
+    ///         through `unwindBackstop`. It never rests orders and is never liquidated.
+    address public immutable BACKSTOP;
 
     // State variables
     address private __gap0;
@@ -219,6 +223,13 @@ abstract contract HashPowerPerpsDEXBase is
     event MinimumMarginPerOrderUpdated(uint256 newMinimumMarginPerOrder);
     /// @notice Emitted whenever the points hook address changes.
     event HookUpdated(address indexed hook);
+    /// @notice Liquidation moved `quantity` (signed, the liquidated user's side) from `user` to the
+    ///         backstop at `price`. Indexers apply it to the backstop's position only; the user's
+    ///         side is already covered by `PositionLiquidated`.
+    event BackstopAssigned(address indexed user, int256 quantity, uint256 price);
+    /// @notice `caller` reduced the backstop by `filledQuantity` (signed, the backstop's taker side)
+    ///         and was paid `fee` from the fee pot.
+    event BackstopUnwound(address indexed caller, int256 filledQuantity, uint256 fee);
 
     // Errors
     error InvalidPrice();
@@ -258,6 +269,12 @@ abstract contract HashPowerPerpsDEXBase is
     error InvalidDependency();
     /// @notice Perps prices, values, and ticks are denominated in six-decimal collateral.
     error UnsupportedTokenDecimals();
+    /// @notice The backstop account cannot be liquidated; use `unwindBackstop`.
+    error BackstopAccount();
+    /// @notice The backstop holds no position to unwind.
+    error PositionNotExists();
+    /// @notice Owner escape hatch that must run while the vault is halted.
+    error NotHalted();
 
     /// @param _vault The shared collateral vault. Its `collateralToken()` becomes the underlying ERC20.
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -266,6 +283,8 @@ abstract contract HashPowerPerpsDEXBase is
         vault = _vault;
         collateralDecimals = IERC20Metadata(address(_vault.collateralToken())).decimals();
         if (collateralDecimals != 6) revert UnsupportedTokenDecimals();
+        BACKSTOP = _vault.BACKSTOP_ADDR();
+        if (BACKSTOP == address(0)) revert ZeroAddress();
         _disableInitializers();
     }
 
@@ -574,7 +593,8 @@ abstract contract HashPowerPerpsDEXBase is
         int256 takerQty = _toSignedQuantity(matchAmt, _remainingQty);
         uint256 notionalValue = _calculateValue(makerPrice, matchAmt);
 
-        int256 takerFee = int256(notionalValue) * int256(takerFeeBps) / int256(BPS);
+        // The backstop is unfunded by design: a taker fee would only be booked as BadDebt.
+        int256 takerFee = _taker == BACKSTOP ? int256(0) : int256(notionalValue) * int256(takerFeeBps) / int256(BPS);
         int256 makerFee = int256(notionalValue) * int256(makerFeeBps) / int256(BPS);
 
         _createPosition(makerParticipant, _taker, makerPrice, takerQty);
@@ -824,6 +844,26 @@ abstract contract HashPowerPerpsDEXBase is
     }
 
     // ── Internal helpers: margin / liquidation ────────────────────────────────
+
+    /// @dev The backstop inherits the liquidated quantity (same sign as the user's position) so
+    ///      positions keep summing to zero: the user's counterparties are untouched and the
+    ///      backstop now faces them. Funding is settled first so the inherited size accrues from
+    ///      now. An opposite backstop leg nets and realizes against the fund; what the backstop
+    ///      cannot pay is recorded as `BadDebt` by the vault. No margin check: the backstop is a
+    ///      ledger for protocol exposure, not a margined trader.
+    function _handOffToBackstop(address _user, int256 _signedClose, uint256 _mark) internal {
+        _settleFunding(BACKSTOP);
+        _updateUserPosition(BACKSTOP, _signedClose, _mark);
+        emit BackstopAssigned(_user, _signedClose, _mark);
+    }
+
+    /// @dev Limit price `_bps` away from `_mark` on the taker's side, rounded to the tick toward
+    ///      the mark so the result is always inside the band and always tick-aligned.
+    function _bandPrice(uint256 _mark, bool _isBuy, uint16 _bps) internal pure returns (uint256) {
+        uint256 offset = _mark * _bps / BPS;
+        uint256 raw = _isBuy ? _mark + offset : _mark - offset + minimumPriceIncrement - 1;
+        return raw / minimumPriceIncrement * minimumPriceIncrement;
+    }
 
     /// @dev Closes `_closeAbs` (< |netQuantity|) of a verified-underwater user's position at the
     ///      mark, realizes PnL on the closed slice via {_settleReducedPosition}, and scales

@@ -50,6 +50,10 @@ dataSources:
           handler: handleOrderMatched
         - event: PositionLiquidated(indexed address,indexed address,int256,int256,uint256)
           handler: handlePositionLiquidated
+        - event: BackstopAssigned(indexed address,int256,uint256)
+          handler: handleBackstopAssigned
+        - event: BackstopUnwound(indexed address,int256,uint256)
+          handler: handleBackstopUnwound
         # Funding events
         - event: FundingUpdated(int256,int256,uint256)
           handler: handleFundingUpdated
