@@ -111,7 +111,9 @@ predictor evaluating other prices uses the aggregate's raw values instead.
 
 The engine then applies its own spot/vol stress scenarios to the netted delta and adds the order margin, unrealized loss and funding owed. Because delta is netted across products, a perps position hedged with futures or options requires less collateral than either leg would in isolation — the portfolio requirement is not the sum of the parts.
 
-Users below initial margin cannot increase exposure or withdraw, but are not liquidated until they fall below maintenance margin. Reduce-only orders (opposite side of position, not exceeding position size) bypass the IM check entirely, ensuring users can always exit a losing position.
+Users below initial margin cannot increase exposure or withdraw, but are not liquidated until they fall below maintenance margin. A single `createOrder` that only reduces the position (opposite side, not exceeding position size) may leave the account below IM, provided it neither raises the portfolio IM nor widens the shortfall below MM, so users can always exit near the mark. A reduce priced beyond the MM shock from the mark realizes more loss than it releases, so it reverts if it would leave the account below MM, or deeper below it. Batches (`createOrders`, `updateOrders`) get no exception.
+
+On every voluntary fill the taker must pay its realized loss in full; a fill whose loss exceeds the taker's vault balance reverts with `InsufficientMarginBalance` rather than booking `BadDebt`. Makers, liquidations and the backstop keep the liveness policy: the payer's balance is transferred and the remainder is recorded as `BadDebt`.
 
 ### Positions and PnL
 

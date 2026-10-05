@@ -6,6 +6,7 @@ import {
   encodeFunctionData,
   getAddress,
   isAddress,
+  parseAbi,
   zeroAddress,
 } from "viem";
 import { estimateContractGas, simulateContract } from "viem/actions";
@@ -26,9 +27,13 @@ import { writeAndWait } from "../lib/writeContract.ts";
 // Initializers are versioned and must run in order: `initializeV2` (reinitializer 2)
 // then `initializeV3` (reinitializer 3). Calling V3 first from version 1 permanently
 // skips V2. Fresh proxies from `deploy-perps.ts` already sit on 3.
-const TARGET_CODE_VERSION = "6.7.0";
+const TARGET_CODE_VERSION = "6.8.0";
 const UPGRADE_CONFIRMATIONS = 5;
 const DEFAULT_SAFE_GAS_OVERHEAD = 150_000n;
+// 6.8.0 calls the engine's `reduceLimits` / `meetsTradeMargin` on every order. Against an
+// older engine every order reverts, so the engine has to be upgraded first.
+const MIN_ENGINE_VERSION = "2.2.0";
+const VERSION_ABI = parseAbi(["function VERSION() view returns (string)"]);
 
 // ERC-7201 namespaced storage slot for OpenZeppelin's `Initializable`.
 const INITIALIZABLE_STORAGE_SLOT: Hex =
@@ -60,6 +65,37 @@ async function readInitializedVersion(
   });
   if (!raw || raw === "0x" || raw === "0x0") return 0n;
   return BigInt(raw) & 0xffffffffffffffffn;
+}
+
+/** Dotted-version comparison; an unreadable version never passes. */
+function versionAtLeast(version: string, min: string): boolean {
+  const have = version.split(".").map(Number);
+  const want = min.split(".").map(Number);
+  for (let i = 0; i < want.length; i++) {
+    const part = have[i] ?? 0;
+    if (part !== want[i]) return part > want[i];
+  }
+  return true;
+}
+
+async function requireEngineVersion(
+  pc: PublicClient,
+  engine: Address,
+  blockNumber?: bigint,
+): Promise<void> {
+  const version = await pc
+    .readContract({
+      address: engine,
+      abi: VERSION_ABI,
+      functionName: "VERSION",
+      blockNumber,
+    })
+    .catch(() => "unknown");
+  if (!versionAtLeast(version, MIN_ENGINE_VERSION)) {
+    throw new Error(
+      `PortfolioMarginEngine ${engine} is at ${version}; upgrade it to ${MIN_ENGINE_VERSION} or later before this venue`,
+    );
+  }
 }
 
 async function main() {
@@ -95,6 +131,20 @@ async function main() {
   );
   const needsInitializeV2 = currentInitVersion < 2n;
   const needsInitializeV3 = currentInitVersion < 3n;
+
+  const wiredEngine = getAddress(
+    await perps.read
+      .portfolioMargin({ blockNumber: snapshotBlock })
+      .catch(() => zeroAddress),
+  );
+  const engines = new Set([
+    wiredEngine,
+    needsInitializeV2 ? pmeAddress : zeroAddress,
+  ]);
+  engines.delete(zeroAddress);
+  for (const engine of engines) {
+    await requireEngineVersion(pc, engine, snapshotBlock);
+  }
 
   if (configuredSafe && configuredSafe !== currentOwner) {
     throw new Error(
