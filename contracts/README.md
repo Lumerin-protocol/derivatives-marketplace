@@ -111,7 +111,9 @@ predictor evaluating other prices uses the aggregate's raw values instead.
 
 The engine then applies its own spot/vol stress scenarios to the netted delta and adds the order margin, unrealized loss and funding owed. Because delta is netted across products, a perps position hedged with futures or options requires less collateral than either leg would in isolation — the portfolio requirement is not the sum of the parts.
 
-Users below initial margin cannot increase exposure or withdraw, but are not liquidated until they fall below maintenance margin. Reduce-only orders (opposite side of position, not exceeding position size) bypass the IM check entirely, ensuring users can always exit a losing position.
+Users below initial margin cannot increase exposure or withdraw, but are not liquidated until they fall below maintenance margin. A single `createOrder` that only reduces the position (opposite side, not exceeding position size) may leave the account below IM, provided it neither raises the portfolio IM nor widens the shortfall below MM, so users can always exit near the mark. A reduce priced beyond the MM shock from the mark realizes more loss than it releases, so it reverts if it would leave the account below MM, or deeper below it. Batches (`createOrders`, `updateOrders`) get no exception.
+
+On every voluntary fill the taker must pay its realized loss in full; a fill whose loss exceeds the taker's vault balance reverts with `InsufficientMarginBalance` rather than booking `BadDebt`. Makers, liquidations and the backstop keep the liveness policy: the payer's balance is transferred and the remainder is recorded as `BadDebt`.
 
 ### Positions and PnL
 
@@ -125,11 +127,13 @@ Realized PnL is settled through a **reserve pool**: profits are paid from the po
 
 ### Liquidation
 
-Anyone can call `liquidate(user)` if the user's collateral falls below their maintenance margin. The liquidation:
+Anyone can call `liquidatePosition(user, closeQty)` if the user's portfolio balance falls below maintenance margin. The liquidation:
 
-1. Calculates PnL at the current oracle price and settles it against the reserve pool.
-2. Pays a fixed liquidation fee to the caller from the user's remaining balance.
-3. Deletes the position entirely.
+1. Settles funding, then closes `closeQty` (clamped to the position) at the current oracle price and settles the slice PnL against the insurance fund.
+2. Reduces or deletes the position (a partial close is guarded by `OverLiquidation`).
+3. Hands the closed signed quantity to the protocol backstop ledger (`BACKSTOP`, read from `vault.BACKSTOP_ADDR()`) at the same price and emits `BackstopAssigned(user, quantity, price)`. Positions therefore stay conserved: `sum(users) + backstop == 0`.
+
+The backstop cannot be liquidated or traded as a user (`BackstopAccount`). Anyone can reduce it with `unwindBackstop(qty)`: an IOC that only reduces, limited to `mark ± vault.backstopParams().unwindBandBps`, that reverts `TimeInForceNotFilled` on a zero fill and pays the caller `unwindFeeBps` of the filled notional from the fee pot (`BackstopUnwound`). The backstop pays no taker fee and participates in funding. `forceClosePositions(users)` is an owner-only, halted-only close at the mark with no hand-off, used to clear residual exposure. See `collateral-margin/docs/protocol-liquidation-exposure.md`.
 
 ### Price Oracle
 

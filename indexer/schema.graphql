@@ -173,6 +173,10 @@ type Trade @entity(immutable: false) {
   liquidator: Bytes # nullable
   "Fee paid to the liquidator; set only when isLiquidation."
   liquidationFee: BigInt # nullable
+  "True when this Trade is the protocol backstop inheriting a liquidated quantity (BackstopAssigned)."
+  isBackstopAssignment: Boolean! # default false
+  "The liquidated user whose quantity the backstop inherited; set only when isBackstopAssignment."
+  backstopFromUser: Bytes # nullable
   fills: [Fill!]! @derivedFrom(field: "trade")
   # Metadata
   timestamp: BigInt!
@@ -251,6 +255,21 @@ type FundingSettlement @entity(immutable: true) {
 # existence is the dedup signal.
 type LiquidationTx @entity(immutable: true) {
   id: Bytes! # transaction hash
+}
+
+# One per `BackstopUnwound`: a permissionless caller reduced the protocol
+# backstop's position as a taker inside the vault's band and was paid `fee`
+# from the venue fee pot. The fill itself is an ordinary `OrderMatched` with the
+# backstop (`0xbB…bB`) as taker, so its Trade/Fill rows come from that handler.
+type BackstopUnwind @entity(immutable: true) {
+  id: Bytes! # tx hash + log index
+  caller: Bytes!
+  "Signed quantity the backstop traded (its taker side): positive = bought to cover a short."
+  filledQuantity: BigInt!
+  fee: BigInt!
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  transactionHash: Bytes!
 }
 
 type ReservePoolEvent @entity(immutable: true) {

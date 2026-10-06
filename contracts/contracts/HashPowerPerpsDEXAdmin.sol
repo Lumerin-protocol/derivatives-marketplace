@@ -106,7 +106,7 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
     /// @notice Withdraw accrued trading and liquidation revenue to the venue owner.
     /// @dev Drains the venue's vault account (the fee pot). No separate accumulator.
     function withdrawCollectedFees() external onlyOwner {
-        vault.withdrawTo(owner(), vault.balanceOf(address(this)));
+        vault.withdrawTo(owner(), _vaultBalance(address(this)));
     }
 
     /// @notice Set the liquidation fee in basis points on the liquidated notional.
@@ -172,6 +172,30 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
         uint256 len = _users.length;
         for (uint256 i = 0; i < len; i++) {
             _rebuildOrderAggregateCache(_users[i]);
+        }
+    }
+
+    // ── Escape hatch ──────────────────────────────────────────────────────────
+
+    /// @notice Close the given users' positions at the current mark, realizing PnL against the
+    ///         insurance fund. No fee, no backstop hand-off: the fund's implicit position closes
+    ///         with the users'. Emits `PositionLiquidated` so indexers need nothing new.
+    /// @dev Only while the vault is halted, so no fill can land between users. Funding is settled
+    ///      per user first. Flat users are skipped. Resting orders are left alone; they carry no
+    ///      exposure until they fill.
+    function forceClosePositions(address[] calldata _users) external onlyOwner {
+        if (!vault.halted()) revert NotHalted();
+        _updateGlobalFunding();
+        uint256 mark = _marketPrice();
+        for (uint256 i = 0; i < _users.length; i++) {
+            address user = _users[i];
+            _settleFunding(user);
+            Position memory position = positions[user];
+            if (position.netQuantity == 0) continue;
+            int256 pnl = _signedValue(mark, position.netQuantity) - position.netEntryValue;
+            _transferPnl(_insuranceFundAccount(), user, pnl);
+            delete positions[user];
+            emit PositionLiquidated(user, _msgSender(), position.netQuantity, pnl, 0);
         }
     }
 

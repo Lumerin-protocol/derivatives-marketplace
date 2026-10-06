@@ -56,6 +56,10 @@ abstract contract HashPowerPerpsDEXBase is
     ICollateralVault public immutable vault;
     /// @dev Collateral token decimals (must be 6). Distinct from QUANTITY_DECIMALS.
     uint8 internal immutable collateralDecimals;
+    /// @notice Keyless protocol backstop account (vault `BACKSTOP_ADDR`). Liquidation hands the
+    ///         closed quantity to it as an explicit position; anyone may shrink that position
+    ///         through `unwindBackstop`. It never rests orders and is never liquidated.
+    address public immutable BACKSTOP;
 
     // State variables
     address private __gap0;
@@ -219,6 +223,13 @@ abstract contract HashPowerPerpsDEXBase is
     event MinimumMarginPerOrderUpdated(uint256 newMinimumMarginPerOrder);
     /// @notice Emitted whenever the points hook address changes.
     event HookUpdated(address indexed hook);
+    /// @notice Liquidation moved `quantity` (signed, the liquidated user's side) from `user` to the
+    ///         backstop at `price`. Indexers apply it to the backstop's position only; the user's
+    ///         side is already covered by `PositionLiquidated`.
+    event BackstopAssigned(address indexed user, int256 quantity, uint256 price);
+    /// @notice `caller` reduced the backstop by `filledQuantity` (signed, the backstop's taker side)
+    ///         and was paid `fee` from the fee pot.
+    event BackstopUnwound(address indexed caller, int256 filledQuantity, uint256 fee);
 
     // Errors
     error InvalidPrice();
@@ -258,6 +269,12 @@ abstract contract HashPowerPerpsDEXBase is
     error InvalidDependency();
     /// @notice Perps prices, values, and ticks are denominated in six-decimal collateral.
     error UnsupportedTokenDecimals();
+    /// @notice The backstop account cannot be liquidated; use `unwindBackstop`.
+    error BackstopAccount();
+    /// @notice The backstop holds no position to unwind.
+    error PositionNotExists();
+    /// @notice Owner escape hatch that must run while the vault is halted.
+    error NotHalted();
 
     /// @param _vault The shared collateral vault. Its `collateralToken()` becomes the underlying ERC20.
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -266,6 +283,8 @@ abstract contract HashPowerPerpsDEXBase is
         vault = _vault;
         collateralDecimals = IERC20Metadata(address(_vault.collateralToken())).decimals();
         if (collateralDecimals != 6) revert UnsupportedTokenDecimals();
+        BACKSTOP = _vault.BACKSTOP_ADDR();
+        if (BACKSTOP == address(0)) revert ZeroAddress();
         _disableInitializers();
     }
 
@@ -574,7 +593,8 @@ abstract contract HashPowerPerpsDEXBase is
         int256 takerQty = _toSignedQuantity(matchAmt, _remainingQty);
         uint256 notionalValue = _calculateValue(makerPrice, matchAmt);
 
-        int256 takerFee = int256(notionalValue) * int256(takerFeeBps) / int256(BPS);
+        // The backstop is unfunded by design: a taker fee would only be booked as BadDebt.
+        int256 takerFee = _taker == BACKSTOP ? int256(0) : int256(notionalValue) * int256(takerFeeBps) / int256(BPS);
         int256 makerFee = int256(notionalValue) * int256(makerFeeBps) / int256(BPS);
 
         _createPosition(makerParticipant, _taker, makerPrice, takerQty);
@@ -723,13 +743,17 @@ abstract contract HashPowerPerpsDEXBase is
     /// @param taker Address of the taker whose funding was already settled before the matching loop
     /// @dev Settles maker then taker so insurance-fund shortfall allocation is role-deterministic
     ///      (matches Futures). `OrderMatched` is emitted by {_executeMatch} after fees/updates.
+    ///      A trader taker must pay its realized loss in full: the fill price is the taker's
+    ///      choice, so an unpaid remainder would let a colluding maker collect it from the fund.
+    ///      The maker and the backstop keep the bad-debt path; a maker that could not pay would
+    ///      otherwise block every taker at its level.
     function _createPosition(address makerParticipant, address taker, uint256 _price, int256 _takerQty)
         internal
     {
         // Maker takes the opposite of the taker fill. Skip taker funding — settled once pre-loop.
         if (makerParticipant != taker) _settleFunding(makerParticipant);
-        _updateUserPosition(makerParticipant, -_takerQty, _price);
-        _updateUserPosition(taker, _takerQty, _price);
+        _updateUserPosition(makerParticipant, -_takerQty, _price, false);
+        _updateUserPosition(taker, _takerQty, _price, taker != BACKSTOP);
     }
 
     function _emitOrderMatched(
@@ -770,7 +794,8 @@ abstract contract HashPowerPerpsDEXBase is
     }
 
     /// @notice Update a user's net position with exact signed entry value
-    function _updateUserPosition(address _user, int256 _quantity, uint256 _tradePrice) internal {
+    /// @param _mustPay Revert instead of recording bad debt when the user cannot pay a realized loss
+    function _updateUserPosition(address _user, int256 _quantity, uint256 _tradePrice, bool _mustPay) internal {
         Position storage position = positions[_user];
         int256 entryValue = position.netEntryValue;
         int256 tradeValue = _signedValue(_tradePrice, _quantity);
@@ -791,11 +816,13 @@ abstract contract HashPowerPerpsDEXBase is
         }
 
         // Opposite direction: settle the reduced part, then open remainder (if any)
-        _settleOpposite(_user, _quantity, _tradePrice, entryValue);
+        _settleOpposite(_user, _quantity, _tradePrice, entryValue, _mustPay);
     }
 
     /// @notice Handle opposite-direction trade (partial/full close or flip)
-    function _settleOpposite(address _user, int256 _quantity, uint256 _tradePrice, int256 _entryValue) internal {
+    function _settleOpposite(address _user, int256 _quantity, uint256 _tradePrice, int256 _entryValue, bool _mustPay)
+        internal
+    {
         Position storage position = positions[_user];
         uint256 absQuantity = M.abs(_quantity);
         uint256 oldAbsQuantity = M.abs(position.netQuantity);
@@ -806,7 +833,7 @@ abstract contract HashPowerPerpsDEXBase is
             remainingEntryValue =
                 (_entryValue * int256(oldAbsQuantity - settledAbs)) / int256(oldAbsQuantity);
         }
-        _settleReducedPosition(_user, _tradePrice, signedSettled, _entryValue - remainingEntryValue);
+        _settleReducedPosition(_user, _tradePrice, signedSettled, _entryValue - remainingEntryValue, _mustPay);
 
         if (absQuantity > oldAbsQuantity) {
             // Flip: close old position and open opposite
@@ -824,6 +851,26 @@ abstract contract HashPowerPerpsDEXBase is
     }
 
     // ── Internal helpers: margin / liquidation ────────────────────────────────
+
+    /// @dev The backstop inherits the liquidated quantity (same sign as the user's position) so
+    ///      positions keep summing to zero: the user's counterparties are untouched and the
+    ///      backstop now faces them. Funding is settled first so the inherited size accrues from
+    ///      now. An opposite backstop leg nets and realizes against the fund; what the backstop
+    ///      cannot pay is recorded as `BadDebt` by the vault. No margin check: the backstop is a
+    ///      ledger for protocol exposure, not a margined trader.
+    function _handOffToBackstop(address _user, int256 _signedClose, uint256 _mark) internal {
+        _settleFunding(BACKSTOP);
+        _updateUserPosition(BACKSTOP, _signedClose, _mark, false);
+        emit BackstopAssigned(_user, _signedClose, _mark);
+    }
+
+    /// @dev Limit price `_bps` away from `_mark` on the taker's side, rounded to the tick toward
+    ///      the mark so the result is always inside the band and always tick-aligned.
+    function _bandPrice(uint256 _mark, bool _isBuy, uint16 _bps) internal pure returns (uint256) {
+        uint256 offset = _mark * _bps / BPS;
+        uint256 raw = _isBuy ? _mark + offset : _mark - offset + minimumPriceIncrement - 1;
+        return raw / minimumPriceIncrement * minimumPriceIncrement;
+    }
 
     /// @dev Closes `_closeAbs` (< |netQuantity|) of a verified-underwater user's position at the
     ///      mark, realizes PnL on the closed slice via {_settleReducedPosition}, and scales
@@ -847,7 +894,7 @@ abstract contract HashPowerPerpsDEXBase is
         uint256 absNet = M.abs(_position.netQuantity);
         int256 remainingEntryValue = (entryValue * int256(absNet - _closeAbs)) / int256(absNet);
 
-        pnl = _settleReducedPosition(_user, _currentPrice, signedClose, entryValue - remainingEntryValue);
+        pnl = _settleReducedPosition(_user, _currentPrice, signedClose, entryValue - remainingEntryValue, false);
 
         // signedClose has the position's sign, so subtracting it moves netQuantity toward zero.
         Position storage position = positions[_user];
@@ -881,21 +928,23 @@ abstract contract HashPowerPerpsDEXBase is
     /// @param _price Execution/mark price in collateral units
     /// @param _quantity Quantity being closed (positive = long, negative = short)
     /// @param _entryValue Signed entry value allocated to the closed quantity
+    /// @param _mustPay Revert instead of recording bad debt when the user cannot pay the loss
     /// @return pnl The PnL realized from reducing this position
-    function _settleReducedPosition(address _user, uint256 _price, int256 _quantity, int256 _entryValue)
+    function _settleReducedPosition(address _user, uint256 _price, int256 _quantity, int256 _entryValue, bool _mustPay)
         internal
         returns (int256 pnl)
     {
         pnl = _signedValue(_price, _quantity) - _entryValue;
-        _transferPnl(_insuranceFundAccount(), _user, pnl);
+        if (!_transferPnl(_insuranceFundAccount(), _user, pnl) && _mustPay) revert InsufficientMarginBalance();
     }
 
     /// @dev Settle signed PnL from `_from` to `_to` without blocking position reduction.
     ///      A trader who cannot pay is recorded as bad debt by the vault. The insurance
     ///      fund pays a winner in full, borrowing whatever its balance does not cover.
     ///      Callers pass `(insuranceFund, user, pnl)` so positive PnL credits the user.
-    function _transferPnl(address _from, address _to, int256 _pnl) internal {
-        if (_pnl == 0) return;
+    /// @return paidInFull False when the vault recorded part of the amount as bad debt
+    function _transferPnl(address _from, address _to, int256 _pnl) internal returns (bool paidInFull) {
+        if (_pnl == 0) return true;
         address payer;
         address receiver;
         uint256 amount;
@@ -909,7 +958,7 @@ abstract contract HashPowerPerpsDEXBase is
             amount = uint256(-_pnl);
         }
 
-        vault.settleTransfer(payer, receiver, amount);
+        return vault.settleTransfer(payer, receiver, amount) == amount;
     }
 
     /// @dev New orders are the only way a fill starts, so rejecting them stops new exposure.
@@ -932,7 +981,7 @@ abstract contract HashPowerPerpsDEXBase is
         uint256 computedFee = _notionalValue * uint256(feeBps) / BPS;
         if (computedFee == 0) return 0;
 
-        uint256 userBal = vault.balanceOf(_user);
+        uint256 userBal = _vaultBalance(_user);
         totalFee = M.min(computedFee, userBal);
         if (totalFee == 0) return 0;
 
@@ -956,13 +1005,22 @@ abstract contract HashPowerPerpsDEXBase is
         return _signedValue(_currentPrice, _position.netQuantity) - _position.netEntryValue;
     }
 
-    /// @notice Ensure the account is not short of portfolio IM (or, when `_maxAllowedIm` is
-    ///         set, that IM did not increase past that ceiling). Delegates to the PME.
-    function _ensureNoCollateralDeficit(address _user, uint256 _maxAllowedIm) internal view {
-        uint256 required = portfolioMargin.computePortfolioIM(_user);
-        if (vault.balanceOf(_user) < required && required > _maxAllowedIm) {
+    /// @notice Ensure the account is not short of portfolio IM. A reducing single order may
+    ///         finish below IM within the limits the engine's `reduceLimits` returned before
+    ///         it; strict callers pass zero for both.
+    function _ensureNoCollateralDeficit(address _user, uint256 _maxAllowedIm, uint256 _maxAllowedMmDeficit)
+        internal
+        view
+    {
+        if (!portfolioMargin.meetsTradeMargin(_user, _maxAllowedIm, _maxAllowedMmDeficit)) {
             revert InsufficientMarginBalance();
         }
+    }
+
+    /// @dev Every vault balance read goes through here: each external call site costs runtime
+    ///      bytecode, and this contract sits near the EIP-170 limit.
+    function _vaultBalance(address _account) internal view returns (uint256) {
+        return vault.balanceOf(_account);
     }
 
     // ── Internal helpers: validation / book lookups ───────────────────────────
@@ -1031,7 +1089,7 @@ abstract contract HashPowerPerpsDEXBase is
 
     /// @notice Fee pot size: the venue's vault balance (match + liquidation exchange share).
     function collectedFeesBalance() public view returns (uint256) {
-        return vault.balanceOf(address(this));
+        return _vaultBalance(address(this));
     }
 
     /// @dev Move a signed trading fee between a participant and the fee pot
@@ -1046,7 +1104,7 @@ abstract contract HashPowerPerpsDEXBase is
             return;
         }
 
-        uint256 rebate = M.min(uint256(-_fee), vault.balanceOf(address(this)));
+        uint256 rebate = M.min(uint256(-_fee), _vaultBalance(address(this)));
         if (rebate > 0) {
             _internalTransfer(address(this), _participant, rebate);
         }

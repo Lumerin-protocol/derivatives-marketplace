@@ -14,6 +14,8 @@ import {
   OrderUpdated,
   OrderMatched,
   PositionLiquidated,
+  BackstopAssigned,
+  BackstopUnwound,
   MakerFeeBpsUpdated,
   TakerFeeBpsUpdated,
   LiquidationFeeBpsUpdated,
@@ -37,6 +39,7 @@ import {
   FundingSettlement,
   LiquidationTx,
   PositionSession,
+  BackstopUnwind,
 } from "../generated/schema";
 import { absBigInt, isSameSign, minBigInt } from "./lib";
 import {
@@ -595,6 +598,7 @@ function getOrCreateTrade(
     trade.aggregatedEntryPriceAfter = BigInt.zero();
     trade.fillCount = 0;
     trade.isLiquidation = false;
+    trade.isBackstopAssignment = false;
     trade.timestamp = timestamp;
     trade.blockNumber = blockNumber;
     trade.transactionHash = txHash;
@@ -1212,6 +1216,171 @@ export function handlePositionLiquidated(event: PositionLiquidated): void {
   );
   perps.lastUpdatedAt = event.block.timestamp;
   perps.save();
+}
+
+// ============ Protocol backstop ============
+
+/// Keyless protocol backstop ledger (`CollateralVault.BACKSTOP_ADDR`). Liquidation
+/// hands the closed quantity to it; `BackstopAssigned` does not repeat the address.
+const BACKSTOP_ADDR: Address = Address.fromString(
+  "0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB",
+);
+
+/**
+ * The backstop inherits `quantity` (the liquidated user's sign) at `price`. There is
+ * no counterparty order and the event carries no post-state, so this mirrors the
+ * contract's `_updateUserPosition`: flat/same-sign scales in and re-averages the
+ * entry; an opposite quantity realizes against the running entry and reduces,
+ * closes or flips. Like a liquidation it produces a flagged Trade with no Fill.
+ */
+export function handleBackstopAssigned(event: BackstopAssigned): void {
+  log.info("Backstop assigned: from {} qty {} price {}", [
+    event.params.user.toHexString(),
+    event.params.quantity.toString(),
+    event.params.price.toString(),
+  ]);
+
+  const zero = BigInt.zero();
+  const qty = event.params.quantity;
+  if (qty.equals(zero)) return;
+  const price = event.params.price;
+  const perps = getOrCreatePerps();
+  const quantityScale = BigInt.fromI32(10).pow(u8(perps.quantityDecimals));
+  const backstop = getOrCreateUser(BACKSTOP_ADDR, event.block.timestamp);
+
+  const oldNet = backstop.netQuantity;
+  const flips =
+    !oldNet.equals(zero) &&
+    !isSameSign(oldNet, qty) &&
+    absBigInt(qty).gt(absBigInt(oldNet));
+
+  if (flips) {
+    // Close the whole old position at `price`, then open the remainder.
+    applyBackstopLeg(backstop, oldNet.neg(), price, quantityScale, event, 0);
+    applyBackstopLeg(backstop, qty.plus(oldNet), price, quantityScale, event, 1);
+  } else {
+    applyBackstopLeg(backstop, qty, price, quantityScale, event, 0);
+  }
+
+  backstop.lastActivityAt = event.block.timestamp;
+  backstop.save();
+}
+
+/// One non-flipping leg on the backstop: `qty` is either same-sign as (or opens) the
+/// position, or reduces it by at most `|net|`.
+function applyBackstopLeg(
+  user: User,
+  qty: BigInt,
+  price: BigInt,
+  quantityScale: BigInt,
+  event: BackstopAssigned,
+  sideIndex: i32,
+): void {
+  const zero = BigInt.zero();
+  const oldNet = user.netQuantity;
+  const oldEntry = user.aggregatedEntryPrice;
+  const newNet = oldNet.plus(qty);
+  const opens = oldNet.equals(zero);
+  const reduces = !opens && !isSameSign(oldNet, qty);
+  const closes = reduces && newNet.equals(zero);
+
+  let newEntry: BigInt;
+  let realizedPnl = zero;
+  if (opens) {
+    newEntry = price;
+  } else if (!reduces) {
+    const absOld = absBigInt(oldNet);
+    const absQty = absBigInt(qty);
+    newEntry = oldEntry.times(absOld).plus(price.times(absQty)).div(absOld.plus(absQty));
+  } else {
+    newEntry = closes ? zero : oldEntry;
+    const signedClosed = oldNet.gt(zero) ? absBigInt(qty) : absBigInt(qty).neg();
+    realizedPnl = price.minus(oldEntry).times(signedClosed).div(quantityScale);
+  }
+
+  let session: PositionSession;
+  if (opens) {
+    const id = positionSessionId(event.block.number, event.logIndex, sideIndex);
+    session = new PositionSession(id);
+    session.status = "OPEN";
+    session.user = user.id;
+    session.entryPrice = newEntry;
+    session.openedAt = event.block.timestamp;
+    session.closePrice = zero;
+    session.closedQuantity = zero;
+    session.realizedPnl = zero;
+    session.maxQuantity = zero;
+    session.tradingFees = zero;
+    session.fundingFees = zero;
+    session.liquidatedQuantity = zero;
+    user.currentSessionId = id;
+  } else {
+    const loaded = PositionSession.load(user.currentSessionId);
+    if (!loaded) {
+      log.warning("Backstop session not found: sessionId {}", [user.currentSessionId]);
+      user.netQuantity = newNet;
+      user.aggregatedEntryPrice = newEntry;
+      return;
+    }
+    session = loaded;
+  }
+
+  if (!closes) session.entryPrice = newEntry;
+  session.netQuantity = newNet;
+  session.lastTradeAt = event.block.timestamp;
+  const absAfter = absBigInt(newNet);
+  if (session.maxQuantity.lt(absAfter)) session.maxQuantity = absAfter;
+  if (reduces) {
+    const settledAbs = absBigInt(qty);
+    const oldClosed = session.closedQuantity;
+    session.closedQuantity = oldClosed.plus(settledAbs);
+    session.realizedPnl = session.realizedPnl.plus(realizedPnl);
+    session.closePrice = session.closePrice
+      .times(oldClosed)
+      .plus(price.times(settledAbs))
+      .div(session.closedQuantity);
+    user.realizedPnl = user.realizedPnl.plus(realizedPnl);
+  }
+  if (closes) {
+    session.status = "CLOSE";
+    user.currentSessionId = "";
+  }
+  session.save();
+
+  const trade = getOrCreateTrade(
+    event.transaction.hash,
+    user,
+    session.id,
+    event.block.timestamp,
+    event.block.number,
+  );
+  updateTradeAggregate(trade, price, qty, zero, realizedPnl, newNet, newEntry);
+  // No matched order: a Trade without Fill rows, like a liquidation exit.
+  trade.fillCount = 0;
+  trade.isBackstopAssignment = true;
+  trade.backstopFromUser = event.params.user;
+  saveTrade(trade, user);
+
+  user.netQuantity = newNet;
+  user.aggregatedEntryPrice = newEntry;
+}
+
+/// Caller-facing record of an unwind. The backstop's position change is already
+/// indexed from the accompanying `OrderMatched` (backstop as taker).
+export function handleBackstopUnwound(event: BackstopUnwound): void {
+  log.info("Backstop unwound: caller {} filled {} fee {}", [
+    event.params.caller.toHexString(),
+    event.params.filledQuantity.toString(),
+    event.params.fee.toString(),
+  ]);
+  const unwind = new BackstopUnwind(createEventId(event.transaction.hash, event.logIndex));
+  unwind.caller = event.params.caller;
+  unwind.filledQuantity = event.params.filledQuantity;
+  unwind.fee = event.params.fee;
+  unwind.timestamp = event.block.timestamp;
+  unwind.blockNumber = event.block.number;
+  unwind.transactionHash = event.transaction.hash;
+  unwind.save();
 }
 
 // ============ Funding Event Handlers ============

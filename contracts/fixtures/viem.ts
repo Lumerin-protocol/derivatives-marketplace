@@ -192,11 +192,13 @@ export async function deployPerpsFixture() {
     publicClient,
     optionsMockArtifact,
   );
-  const pmeImplAddress = await deploy(ownerWallet, publicClient, pmeArtifact);
+  const pmeImplAddress = await deploy(ownerWallet, publicClient, pmeArtifact, [
+    vaultAddress,
+  ]);
   const pmeInitData = encodeFunctionData({
     abi: pmeArtifact.abi,
     functionName: "initialize",
-    args: [vaultAddress],
+    args: [],
   });
   const pmeAddress = await deploy(ownerWallet, publicClient, proxyArtifact, [
     pmeImplAddress,
