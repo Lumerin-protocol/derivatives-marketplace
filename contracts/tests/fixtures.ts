@@ -201,7 +201,7 @@ export async function deployPerpsFixture(conn: Conn) {
     owner,
     pc,
     "../artifacts/collateral-margin/contracts/contracts/PortfolioMarginEngine.sol/PortfolioMarginEngine.json",
-    [],
+    [vault.address],
   );
   const pmeProxy = await deployContract<"ERC1967Proxy">(
     owner,
@@ -222,7 +222,6 @@ export async function deployPerpsFixture(conn: Conn) {
     client: { public: pc, wallet: owner },
   });
   // The PME pins each product to its own vault at registration.
-  await pme.write.setVault([vault.address]);
   await optionsMock.write.setVault([vault.address]);
   await pme.write.addLinearMarket([perps.address]);
   await pme.write.setOptions([optionsMock.address]);
@@ -518,7 +517,7 @@ export async function deployLocalFullStackFixture(conn: Conn) {
   ]);
   const optionMarginEngine = await viem.getContractAt("OptionMarginEngine", engineProxy.address);
 
-  const pmeImpl = await viem.deployContract("PortfolioMarginEngine", []);
+  const pmeImpl = await viem.deployContract("PortfolioMarginEngine", [vault.address]);
   const pmeProxy = await viem.deployContract("ERC1967Proxy", [
     pmeImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -528,7 +527,6 @@ export async function deployLocalFullStackFixture(conn: Conn) {
     }),
   ]);
   const pme = await viem.getContractAt("PortfolioMarginEngine", pmeProxy.address);
-  await pme.write.setVault([vault.address])
   await pme.write.addLinearMarket([perps.address]);
   await pme.write.setOptions([optionMarginEngine.address]);
   await pme.write.setOracle([priceOracle.address]);

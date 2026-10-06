@@ -56,7 +56,7 @@ async function deployPerpsIntegrationFixture(conn: NetworkConnection) {
   const perpsMock = await v.deployContract("PerpsDEXMock", []);
 
   // ── PME (reads spot from its own oracle reference) ────────────────────
-  const pmeImpl = await v.deployContract("PortfolioMarginEngine", []);
+  const pmeImpl = await v.deployContract("PortfolioMarginEngine", [vault.address]);
   const pmeProxy = await v.deployContract("ERC1967Proxy", [
     pmeImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -67,7 +67,6 @@ async function deployPerpsIntegrationFixture(conn: NetworkConnection) {
   ]);
   const pme = await v.getContractAt("PortfolioMarginEngine", pmeProxy.address);
   // The PME pins each product to its own vault at registration.
-  await pme.write.setVault([vault.address]);
   await perpsMock.write.setVault([vault.address]);
   await pme.write.addLinearMarket([perpsMock.address]);
   await pme.write.setOptions([engine.address]);
@@ -194,7 +193,7 @@ async function deployNoPerpsFixture(conn: NetworkConnection) {
   // PME reads spot from its own oracle reference.
   const perpsMock = await v.deployContract("PerpsDEXMock", []);
 
-  const pmeImpl = await v.deployContract("PortfolioMarginEngine", []);
+  const pmeImpl = await v.deployContract("PortfolioMarginEngine", [vault.address]);
   const pmeProxy = await v.deployContract("ERC1967Proxy", [
     pmeImpl.address as `0x${string}`,
     encodeFunctionData({
@@ -204,7 +203,6 @@ async function deployNoPerpsFixture(conn: NetworkConnection) {
     }),
   ]);
   const pme = await v.getContractAt("PortfolioMarginEngine", pmeProxy.address);
-  await pme.write.setVault([vault.address]);
   await perpsMock.write.setVault([vault.address]);
   await pme.write.addLinearMarket([perpsMock.address]);
   await pme.write.setOptions([engine.address]);

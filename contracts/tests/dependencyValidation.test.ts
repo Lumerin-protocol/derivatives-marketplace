@@ -18,16 +18,14 @@ async function deployVault(collateralToken: `0x${string}`) {
   return await viem.getContractAt("CollateralVault", proxy.address);
 }
 
-/** A second engine, aggregating whichever vault it is pointed at. */
+/** A second engine, aggregating whichever vault it is built against. */
 async function deployEngine(vaultAddress: `0x${string}`) {
-  const impl = await viem.deployContract("PortfolioMarginEngine", []);
+  const impl = await viem.deployContract("PortfolioMarginEngine", [vaultAddress]);
   const proxy = await viem.deployContract("ERC1967Proxy", [
     impl.address,
     encodeFunctionData({ abi: impl.abi, functionName: "initialize", args: [] }),
   ]);
-  const pme = await viem.getContractAt("PortfolioMarginEngine", proxy.address);
-  await pme.write.setVault([vaultAddress]);
-  return pme;
+  return await viem.getContractAt("PortfolioMarginEngine", proxy.address);
 }
 
 async function deployUninitializedPerps(vaultAddress: `0x${string}`) {
