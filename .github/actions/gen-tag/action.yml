@@ -52,6 +52,13 @@ runs:
           ENV="$ENV_OVERRIDE"
           CREATE_RELEASE="false"
           [ "$ENV" == "main" ] && CREATE_RELEASE="true"
+
+          # Feature branches may only target the shared dev environment.
+          BRANCH="${{ github.ref_name }}"
+          if [[ "$BRANCH" != "dev" && "$BRANCH" != "stg" && "$BRANCH" != "main" && "$ENV" != "dev" ]]; then
+            echo "::error::Feature branch '$BRANCH' can only deploy to dev (got '$ENV'). Staging and production stay locked to their own branches."
+            exit 1
+          fi
         else
           # Detect from branch name
           BRANCH="${{ github.ref_name }}"
