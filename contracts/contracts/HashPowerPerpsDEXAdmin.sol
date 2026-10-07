@@ -1,6 +1,7 @@
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import { AggregatorV3Interface } from "./interfaces/AggregatorV3Interface.sol";
 import { IPortfolioMarginEngine } from "collateral-margin/contracts/contracts/interfaces/IPortfolioMarginEngine.sol";
 import { IPointsHook } from "collateral-margin/contracts/contracts/interfaces/IPointsHook.sol";
@@ -23,6 +24,8 @@ import { HashPowerPerpsDEXBase } from "./HashPowerPerpsDEXBase.sol";
 ///      needed, declare it in {HashPowerPerpsDEXBase} at the end alongside the existing
 ///      gap slots.
 abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
+    using EnumerableSet for EnumerableSet.Bytes32Set;
+
     /// @notice Authorize upgrade (only owner)
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
 
@@ -182,7 +185,7 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
     ///         with the users'. Emits `PositionLiquidated` so indexers need nothing new.
     /// @dev Only while the vault is halted, so no fill can land between users. Funding is settled
     ///      per user first. Flat users are skipped. Resting orders are left alone; they carry no
-    ///      exposure until they fill.
+    ///      exposure until they fill, and {forceCancelOrders} removes them.
     function forceClosePositions(address[] calldata _users) external onlyOwner {
         if (!vault.halted()) revert NotHalted();
         _updateGlobalFunding();
@@ -199,16 +202,19 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
         }
     }
 
-    // ── Testnet maintenance ───────────────────────────────────────────────────
-
-    /// @notice Clear orders, position, and funding snapshot for explicit participants.
-    /// @dev Intended for testnet resets and migrations. The caller must supply the complete
-    ///      participant set; the contract deliberately performs no global enumeration.
-    ///      Global funding, configuration, collateral balances, and the order nonce are untouched.
-    function resetState(address[] calldata _participants) external onlyOwner {
-        uint256 len = _participants.length;
-        for (uint256 i = 0; i < len; i++) {
-            _resetStateForParticipant(_participants[i]);
+    /// @notice Cancel every resting order of the given users. Emits `OrderCancelled` per order,
+    ///         like a user's own cancel, so indexers need nothing new.
+    /// @dev Only while the vault is halted, so the users cannot place orders again before the
+    ///      batch ends. Funding accrues off the book mid, so it is checkpointed before the book
+    ///      changes. Users without orders are skipped.
+    function forceCancelOrders(address[] calldata _users) external onlyOwner {
+        if (!vault.halted()) revert NotHalted();
+        _updateGlobalFunding();
+        for (uint256 i = 0; i < _users.length; i++) {
+            bytes32[] memory orderIds = participantOrderIdsIndex[_users[i]].values();
+            for (uint256 j = 0; j < orderIds.length; j++) {
+                _dropRestingOrder(orderIds[j], orders[orderIds[j]]);
+            }
         }
     }
 }

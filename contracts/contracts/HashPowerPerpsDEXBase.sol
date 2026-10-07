@@ -726,6 +726,15 @@ abstract contract HashPowerPerpsDEXBase is
         delete orders[_orderId];
     }
 
+    /// @dev Unindex a resting order, drop its price level if that empties it, and announce it
+    ///      cancelled. Callers own the authorization decision; this only performs the removal.
+    function _dropRestingOrder(bytes32 _orderId, Order memory _order) internal {
+        bool isBid = _order.quantity > 0;
+        _removeRestingOrder(_orderId, _order.participant, _order.price, _order.quantity);
+        _removePriceLevelIfEmpty(_priceOrderIds(_order.price, isBid), _order.price, isBid);
+        emit OrderCancelled(_orderId, _order.participant);
+    }
+
     /// @dev Shrink one canonical resting order in place, preserving its queue/FIFO position.
     function _reduceRestingOrder(bytes32 _orderId, Order storage _order, int256 _newQuantity) internal {
         int256 oldQuantity = _order.quantity;
@@ -1230,33 +1239,6 @@ abstract contract HashPowerPerpsDEXBase is
         if (delta == 0) return 0;
 
         return (position.netQuantity * delta) / (int256(10 ** QUANTITY_DECIMALS) * int256(10 ** FUNDING_DECIMALS));
-    }
-
-    // ── Internal helpers: admin ───────────────────────────────────────────────
-
-    /// @dev Clear one explicitly supplied participant without touching global funding or
-    ///      the monotonic order nonce. Duplicate participants are safe because every cleanup
-    ///      operation is idempotent once the participant has no remaining state.
-    function _resetStateForParticipant(address _participant) internal {
-        // Historical orders can predate the aggregate cache. Rebuild before subtracting
-        // each order so an atomic upgrade reset cannot underflow on legacy state.
-        _rebuildOrderAggregateCache(_participant);
-        bytes32[] memory orderIds = participantOrderIdsIndex[_participant].values();
-        uint256 len = orderIds.length;
-        for (uint256 i = 0; i < len; i++) {
-            bytes32 orderId = orderIds[i];
-            Order storage order = orders[orderId];
-            uint256 price = order.price;
-            int256 quantity = order.quantity;
-            bool isBid = quantity > 0;
-            StructuredLinkedList.List storage queue = _priceOrderIds(price, isBid);
-            _removeRestingOrder(orderId, _participant, price, quantity);
-            _removePriceLevelIfEmpty(queue, price, isBid);
-        }
-
-        delete userOrderAggregate[_participant];
-        delete positions[_participant];
-        delete userFundingSnapshot[_participant];
     }
 
 }
