@@ -16,13 +16,13 @@ inputs:
 
 outputs:
   tag_name:
-    description: "Full tag name (e.g., v2.0.5-abc1234 or v2.0.5-dev-abc1234)"
+    description: "Full git tag name (e.g., indexer-v2.1.0, indexer-v2.0.5-dev, indexer-v2.1.0-run123)"
     value: ${{ steps.gen_tag.outputs.tag_name }}
   vtag:
     description: "Version tag (same as tag_name)"
     value: ${{ steps.gen_tag.outputs.vtag }}
   version:
-    description: "Version string with v prefix (e.g., v2.0.5-abc1234 or v2.0.5-dev-abc1234). Same as vtag."
+    description: "Deployed version string without component prefix (e.g., v2.1.0, v2.0.5-dev, v2.1.0-run123)"
     value: ${{ steps.gen_tag.outputs.version }}
   vfull:
     description: "Semantic version without prefix (e.g., 2.0.5)"
@@ -80,7 +80,9 @@ runs:
       shell: bash
       run: |
         # Component-based versioning for monorepo
-        # Pattern: v<major>.<minor>.<patch>[-env]-<sha>
+        # Pattern: <component>-v<major>.<minor>.<patch>[-branch][-runN]
+        # The git tag carries the component prefix; the deployed version
+        # string does not (e.g. tag indexer-v3.2.0 → version v3.2.0).
         COMPONENT="${{ inputs.component }}"
         VMAJ_NEW=${{ inputs.major_version }}
         VMIN_NEW=0
@@ -103,7 +105,8 @@ runs:
         fi
 
         ENV="${{ steps.determine_env.outputs.environment }}"
-        SHORT_SHA=$(git rev-parse --short HEAD)
+        RNAME=${GITHUB_REF_NAME##*/}
+        [ "$GITHUB_EVENT_NAME" = "pull_request" ] && RNAME=pr${GITHUB_REF_NAME%/merge}
 
         if [ "$ENV" = "main" ]; then
             # Production release - increment version
@@ -118,31 +121,35 @@ runs:
                 VPAT=0
             fi
             VFULL=${VMAJ}.${VMIN}.${VPAT}
-            VTAG=v${VFULL}
             VERSION="v${VFULL}"
+            # Exact form of a production tag on HEAD (used to detect a redeploy).
+            DEPLOYED_RE="^${COMPONENT}-v[0-9]+\.[0-9]+\.[0-9]+$"
         else
-            # Non-production — unique per build
-            if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-              # Manual re-deploy (e.g. changed START_BLOCK): the source tree may be
-              # unchanged, so the commit count is not unique. Use the run number and
-              # the target environment (not the branch) to guarantee a fresh version.
-              RUN_NUM=${{ github.run_number }}
-              VFULL=${VMAJ}.${VMIN}.0
-              VTAG=v${VFULL}-${ENV}-run${RUN_NUM}
-              VERSION="v${VFULL}-${ENV}-run${RUN_NUM}"
+            # Non-production - use commit count as patch for uniqueness
+            if git rev-parse refs/remotes/origin/main &>/dev/null; then
+              MB=$(git merge-base refs/remotes/origin/main HEAD)
+              VPAT=$(git rev-list --count --no-merges ${MB}..HEAD 2>/dev/null || echo "0")
             else
-              # push/PR — use commit count as patch for uniqueness
-              if git rev-parse refs/remotes/origin/main &>/dev/null; then
-                MB=$(git merge-base refs/remotes/origin/main HEAD)
-                VPAT=$(git rev-list --count --no-merges ${MB}..HEAD 2>/dev/null || echo "0")
-              else
-                VPAT=$(git rev-list --count --no-merges HEAD 2>/dev/null || echo "0")
-              fi
-              VFULL=${VMAJ}.${VMIN}.${VPAT}
-              RNAME=${GITHUB_REF_NAME##*/}
-              [ "$GITHUB_EVENT_NAME" = "pull_request" ] && RNAME=pr${GITHUB_REF_NAME%/merge}
-              VTAG=v${VFULL}-${RNAME}
-              VERSION="v${VFULL}-${RNAME}"
+              VPAT=$(git rev-list --count --no-merges HEAD 2>/dev/null || echo "0")
+            fi
+            VFULL=${VMAJ}.${VMIN}.${VPAT}
+            VERSION="v${VFULL}-${RNAME}"
+            DEPLOYED_RE="^${COMPONENT}-v[0-9]+\.[0-9]+\.[0-9]+-${RNAME}$"
+        fi
+        VTAG=${COMPONENT}-${VERSION}
+
+        # Manual redeploy of an already-deployed commit (e.g. changed START_BLOCK):
+        # Goldsky versions are immutable, so reuse the version that was deployed
+        # from this commit and make it unique with the run number. A first deploy
+        # of a commit gets no suffix.
+        if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            DEPLOYED_TAG=$(git tag --points-at HEAD -l "${COMPONENT}-v*" | grep -E "$DEPLOYED_RE" | sort -V | tail -n 1)
+            if [ -n "$DEPLOYED_TAG" ]; then
+                RUN_NUM=${{ github.run_number }}
+                VTAG="${DEPLOYED_TAG}-run${RUN_NUM}"
+                VERSION="${DEPLOYED_TAG#${COMPONENT}-}-run${RUN_NUM}"
+                VFULL=$(echo "$DEPLOYED_TAG" | sed -E "s/^${COMPONENT}-v([0-9]+\.[0-9]+\.[0-9]+).*/\1/")
+                echo "🔁 Redeploy of ${DEPLOYED_TAG} as ${VERSION}"
             fi
         fi
 
