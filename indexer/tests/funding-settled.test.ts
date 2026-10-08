@@ -65,14 +65,15 @@ function closeLongPosition(
   handleOrderMatched(event);
 }
 
+/** `received` is in entity terms (positive = received); the contract emits what the user owes. */
 function createFundingSettledEvent(
   user: Address,
-  amount: BigInt,
+  received: BigInt,
   logIndex: i32 = 1,
 ): FundingSettled {
   const event = newTypedMockEventWithParams<FundingSettled>([
     paramAddr("user", user),
-    paramInt("amount", amount),
+    paramInt("amount", received.neg()),
   ]);
   event.logIndex = BigInt.fromI32(logIndex);
   return event;
