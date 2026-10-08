@@ -186,14 +186,21 @@ describe("forced settlement: the indexer follows forceCancelOrders and forceClos
       const session = snap.entity("PositionSession", String(trade.positionSession));
       assert.ok(session);
       assert.equal(session.status, "CLOSE");
+      // The event carries what the user owes; the indexer stores what the user received.
       const funding = settled.find((e) => id(e.args.user) === String(trade.user).toLowerCase());
       assert.ok(funding);
+      const owed = funding.args.amount;
       assert.ok(
         snap.saved("FundingSettlement").some(
-          (row) => row.positionSession === session.id && big(row.amount) === funding.args.amount,
+          (row) => row.positionSession === session.id && big(row.amount) === -owed,
         ),
         "funding settled in the close tx is attached to the closing session",
       );
+      assert.equal(big(session.fundingFees), -owed);
+      const user = snap.entity("User", String(trade.user));
+      assert.ok(user);
+      assert.equal(big(user.totalFundingPaid), owed > 0n ? owed : 0n);
+      assert.equal(big(user.totalFundingReceived), owed < 0n ? -owed : 0n);
     }
     assert.equal(snap.get("Perps", "0", "totalLiquidations"), 1);
   });
