@@ -25,7 +25,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @dev Lives here rather than in {HashPowerPerpsDEXBase} so that a diff to
     ///      this file and the version it ships under stay in the same place,
     ///      mirroring {Futures}.
-    string public constant VERSION = "6.8.0";
+    string public constant VERSION = "6.9.0";
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ICollateralVault _vault) HashPowerPerpsDEXBase(_vault) { }
@@ -221,11 +221,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
             revert OrderNotBelongToSender();
         }
         if (order.quantity == 0) revert OrderNotExists();
-
-        bool isBid = order.quantity > 0;
-        _removeRestingOrder(_orderId, order.participant, order.price, order.quantity);
-        _removePriceLevelIfEmpty(_priceOrderIds(order.price, isBid), order.price, isBid);
-        emit OrderCancelled(_orderId, order.participant);
+        _dropRestingOrder(_orderId, order);
     }
 
     /// @dev In-place size shrink. Keeps the order id in its price queue slot.

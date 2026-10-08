@@ -164,25 +164,25 @@ preceding 180 days and confirms candidates against `getUserOrders`. Set
 `ORDER_CACHE_WRITE_BATCH_SIZE` batches (default 25) and verifies all four fields
 against a canonical order scan.
 
-#### Explicit reset and migration participants
+#### Forced settlement
 
 The contract does not enumerate position holders on chain. The legacy
 `usersWithPositions` storage slot remains dead and untouched solely for proxy
 layout compatibility.
 
-Testnet resets require an explicit comma-separated participant list:
+To empty the venue for a migration, halt the vault and pass explicit account
+lists, built from the subgraph or event history, to two owner calls:
 
-```sh
-PERPS_ADDRESS=0x... RESET_PARTICIPANTS=0x...,0x... pnpm reset:perps
-```
+- `forceCancelOrders(address[])` cancels every resting order of each account and
+  emits `OrderCancelled` per order.
+- `forceClosePositions(address[])` settles funding (`FundingSettled` when any
+  is due), then closes each position at the oracle mark against the insurance
+  fund and emits `PositionLiquidated` with a zero fee.
 
-The script deduplicates addresses and calls `resetState(address[])` in
-`RESET_BATCH_SIZE` batches (default 25). Only supplied accounts have their
-orders, position, and funding snapshot cleared; collateral, global funding, and
-the monotonic order nonce are preserved. Operators must build a complete list
-from authoritative configuration or indexed event history. Any future net-entry
-position migration must likewise accept explicit participant arrays and must not
-read the dead enumeration slot.
+Both revert with `NotHalted` unless the vault is halted. Batch them with
+`halt()` and `resume()` in one Safe transaction. Every change emits the same
+events as a user cancel or a liquidation, so the subgraph stays in step with the
+chain and its start block never has to move.
 
 ### Funding Fees
 

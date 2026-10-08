@@ -951,6 +951,19 @@ export const HashPowerPerpsDEXAbi = [
         "type": "address[]"
       }
     ],
+    "name": "forceCancelOrders",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address[]",
+        "name": "_users",
+        "type": "address[]"
+      }
+    ],
     "name": "forceClosePositions",
     "outputs": [],
     "stateMutability": "nonpayable",
@@ -1557,19 +1570,6 @@ export const HashPowerPerpsDEXAbi = [
   {
     "inputs": [],
     "name": "renounceOwnership",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address[]",
-        "name": "_participants",
-        "type": "address[]"
-      }
-    ],
-    "name": "resetState",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"

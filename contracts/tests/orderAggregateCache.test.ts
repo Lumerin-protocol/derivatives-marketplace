@@ -246,11 +246,11 @@ describe("HashPowerPerpsDEX order aggregate cache migration", function () {
     await assertCacheMatchesScan(perps, seller.account.address, config.quantityDecimals);
   });
 
-  it("clears both aggregate sides during resetState", async function () {
+  it("clears both aggregate sides during forceCancelOrders", async function () {
     const { contracts, accounts, config } = await networkHelpers.loadFixture(
       deployPerpsWithCollateralFixture,
     );
-    const { perps } = contracts;
+    const { perps, vault } = contracts;
     const { owner, buyer } = accounts;
     const price = await perps.read.getMarketPrice();
     const qty = parseUnits("1", config.quantityDecimals);
@@ -263,7 +263,8 @@ describe("HashPowerPerpsDEX order aggregate cache migration", function () {
       [price + config.minimumPriceIncrement, -qty, TimeInForce.GTC],
       { account: buyer.account },
     );
-    await perps.write.resetState([[buyer.account.address]], {
+    await vault.write.halt({ account: owner.account });
+    await perps.write.forceCancelOrders([[buyer.account.address]], {
       account: owner.account,
     });
 

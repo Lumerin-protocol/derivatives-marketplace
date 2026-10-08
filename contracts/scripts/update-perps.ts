@@ -27,7 +27,7 @@ import { writeAndWait } from "../lib/writeContract.ts";
 // Initializers are versioned and must run in order: `initializeV2` (reinitializer 2)
 // then `initializeV3` (reinitializer 3). Calling V3 first from version 1 permanently
 // skips V2. Fresh proxies from `deploy-perps.ts` already sit on 3.
-const TARGET_CODE_VERSION = "6.8.0";
+const TARGET_CODE_VERSION = "6.9.0";
 const UPGRADE_CONFIRMATIONS = 5;
 const DEFAULT_SAFE_GAS_OVERHEAD = 150_000n;
 // 6.8.0 calls the engine's `reduceLimits` / `meetsTradeMargin` on every order. Against an
