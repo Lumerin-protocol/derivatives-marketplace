@@ -1416,11 +1416,14 @@ export function handleFundingSettled(event: FundingSettled): void {
   ]);
 
   const user = getOrCreateUser(event.params.user, event.block.timestamp);
+  // The contract emits what the user owes (positive = paid); entities store what the user
+  // received (positive = received).
+  const received = event.params.amount.neg();
 
   const eventId = createEventId(event.transaction.hash, event.logIndex);
   const settlement = new FundingSettlement(eventId);
   settlement.user = user.id;
-  settlement.amount = event.params.amount;
+  settlement.amount = received;
   settlement.timestamp = event.block.timestamp;
   settlement.blockNumber = event.block.number;
   settlement.transactionHash = event.transaction.hash;
@@ -1429,21 +1432,17 @@ export function handleFundingSettled(event: FundingSettled): void {
     const session = PositionSession.load(user.currentSessionId);
     if (session) {
       settlement.positionSession = session.id;
-      session.fundingFees = session.fundingFees.plus(event.params.amount);
+      session.fundingFees = session.fundingFees.plus(received);
       session.save();
     }
   }
 
   settlement.save();
 
-  if (event.params.amount.gt(BigInt.zero())) {
-    user.totalFundingReceived = user.totalFundingReceived.plus(
-      event.params.amount,
-    );
+  if (received.gt(BigInt.zero())) {
+    user.totalFundingReceived = user.totalFundingReceived.plus(received);
   } else {
-    user.totalFundingPaid = user.totalFundingPaid.plus(
-      event.params.amount.neg(),
-    );
+    user.totalFundingPaid = user.totalFundingPaid.plus(received.neg());
   }
   user.lastActivityAt = event.block.timestamp;
   user.save();
