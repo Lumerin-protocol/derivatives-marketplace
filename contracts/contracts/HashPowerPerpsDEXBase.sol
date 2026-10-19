@@ -15,6 +15,7 @@ import { IPortfolioMarginEngine } from "collateral-margin/contracts/contracts/in
 import { IPointsHook } from "collateral-margin/contracts/contracts/interfaces/IPointsHook.sol";
 import { PriceLadderLib } from "./libs/PriceLadderLib.sol";
 import { MathLib as M } from "./libs/MathLib.sol";
+import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import { Versionable } from "./interfaces/Versionable.sol";
 
 /// @title HashPowerPerpsDEXBase — storage layout and internal helpers for {HashPowerPerpsDEX}
@@ -30,6 +31,7 @@ abstract contract HashPowerPerpsDEXBase is
     using EnumerableSet for EnumerableSet.Bytes32Set;
     using EnumerableSet for EnumerableSet.AddressSet;
     using StructuredLinkedList for StructuredLinkedList.List;
+    using SafeCast for uint256;
 
     // Constants
     uint256 public constant MAX_ORACLE_STALENESS = 3600; // 1 hour
@@ -42,6 +44,11 @@ abstract contract HashPowerPerpsDEXBase is
     ///      int256. 1e24 contracts × `MAX_ORDERS_PER_PARTICIPANT` keeps that sum ~30 orders
     ///      of magnitude below 2^255, so the cast can never wrap.
     uint256 internal constant MAX_ORDER_QUANTITY = 1e30;
+    /// @notice Largest order price accepted, in token decimals (~$1e24 per contract).
+    /// @dev Oracle-independent, so it binds even when the feed is unusable. Keeps every
+    ///      price-derived `int256` (entry value, PnL, fees) far below 2^255, so a price can
+    ///      never wrap into an attacker-chosen negative trade value.
+    uint256 internal constant MAX_PRICE = 1e30;
     uint256 internal constant BPS = 10_000; // Basis points denominator
     /// @notice Hard ceiling on |makerFeeBps| and |takerFeeBps|: 100 bps (1%).
     /// @dev Keeps a trading fee at most a fifth of the 5% MM spot shock, so the argument
@@ -599,8 +606,8 @@ abstract contract HashPowerPerpsDEXBase is
         uint256 notionalValue = _calculateValue(makerPrice, matchAmt);
 
         // The backstop is unfunded by design: a taker fee would only be booked as BadDebt.
-        int256 takerFee = _taker == BACKSTOP ? int256(0) : int256(notionalValue) * int256(takerFeeBps) / int256(BPS);
-        int256 makerFee = int256(notionalValue) * int256(makerFeeBps) / int256(BPS);
+        int256 takerFee = _taker == BACKSTOP ? int256(0) : notionalValue.toInt256() * int256(takerFeeBps) / int256(BPS);
+        int256 makerFee = notionalValue.toInt256() * int256(makerFeeBps) / int256(BPS);
 
         _createPosition(makerParticipant, _taker, makerPrice, takerQty);
 
@@ -795,7 +802,7 @@ abstract contract HashPowerPerpsDEXBase is
     }
 
     function _signedValue(uint256 _price, int256 _quantity) internal pure returns (int256) {
-        return (_quantity * int256(_price)) / int256(10 ** QUANTITY_DECIMALS);
+        return (_quantity * _price.toInt256()) / int256(10 ** QUANTITY_DECIMALS);
     }
 
     /// @notice Update a user's net position with exact signed entry value
@@ -1051,7 +1058,7 @@ abstract contract HashPowerPerpsDEXBase is
     }
 
     function _validatePrice(uint256 _price) internal pure {
-        if (_price == 0) revert InvalidPrice();
+        if (_price == 0 || _price > MAX_PRICE) revert InvalidPrice();
         if (_price % minimumPriceIncrement != 0) revert InvalidPrice();
     }
 
