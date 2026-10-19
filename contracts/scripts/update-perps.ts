@@ -193,10 +193,18 @@ async function main() {
     existingImpl ? "Using existing implementation" : "Deployed",
     addrUrl(pc, newImpl.address),
   );
-  if (!existingImpl) {
-    await verifyContract(newImpl.address, [vaultAddress]);
-    logStep("Verified", addrUrl(pc, newImpl.address));
+  const verified = await verifyContract(
+    newImpl.address,
+    [vaultAddress],
+    undefined,
+    { contract: "contracts/HashPowerPerpsDEX.sol:HashPowerPerpsDEX" },
+  );
+  if (!verified) {
+    throw new Error(
+      `Basescan did not verify implementation ${newImpl.address}`,
+    );
   }
+  logStep("Verified", addrUrl(pc, newImpl.address));
 
   const implVersion = await newImpl.read.VERSION();
   if (implVersion !== TARGET_CODE_VERSION) {
