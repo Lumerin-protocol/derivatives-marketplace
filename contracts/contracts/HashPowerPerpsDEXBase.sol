@@ -37,6 +37,11 @@ abstract contract HashPowerPerpsDEXBase is
     uint8 public constant MAX_ORDERS_PER_PARTICIPANT = 100;
     uint8 public constant QUANTITY_DECIMALS = 6;
     uint256 public constant MAX_PRICE_LEVELS_PER_SIDE = 200;
+    /// @notice Largest |quantity| a single order may carry (raw, `QUANTITY_DECIMALS`).
+    /// @dev The margin engine lifts summed order quantity to WAD (×1e12) and stresses it as
+    ///      int256. 1e24 contracts × `MAX_ORDERS_PER_PARTICIPANT` keeps that sum ~30 orders
+    ///      of magnitude below 2^255, so the cast can never wrap.
+    uint256 internal constant MAX_ORDER_QUANTITY = 1e30;
     uint256 internal constant BPS = 10_000; // Basis points denominator
     /// @notice Hard ceiling on |makerFeeBps| and |takerFeeBps|: 100 bps (1%).
     /// @dev Keeps a trading fee at most a fifth of the 5% MM spot shock, so the argument
@@ -1042,7 +1047,7 @@ abstract contract HashPowerPerpsDEXBase is
     }
 
     function _validateQty(int256 _quantity) internal pure {
-        if (_quantity == 0) revert InvalidQty();
+        if (_quantity == 0 || M.abs(_quantity) > MAX_ORDER_QUANTITY) revert InvalidQty();
     }
 
     function _validatePrice(uint256 _price) internal pure {
