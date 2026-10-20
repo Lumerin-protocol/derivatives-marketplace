@@ -280,6 +280,14 @@
       "type": "mapping(address => struct HashPowerPerpsDEXBase.OrderAggregate)",
       "bytes": "32",
       "typeFingerprint": "0662eff707646ab16e15a4fe91c4b166737239e8840c3d46684e04141ea8b418"
+    },
+    {
+      "label": "userOrderMoments",
+      "slot": "32",
+      "offset": 0,
+      "type": "mapping(address => struct HashPowerPerpsDEXBase.OrderMoments)",
+      "bytes": "32",
+      "typeFingerprint": "66c9349d773485010b86b51f0af91fe5b4ab2b3f00e95f0402c431206902041a"
     }
   ]
 }

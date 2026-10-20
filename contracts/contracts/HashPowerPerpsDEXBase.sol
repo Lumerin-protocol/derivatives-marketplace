@@ -44,11 +44,12 @@ abstract contract HashPowerPerpsDEXBase is
     ///      int256. 1e24 contracts × `MAX_ORDERS_PER_PARTICIPANT` keeps that sum ~30 orders
     ///      of magnitude below 2^255, so the cast can never wrap.
     uint256 internal constant MAX_ORDER_QUANTITY = 1e30;
-    /// @notice Largest order price accepted, in token decimals (~$1e24 per contract).
+    /// @notice Largest order price accepted, in token decimals (~$1e12 per contract).
     /// @dev Oracle-independent, so it binds even when the feed is unusable. Keeps every
     ///      price-derived `int256` (entry value, PnL, fees) far below 2^255, so a price can
-    ///      never wrap into an attacker-chosen negative trade value.
-    uint256 internal constant MAX_PRICE = 1e30;
+    ///      never wrap into an attacker-chosen negative trade value, and keeps the
+    ///      `Σ price²·qty` order moment within uint256.
+    uint256 internal constant MAX_PRICE = 1e18;
     uint256 internal constant BPS = 10_000; // Basis points denominator
     /// @notice Hard ceiling on |makerFeeBps| and |takerFeeBps|: 100 bps (1%).
     /// @dev Keeps a trading fee at most a fifth of the 5% MM spot shock, so the argument
@@ -160,6 +161,19 @@ abstract contract HashPowerPerpsDEXBase is
 
     /// @dev Appended at the storage tail in v2.13. Never move above the four legacy mappings.
     mapping(address => OrderAggregate) internal userOrderAggregate;
+
+    /// @notice Unscaled price moments of a user's remaining resting orders, per side.
+    /// @dev `Σ price·qty` and `Σ price²·qty` without the `10^QUANTITY_DECIMALS` division
+    ///      `OrderAggregate` values carry, so the fill-loss bound's spread term is exact.
+    struct OrderMoments {
+        uint256 buyPQ;
+        uint256 buyP2Q;
+        uint256 sellPQ;
+        uint256 sellP2Q;
+    }
+
+    /// @dev Appended at the storage tail in 6.10. Never move above `userOrderAggregate`.
+    mapping(address => OrderMoments) internal userOrderMoments;
 
     /// @notice Represents an order in the order book
     struct Order {
@@ -674,13 +688,19 @@ abstract contract HashPowerPerpsDEXBase is
     /// @dev Add one canonical remaining order to the aggregate.
     function _addOrderAggregate(address _user, bool _isBuy, uint256 _price, uint256 _absQty) internal {
         OrderAggregate storage aggregate = userOrderAggregate[_user];
+        OrderMoments storage moments = userOrderMoments[_user];
         uint256 value = _calculateValue(_price, _absQty);
+        uint256 pq = _price * _absQty;
         if (_isBuy) {
             aggregate.buyQty += _absQty;
             aggregate.buyValue += value;
+            moments.buyPQ += pq;
+            moments.buyP2Q += pq * _price;
         } else {
             aggregate.sellQty += _absQty;
             aggregate.sellValue += value;
+            moments.sellPQ += pq;
+            moments.sellP2Q += pq * _price;
         }
     }
 
@@ -691,14 +711,20 @@ abstract contract HashPowerPerpsDEXBase is
         internal
     {
         OrderAggregate storage aggregate = userOrderAggregate[_user];
+        OrderMoments storage moments = userOrderMoments[_user];
         uint256 qtyReduction = _oldAbsQty - _newAbsQty;
         uint256 valueReduction = _calculateValue(_price, _oldAbsQty) - _calculateValue(_price, _newAbsQty);
+        uint256 pq = _price * qtyReduction;
         if (_isBuy) {
             aggregate.buyQty -= qtyReduction;
             aggregate.buyValue -= valueReduction;
+            moments.buyPQ -= pq;
+            moments.buyP2Q -= pq * _price;
         } else {
             aggregate.sellQty -= qtyReduction;
             aggregate.sellValue -= valueReduction;
+            moments.sellPQ -= pq;
+            moments.sellP2Q -= pq * _price;
         }
     }
 
@@ -706,22 +732,29 @@ abstract contract HashPowerPerpsDEXBase is
     ///      historical value dust accumulated by the deprecated incremental mappings.
     function _rebuildOrderAggregateCache(address _user) internal {
         OrderAggregate memory aggregate;
+        OrderMoments memory moments;
         EnumerableSet.Bytes32Set storage ids = participantOrderIdsIndex[_user];
         uint256 len = ids.length();
         for (uint256 i = 0; i < len; i++) {
             Order storage order = orders[ids.at(i)];
             int256 quantity = order.quantity;
+            uint256 price = order.price;
+            uint256 absQty = M.abs(quantity);
+            uint256 pq = price * absQty;
             if (quantity > 0) {
-                uint256 absQty = uint256(quantity);
                 aggregate.buyQty += absQty;
-                aggregate.buyValue += _calculateValue(order.price, absQty);
+                aggregate.buyValue += _calculateValue(price, absQty);
+                moments.buyPQ += pq;
+                moments.buyP2Q += pq * price;
             } else if (quantity < 0) {
-                uint256 absQty = M.abs(quantity);
                 aggregate.sellQty += absQty;
-                aggregate.sellValue += _calculateValue(order.price, absQty);
+                aggregate.sellValue += _calculateValue(price, absQty);
+                moments.sellPQ += pq;
+                moments.sellP2Q += pq * price;
             }
         }
         userOrderAggregate[_user] = aggregate;
+        userOrderMoments[_user] = moments;
     }
 
     /// @dev Remove one canonical resting order from every per-order accounting structure.
@@ -1267,6 +1300,7 @@ abstract contract HashPowerPerpsDEXBase is
         }
 
         delete userOrderAggregate[_participant];
+        delete userOrderMoments[_participant];
         delete positions[_participant];
         delete userFundingSnapshot[_participant];
     }

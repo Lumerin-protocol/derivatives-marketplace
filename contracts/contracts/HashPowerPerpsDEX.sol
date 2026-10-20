@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { StructuredLinkedList } from "solidity-linked-list/contracts/StructuredLinkedList.sol";
 import { AggregatorV3Interface } from "./interfaces/AggregatorV3Interface.sol";
 import { ICollateralVault } from "collateral-margin/contracts/contracts/interfaces/ICollateralVault.sol";
@@ -25,7 +26,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @dev Lives here rather than in {HashPowerPerpsDEXBase} so that a diff to
     ///      this file and the version it ships under stay in the same place,
     ///      mirroring {Futures}.
-    string public constant VERSION = "6.9.0";
+    string public constant VERSION = "6.10.0";
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ICollateralVault _vault) HashPowerPerpsDEXBase(_vault) { }
@@ -526,17 +527,15 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         view_.buyOrderDelta = buyQty;
         view_.sellOrderDelta = sellQty;
 
-        // Instant mark-to-market loss if a whole side fills. Filling a bid above spot costs
-        // the difference immediately and in full, which the old shock-scaled reservation
-        // charged only a tenth of.
-        //
-        uint256 buyMark = _calculateValue(currentPrice, buyQty);
-        uint256 buyVal = aggregate.buyValue;
-        if (buyVal > buyMark) view_.buyOrderFillLoss = buyVal - buyMark;
-
-        uint256 sellMark = _calculateValue(currentPrice, sellQty);
-        uint256 sellVal = aggregate.sellValue;
-        if (sellMark > sellVal) view_.sellOrderFillLoss = sellMark - sellVal;
+        // Instant mark-to-market loss if any subset of a side fills. Bounded per order rather
+        // than netted per side: fills go best price first, so a deep order must never offset
+        // a marketable one's loss.
+        OrderMoments storage moments = userOrderMoments[_user];
+        uint256 scale = 10 ** QUANTITY_DECIMALS;
+        view_.buyOrderFillLoss =
+            Math.ceilDiv(M.fillLossBound(buyQty, moments.buyPQ, moments.buyP2Q, currentPrice, true), scale);
+        view_.sellOrderFillLoss =
+            Math.ceilDiv(M.fillLossBound(sellQty, moments.sellPQ, moments.sellP2Q, currentPrice, false), scale);
     }
 
     /// @notice Get total unrealized PnL for a user (including pending funding)

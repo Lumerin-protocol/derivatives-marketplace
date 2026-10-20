@@ -1,8 +1,38 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
+
 /// @title MathLib — Pure math helpers shared by Perps and Futures
 library MathLib {
+    /// @notice Upper bound on a side's instant fill loss, `Σ q·max(0, p − m)` for bids or
+    ///         `Σ q·max(0, m − p)` for asks, from that side's `Σq`, `Σp·q` and `Σp²·q`.
+    /// @dev Scarf's bound: the worst case over every book with the same three sums, so a
+    ///      far-off order can never offset a marketable one. Never below the true loss
+    ///      (all roundings go up) and exact when the side has a single price level. Units are
+    ///      the caller's unscaled `price · qty`.
+    function fillLossBound(uint256 qty, uint256 pq, uint256 p2q, uint256 mark, bool isBuy)
+        internal
+        pure
+        returns (uint256)
+    {
+        if (qty == 0) return 0;
+        uint256 mq = mark * qty;
+        // Σ q·(p − m)², exact in integers and never negative.
+        uint256 pos = p2q + mark * mq;
+        uint256 neg = 2 * mark * pq;
+        uint256 spread = pos > neg ? pos - neg : 0;
+        // Exact whenever qty·spread fits, which is every realistic book; the split form only
+        // guards overflow and still rounds up.
+        uint256 root = spread <= type(uint256).max / qty
+            ? Math.sqrt(qty * spread, Math.Rounding.Ceil)
+            : Math.sqrt(qty, Math.Rounding.Ceil) * Math.sqrt(spread, Math.Rounding.Ceil);
+        (uint256 up, uint256 down) = isBuy ? (pq, mq) : (mq, pq);
+        if (up >= down) return Math.ceilDiv(root + (up - down), 2);
+        uint256 gap = down - up;
+        return root > gap ? Math.ceilDiv(root - gap, 2) : 0;
+    }
+
     /// @notice Absolute value of int256, safe for type(int256).min.
     function abs(int256 value) internal pure returns (uint256) {
         unchecked {

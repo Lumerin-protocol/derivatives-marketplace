@@ -11,9 +11,10 @@ import { HashPowerPerpsDEX } from "../HashPowerPerpsDEX.sol";
 contract HashPowerPerpsDEXMigrationHarness is HashPowerPerpsDEX {
     constructor(ICollateralVault _vault) HashPowerPerpsDEX(_vault) { }
 
-    /// @dev Clears only the new aggregate while preserving canonical remaining orders.
+    /// @dev Clears only the cached totals while preserving canonical remaining orders.
     function clearOrderAggregateCache(address _user) external {
         delete userOrderAggregate[_user];
+        delete userOrderMoments[_user];
     }
 
     /// @dev Simulates a non-zero legacy flat-liquidation-fee value in the reused slot.
