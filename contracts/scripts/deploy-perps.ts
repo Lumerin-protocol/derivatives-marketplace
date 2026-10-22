@@ -92,7 +92,13 @@ async function main() {
   logStep("Deployed", addrUrl(pc, perpsImpl.address));
 
   console.log("Verifying HashPowerPerpsDEX implementation...");
-  await verifyContract(perpsImpl.address, args);
+  if (
+    !(await verifyContract(perpsImpl.address, args, undefined, {
+      contract: "contracts/HashPowerPerpsDEX.sol:HashPowerPerpsDEX",
+    }))
+  ) {
+    throw new Error(`Basescan did not verify implementation ${perpsImpl.address}`);
+  }
   logStep("Verified", addrUrl(pc, perpsImpl.address));
 
   // Deploy HashPowerPerpsDEX proxy
@@ -114,6 +120,22 @@ async function main() {
     encodedInitFn,
   ]);
   logStep("Deployed", addrUrl(pc, perpsProxy.address));
+
+  console.log("Verifying HashPowerPerpsDEX proxy...");
+  if (
+    !(await verifyContract(
+      perpsProxy.address,
+      [perpsImpl.address, encodedInitFn],
+      undefined,
+      {
+        contract:
+          "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol:ERC1967Proxy",
+      },
+    ))
+  ) {
+    throw new Error(`Basescan did not verify proxy ${perpsProxy.address}`);
+  }
+  logStep("Verified", addrUrl(pc, perpsProxy.address));
 
   const perps = await viem.getContractAt("HashPowerPerpsDEX", perpsProxy.address);
   // Set fees

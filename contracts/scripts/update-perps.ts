@@ -42,7 +42,7 @@ import {
 // with resting orders (further batches follow while still halted). Resume the vault only once
 // every venue is upgraded and verified (`VERIFY_ONLY=true` checks a venue without upgrading).
 const DEFAULT_FORCE_CANCEL_BATCH_SIZE = 20;
-const TARGET_CODE_VERSION = "6.13.0";
+const TARGET_CODE_VERSION = "6.13.1";
 const UPGRADE_CONFIRMATIONS = 5;
 const DEFAULT_SAFE_GAS_OVERHEAD = 150_000n;
 // 6.8.0 calls the engine's `reduceLimits` / `meetsTradeMargin` on every order. Against an
@@ -235,10 +235,18 @@ async function main() {
     existingImpl ? "Using existing implementation" : "Deployed",
     addrUrl(pc, newImpl.address),
   );
-  if (!existingImpl) {
-    await verifyContract(newImpl.address, [vaultAddress]);
-    logStep("Verified", addrUrl(pc, newImpl.address));
+  const verified = await verifyContract(
+    newImpl.address,
+    [vaultAddress],
+    undefined,
+    { contract: "contracts/HashPowerPerpsDEX.sol:HashPowerPerpsDEX" },
+  );
+  if (!verified) {
+    throw new Error(
+      `Basescan did not verify implementation ${newImpl.address}`,
+    );
   }
+  logStep("Verified", addrUrl(pc, newImpl.address));
 
   const implVersion = await newImpl.read.VERSION();
   if (implVersion !== TARGET_CODE_VERSION) {

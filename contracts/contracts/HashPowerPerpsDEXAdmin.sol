@@ -169,7 +169,7 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
     ///         with the users'. Emits `PositionLiquidated` so indexers need nothing new.
     /// @dev Only while the vault is halted, so no fill can land between users. Funding is settled
     ///      per user first. Flat users are skipped. Resting orders are left alone; they carry no
-    ///      exposure until they fill.
+    ///      exposure until they fill, and {forceCancelOrders} removes them.
     function forceClosePositions(address[] calldata _users) external onlyOwner {
         if (!vault.halted()) revert NotHalted();
         _updateGlobalFunding();
@@ -186,12 +186,15 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
         }
     }
 
-    /// @notice Cancel every resting order of the given users. Realizes nothing, so it runs with
-    ///         or without a halt; pair it with `forceClosePositions` to unwind users fully.
+    /// @notice Cancel every resting order of the given users, emitting `OrderCancelled` per order
+    ///         like a user's own cancel. Realizes nothing, so it runs with or without a halt;
+    ///         pair it with `forceClosePositions` to unwind users fully.
     /// @dev Clears each user's aggregate wholesale instead of subtracting per order, so it also
     ///      removes orders placed before 6.10, which the aggregate never counted. Run it as the
     ///      call of any upgrade from before 6.10, for every user with resting orders.
     function forceCancelOrders(address[] calldata _users) external onlyOwner {
+        // Funding accrues off the book mid, so checkpoint it before the book changes.
+        _updateGlobalFunding();
         for (uint256 i = 0; i < _users.length; i++) {
             address user = _users[i];
             bytes32[] memory orderIds = participantOrderIdsIndex[user].values();

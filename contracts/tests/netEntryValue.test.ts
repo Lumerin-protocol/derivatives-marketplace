@@ -21,7 +21,7 @@ function derivedAverage(entryValue: bigint, quantity: bigint) {
   return (absEntry * SCALE) / absQty;
 }
 
-describe("HashPowerPerpsDEX exact entry value", function () {
+describe("HashPowerPerpsDEX exact entry-value accounting", function () {
   it("keeps exact values through increase, partial reduce, flip, close, PnL, and risk", async function () {
     const data = await networkHelpers.loadFixture(
       deployPerpsWithCollateralFixture,
