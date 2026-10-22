@@ -99,6 +99,7 @@ async function benchmarkViews() {
     ["FUNDING_DECIMALS()", "FUNDING_DECIMALS", []],
     ["MAX_ORACLE_STALENESS()", "MAX_ORACLE_STALENESS", []],
     ["MAX_ORDERS_PER_PARTICIPANT()", "MAX_ORDERS_PER_PARTICIPANT", []],
+    ["MAX_PRICE()", "MAX_PRICE", []],
     ["MAX_PRICE_LEVELS_PER_SIDE()", "MAX_PRICE_LEVELS_PER_SIDE", []],
     ["QUANTITY_DECIMALS()", "QUANTITY_DECIMALS", []],
     ["UPGRADE_INTERFACE_VERSION()", "UPGRADE_INTERFACE_VERSION", []],
@@ -471,21 +472,11 @@ async function benchmarkAdminAndLifecycle() {
     const users = [data.accounts.seller.account.address, data.accounts.buyer.account.address];
     await recordTransaction(
       data.accounts.pc,
-      "rebuildOrderAggregateCache(address[])",
+      "forceCancelOrders(address[])",
       "two users with one order each",
-      perps.write.rebuildOrderAggregateCache([users], owner(data)),
-    );
-    await recordTransaction(
-      data.accounts.pc,
-      "resetState(address[])",
-      "two participants with order-and-position state",
-      perps.write.resetState([users], owner(data)),
+      perps.write.forceCancelOrders([users], owner(data)),
     );
   }
-  await admin("initializeV2(address,address)", "fresh proxy", (d) =>
-    d.contracts.perps.write.initializeV2([d.contracts.vault.address, d.contracts.pme.address], owner(d)),
-  );
-  await admin("initializeV3()", "fresh proxy", (d) => d.contracts.perps.write.initializeV3(owner(d)));
   {
     const data = await fresh();
     const implementation = await viem.deployContract("HashPowerPerpsDEX", [data.contracts.vault.address]);
@@ -514,7 +505,7 @@ describe("Perps gas benchmark", () => {
 
     const snapshot = gas.snapshot();
     const coverage = assertAbiFunctionCoverage(HashPowerPerpsDEXAbi, snapshot, exclusions);
-    assert.equal(coverage.covered.length, 65);
+    assert.equal(coverage.covered.length, 63);
     assert.deepEqual(coverage.excluded, ["initialize(address,address)", "proxiableUUID()"]);
 
     await mkdir(fileURLToPath(new URL("../../benchmarks", import.meta.url)), { recursive: true });

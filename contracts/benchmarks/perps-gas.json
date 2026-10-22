@@ -2,539 +2,525 @@
   "measurements": [
     {
       "function": "BACKSTOP()",
-      "gas": "26824",
+      "gas": "26799",
       "id": "BACKSTOP()::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "CONTRACT_SIZE_HPS_DAY()",
-      "gas": "27177",
+      "gas": "27152",
       "id": "CONTRACT_SIZE_HPS_DAY()::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "FUNDING_DECIMALS()",
-      "gas": "27133",
+      "gas": "27086",
       "id": "FUNDING_DECIMALS()::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "MAX_ORACLE_STALENESS()",
-      "gas": "26693",
+      "gas": "26668",
       "id": "MAX_ORACLE_STALENESS()::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "MAX_ORDERS_PER_PARTICIPANT()",
-      "gas": "27199",
+      "gas": "27174",
       "id": "MAX_ORDERS_PER_PARTICIPANT()::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
+      "function": "MAX_PRICE()",
+      "gas": "26113",
+      "id": "MAX_PRICE()::representative",
+      "kind": "view",
+      "scenario": "representative"
+    },
+    {
       "function": "MAX_PRICE_LEVELS_PER_SIDE()",
-      "gas": "27045",
+      "gas": "27020",
       "id": "MAX_PRICE_LEVELS_PER_SIDE()::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "QUANTITY_DECIMALS()",
-      "gas": "26935",
+      "gas": "26910",
       "id": "QUANTITY_DECIMALS()::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "UPGRADE_INTERFACE_VERSION()",
-      "gas": "27527",
+      "gas": "27502",
       "id": "UPGRADE_INTERFACE_VERSION()::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "VERSION()",
-      "gas": "27877",
+      "gas": "27832",
       "id": "VERSION()::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "cancelOrder(bytes32)",
-      "gas": "102699",
+      "gas": "106712",
       "id": "cancelOrder(bytes32)::resting order",
       "kind": "transaction",
       "scenario": "resting order"
     },
     {
       "function": "collectedFeesBalance()",
-      "gas": "37849",
+      "gas": "37824",
       "id": "collectedFeesBalance()::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "createOrder(uint256,int256,uint8)",
-      "gas": "288884",
+      "gas": "294770",
       "id": "createOrder(uint256,int256,uint8)::full match against one maker",
       "kind": "transaction",
       "scenario": "full match against one maker"
     },
     {
       "function": "createOrder(uint256,int256,uint8)",
-      "gas": "312614",
+      "gas": "322276",
       "id": "createOrder(uint256,int256,uint8)::resting order, existing level",
       "kind": "transaction",
       "scenario": "resting order, existing level"
     },
     {
       "function": "createOrder(uint256,int256,uint8)",
-      "gas": "466710",
+      "gas": "493460",
       "id": "createOrder(uint256,int256,uint8)::resting order, new level",
       "kind": "transaction",
       "scenario": "resting order, new level"
     },
     {
       "function": "createOrder(uint256,int256,uint8)",
-      "gas": "350768",
+      "gas": "359389",
       "id": "createOrder(uint256,int256,uint8)::two-level fill",
       "kind": "transaction",
       "scenario": "two-level fill"
     },
     {
       "function": "createOrders((uint256,int256,uint8)[])",
-      "gas": "467957",
+      "gas": "494691",
       "id": "createOrders((uint256,int256,uint8)[])::batch-1",
       "kind": "transaction",
       "scenario": "batch-1"
     },
     {
       "function": "createOrders((uint256,int256,uint8)[])",
-      "gas": "2608576",
+      "gas": "2639647",
       "id": "createOrders((uint256,int256,uint8)[])::batch-10",
       "kind": "transaction",
       "scenario": "batch-10"
     },
     {
       "function": "createOrders((uint256,int256,uint8)[])",
-      "gas": "1419342",
+      "gas": "1448013",
       "id": "createOrders((uint256,int256,uint8)[])::batch-5",
       "kind": "transaction",
       "scenario": "batch-5"
     },
     {
       "function": "cumulativeFundingPerUnit()",
-      "gas": "28216",
+      "gas": "28243",
       "id": "cumulativeFundingPerUnit()::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
+      "function": "forceCancelOrders(address[])",
+      "gas": "182695",
+      "id": "forceCancelOrders(address[])::two users with one order each",
+      "kind": "transaction",
+      "scenario": "two users with one order each"
+    },
+    {
       "function": "forceClosePositions(address[])",
-      "gas": "70312",
+      "gas": "70315",
       "id": "forceClosePositions(address[])::two users at the mark while halted",
       "kind": "transaction",
       "scenario": "two users at the mark while halted"
     },
     {
       "function": "fundingPeriod()",
-      "gas": "29129",
+      "gas": "29104",
       "id": "fundingPeriod()::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "fundingRateMaxBps()",
-      "gas": "29526",
+      "gas": "29501",
       "id": "fundingRateMaxBps()::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "getMarketPrice()",
-      "gas": "39828",
+      "gas": "39831",
       "id": "getMarketPrice()::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "getOrder(bytes32)",
-      "gas": "33769",
+      "gas": "33744",
       "id": "getOrder(bytes32)::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "getOrderAggregate(address)",
-      "gas": "35998",
+      "gas": "40188",
       "id": "getOrderAggregate(address)::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "getOrderBookPrices(uint256)",
-      "gas": "53017",
+      "gas": "52992",
       "id": "getOrderBookPrices(uint256)::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "getPendingFunding(address)",
-      "gas": "39095",
+      "gas": "39069",
       "id": "getPendingFunding(address)::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "getQuantityAtPrice(uint256,bool)",
-      "gas": "42618",
+      "gas": "42571",
       "id": "getQuantityAtPrice(uint256,bool)::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "getRiskView(address)",
-      "gas": "36686",
+      "gas": "36658",
       "id": "getRiskView(address)::0-orders",
       "kind": "view",
       "scenario": "0-orders"
     },
     {
       "function": "getRiskView(address)",
-      "gas": "54718",
+      "gas": "61541",
       "id": "getRiskView(address)::1-orders",
       "kind": "view",
       "scenario": "1-orders"
     },
     {
       "function": "getRiskView(address)",
-      "gas": "54718",
+      "gas": "61522",
       "id": "getRiskView(address)::10-orders",
       "kind": "view",
       "scenario": "10-orders"
     },
     {
       "function": "getRiskView(address)",
-      "gas": "54718",
+      "gas": "61534",
       "id": "getRiskView(address)::100-orders",
       "kind": "view",
       "scenario": "100-orders"
     },
     {
       "function": "getRiskView(address)",
-      "gas": "54718",
+      "gas": "61504",
       "id": "getRiskView(address)::50-orders",
       "kind": "view",
       "scenario": "50-orders"
     },
     {
       "function": "getRiskView(address)",
-      "gas": "62210",
+      "gas": "68285",
       "id": "getRiskView(address)::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "getUnrealizedPnl(address)",
-      "gas": "51864",
+      "gas": "51889",
       "id": "getUnrealizedPnl(address)::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "getUserOrders(address)",
-      "gas": "32197",
+      "gas": "32172",
       "id": "getUserOrders(address)::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "getUserPosition(address)",
-      "gas": "31943",
+      "gas": "31918",
       "id": "getUserPosition(address)::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "hasRestingOrderDelta(address)",
-      "gas": "29260",
+      "gas": "29235",
       "id": "hasRestingOrderDelta(address)::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "hook()",
-      "gas": "29241",
+      "gas": "29216",
       "id": "hook()::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
-      "function": "initializeV2(address,address)",
-      "gas": "56328",
-      "id": "initializeV2(address,address)::fresh proxy",
-      "kind": "transaction",
-      "scenario": "fresh proxy"
-    },
-    {
-      "function": "initializeV3()",
-      "gas": "37125",
-      "id": "initializeV3()::fresh proxy",
-      "kind": "transaction",
-      "scenario": "fresh proxy"
-    },
-    {
       "function": "lastFundingUpdateTime()",
-      "gas": "29372",
+      "gas": "29325",
       "id": "lastFundingUpdateTime()::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "liquidateOrder(address,bytes32)",
-      "gas": "189312",
+      "gas": "198269",
       "id": "liquidateOrder(address,bytes32)::one underwater resting order",
       "kind": "transaction",
       "scenario": "one underwater resting order"
     },
     {
       "function": "liquidateOrders(address,bytes32[])",
-      "gas": "257872",
+      "gas": "267847",
       "id": "liquidateOrders(address,bytes32[])::batch-2",
       "kind": "transaction",
       "scenario": "batch-2"
     },
     {
       "function": "liquidatePosition(address,uint256)",
-      "gas": "245271",
+      "gas": "251140",
       "id": "liquidatePosition(address,uint256)::full close, no orders",
       "kind": "transaction",
       "scenario": "full close, no orders"
     },
     {
       "function": "liquidatePosition(address,uint256)",
-      "gas": "261983",
+      "gas": "269389",
       "id": "liquidatePosition(address,uint256)::partial close",
       "kind": "transaction",
       "scenario": "partial close"
     },
     {
       "function": "liquidationFeeBps()",
-      "gas": "29630",
+      "gas": "29605",
       "id": "liquidationFeeBps()::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "liquidatorShareBps()",
-      "gas": "28246",
+      "gas": "28265",
       "id": "liquidatorShareBps()::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "makerFeeBps()",
-      "gas": "29474",
+      "gas": "29449",
       "id": "makerFeeBps()::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "minimumMarginPerOrder()",
-      "gas": "28533",
+      "gas": "28530",
       "id": "minimumMarginPerOrder()::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "minimumPriceIncrement()",
-      "gas": "27353",
+      "gas": "27328",
       "id": "minimumPriceIncrement()::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "owner()",
-      "gas": "29381",
+      "gas": "29334",
       "id": "owner()::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "portfolioMargin()",
-      "gas": "28402",
+      "gas": "28399",
       "id": "portfolioMargin()::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "priceOracle()",
-      "gas": "28579",
+      "gas": "28576",
       "id": "priceOracle()::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
-      "function": "rebuildOrderAggregateCache(address[])",
-      "gas": "68090",
-      "id": "rebuildOrderAggregateCache(address[])::two users with one order each",
-      "kind": "transaction",
-      "scenario": "two users with one order each"
-    },
-    {
       "function": "reduceOrderSize(bytes32,int256)",
-      "gas": "51286",
+      "gas": "56179",
       "id": "reduceOrderSize(bytes32,int256)::two-to-one",
       "kind": "transaction",
       "scenario": "two-to-one"
     },
     {
       "function": "renounceOwnership()",
-      "gas": "28791",
+      "gas": "28769",
       "id": "renounceOwnership()::current owner",
       "kind": "transaction",
       "scenario": "current owner"
     },
     {
-      "function": "resetState(address[])",
-      "gas": "191507",
-      "id": "resetState(address[])::two participants with order-and-position state",
-      "kind": "transaction",
-      "scenario": "two participants with order-and-position state"
-    },
-    {
       "function": "setFundingParameters(uint256,uint256)",
-      "gas": "96715",
+      "gas": "96712",
       "id": "setFundingParameters(uint256,uint256)::100bps-1day",
       "kind": "transaction",
       "scenario": "100bps-1day"
     },
     {
       "function": "setHook(address)",
-      "gas": "32215",
+      "gas": "32193",
       "id": "setHook(address)::clear",
       "kind": "transaction",
       "scenario": "clear"
     },
     {
       "function": "setLiquidationFeeBps(uint16)",
-      "gas": "51771",
+      "gas": "51790",
       "id": "setLiquidationFeeBps(uint16)::to-50",
       "kind": "transaction",
       "scenario": "to-50"
     },
     {
       "function": "setLiquidatorShareBps(uint16)",
-      "gas": "52179",
+      "gas": "52154",
       "id": "setLiquidatorShareBps(uint16)::to-5000",
       "kind": "transaction",
       "scenario": "to-5000"
     },
     {
       "function": "setMakerFeeBps(int16)",
-      "gas": "36213",
+      "gas": "36188",
       "id": "setMakerFeeBps(int16)::zero-to-5",
       "kind": "transaction",
       "scenario": "zero-to-5"
     },
     {
       "function": "setMinimumMarginPerOrder(uint256)",
-      "gas": "52501",
+      "gas": "52476",
       "id": "setMinimumMarginPerOrder(uint256)::to-1-usdc",
       "kind": "transaction",
       "scenario": "to-1-usdc"
     },
     {
       "function": "setOracle(address)",
-      "gas": "48968",
+      "gas": "51234",
       "id": "setOracle(address)::replace-live-feed",
       "kind": "transaction",
       "scenario": "replace-live-feed"
     },
     {
       "function": "setPortfolioMargin(address)",
-      "gas": "49904",
+      "gas": "49840",
       "id": "setPortfolioMargin(address)::revalidate-current-engine",
       "kind": "transaction",
       "scenario": "revalidate-current-engine"
     },
     {
       "function": "setTakerFeeBps(int16)",
-      "gas": "35812",
+      "gas": "35787",
       "id": "setTakerFeeBps(int16)::5-to-10",
       "kind": "transaction",
       "scenario": "5-to-10"
     },
     {
       "function": "simulateOrder(uint256,int256)",
-      "gas": "52737",
+      "gas": "52712",
       "id": "simulateOrder(uint256,int256)::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "takerFeeBps()",
-      "gas": "29557",
+      "gas": "29531",
       "id": "takerFeeBps()::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "transferOwnership(address)",
-      "gas": "34784",
+      "gas": "34740",
       "id": "transferOwnership(address)::to-seller",
       "kind": "transaction",
       "scenario": "to-seller"
     },
     {
       "function": "unwindBackstop(uint256)",
-      "gas": "196741",
+      "gas": "200654",
       "id": "unwindBackstop(uint256)::buy one contract from a resting ask",
       "kind": "transaction",
       "scenario": "buy one contract from a resting ask"
     },
     {
       "function": "updateFunding()",
-      "gas": "88533",
+      "gas": "88556",
       "id": "updateFunding()::two-sided book after an hour",
       "kind": "transaction",
       "scenario": "two-sided book after an hour"
     },
     {
       "function": "updateOrders(bytes32[],(bytes32,int256)[],(uint256,int256,uint8)[])",
-      "gas": "410192",
+      "gas": "420217",
       "id": "updateOrders(bytes32[],(bytes32,int256)[],(uint256,int256,uint8)[])::cancel-1-reduce-1-create-1",
       "kind": "transaction",
       "scenario": "cancel-1-reduce-1-create-1"
     },
     {
       "function": "updateOrders(bytes32[],(bytes32,int256)[],(uint256,int256,uint8)[])",
-      "gas": "104021",
+      "gas": "108035",
       "id": "updateOrders(bytes32[],(bytes32,int256)[],(uint256,int256,uint8)[])::cancel-only",
       "kind": "transaction",
       "scenario": "cancel-only"
     },
     {
       "function": "upgradeToAndCall(address,bytes)",
-      "gas": "38060",
+      "gas": "38010",
       "id": "upgradeToAndCall(address,bytes)::new compatible implementation",
       "kind": "transaction",
       "scenario": "new compatible implementation"
     },
     {
       "function": "vault()",
-      "gas": "27575",
+      "gas": "27528",
       "id": "vault()::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "withdrawCollectedFees()",
-      "gas": "134221",
+      "gas": "134312",
       "id": "withdrawCollectedFees()::nonzero fee balance",
       "kind": "transaction",
       "scenario": "nonzero fee balance"
