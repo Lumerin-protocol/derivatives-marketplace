@@ -1066,16 +1066,26 @@ export const HashPowerPerpsDEXAbi = [
           },
           {
             "internalType": "uint256",
-            "name": "buyValue",
+            "name": "buyPQ",
             "type": "uint256"
           },
           {
             "internalType": "uint256",
-            "name": "sellValue",
+            "name": "buyP2Q",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "sellPQ",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "sellP2Q",
             "type": "uint256"
           }
         ],
-        "internalType": "struct HashPowerPerpsDEXBase.OrderAggregate",
+        "internalType": "struct HashPowerPerpsDEXBase.RestingOrderAggregate",
         "name": "aggregate_",
         "type": "tuple"
       }
@@ -1326,31 +1336,6 @@ export const HashPowerPerpsDEXAbi = [
     "type": "function"
   },
   {
-    "inputs": [
-      {
-        "internalType": "contract ICollateralVault",
-        "name": "_vault",
-        "type": "address"
-      },
-      {
-        "internalType": "contract IPortfolioMarginEngine",
-        "name": "_pm",
-        "type": "address"
-      }
-    ],
-    "name": "initializeV2",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "initializeV3",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
     "inputs": [],
     "name": "lastFundingUpdateTime",
     "outputs": [
@@ -1532,19 +1517,6 @@ export const HashPowerPerpsDEXAbi = [
       }
     ],
     "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address[]",
-        "name": "_users",
-        "type": "address[]"
-      }
-    ],
-    "name": "rebuildOrderAggregateCache",
-    "outputs": [],
-    "stateMutability": "nonpayable",
     "type": "function"
   },
   {

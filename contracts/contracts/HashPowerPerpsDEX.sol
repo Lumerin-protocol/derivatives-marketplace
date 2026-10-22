@@ -43,29 +43,6 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         setOracle(_priceOracle);
     }
 
-    /// @notice One-shot post-upgrade migration to wire up the portfolio margin engine added in v2.
-    /// @dev Intended to be invoked atomically via `upgradeToAndCall`:
-    ///      `proxy.upgradeToAndCall(newImpl, abi.encodeCall(this.initializeV2, (vault, pm)))`.
-    /// @param _vault Must match the immutable constructor vault. The argument is retained
-    ///        to preserve the historical initializer signature.
-    /// @param _pm The portfolio margin engine (may be `address(0)` to set later via `setPortfolioMargin`).
-    /// @dev A nonzero engine must already expose the complete dependency surface. Pass zero
-    ///      when an atomic upgrade must precede wiring the engine on the other side.
-    function initializeV2(ICollateralVault _vault, IPortfolioMarginEngine _pm) external reinitializer(2) onlyOwner {
-        _validateVault(_vault);
-        if (address(_pm) == address(0)) {
-            portfolioMargin = _pm;
-        } else {
-            _setPortfolioMargin(_pm);
-        }
-    }
-
-    /// @notice One-shot migration that clears the reused legacy flat-liquidation-fee slot.
-    /// @dev Invoke atomically through `upgradeToAndCall` before any v2.15 fee path executes.
-    function initializeV3() external reinitializer(3) onlyOwner {
-        __gap3 = 0;
-    }
-
     /// @notice Get current market price from oracle
     /// @return price The current price (scaled to collateral token decimals)
     function getMarketPrice() public view returns (uint256) {
@@ -251,7 +228,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     ///      not of any single venue. Combine it with this view and the position views to
     ///      tell whether this venue holds anything actionable.
     function hasRestingOrderDelta(address _user) external view returns (bool) {
-        OrderAggregate storage aggregate = userOrderAggregate[_user];
+        RestingOrderAggregate storage aggregate = userRestingOrderAggregate[_user];
         return aggregate.buyQty != 0 || aggregate.sellQty != 0;
     }
 
@@ -508,7 +485,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     ///      when filling it would take the portfolio genuinely short.
     function getRiskView(address _user) external view returns (ILinearMarket.RiskView memory view_) {
         Position memory position = positions[_user];
-        OrderAggregate storage aggregate = userOrderAggregate[_user];
+        RestingOrderAggregate storage aggregate = userRestingOrderAggregate[_user];
         uint256 buyQty = aggregate.buyQty;
         uint256 sellQty = aggregate.sellQty;
         if (position.netQuantity == 0 && buyQty == 0 && sellQty == 0) return view_;
@@ -527,15 +504,14 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         view_.buyOrderDelta = buyQty;
         view_.sellOrderDelta = sellQty;
 
-        // Instant mark-to-market loss if any subset of a side fills. Bounded per order rather
-        // than netted per side: fills go best price first, so a deep order must never offset
-        // a marketable one's loss.
-        OrderMoments storage moments = userOrderMoments[_user];
+        // Instant mark-to-market loss if any subset of a side fills, bounded from the side's
+        // price spread rather than netted: fills go best price first, so a deep order must
+        // never offset a marketable one's loss.
         uint256 scale = 10 ** QUANTITY_DECIMALS;
         view_.buyOrderFillLoss =
-            Math.ceilDiv(M.fillLossBound(buyQty, moments.buyPQ, moments.buyP2Q, currentPrice, true), scale);
+            Math.ceilDiv(M.fillLossBound(buyQty, aggregate.buyPQ, aggregate.buyP2Q, currentPrice, true), scale);
         view_.sellOrderFillLoss =
-            Math.ceilDiv(M.fillLossBound(sellQty, moments.sellPQ, moments.sellP2Q, currentPrice, false), scale);
+            Math.ceilDiv(M.fillLossBound(sellQty, aggregate.sellPQ, aggregate.sellP2Q, currentPrice, false), scale);
     }
 
     /// @notice Get total unrealized PnL for a user (including pending funding)
@@ -580,8 +556,9 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         return total;
     }
 
-    /// @notice Cached resting-order quantities and notionals per side for a user.
-    function getOrderAggregate(address _user) external view returns (OrderAggregate memory aggregate_) {
-        return userOrderAggregate[_user];
+    /// @notice Cached resting-order totals per side for a user: quantity and the first two
+    ///         price moments, the inputs of the fill-loss bound.
+    function getOrderAggregate(address _user) external view returns (RestingOrderAggregate memory aggregate_) {
+        return userRestingOrderAggregate[_user];
     }
 }

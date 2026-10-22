@@ -28,30 +28,24 @@ async function assertUserOrderState(
   const actualIds = await perps.read.getUserOrders([user]);
   assert.deepEqual([...actualIds].sort(), expected.map(({ id }) => id).sort());
 
-  let buyQty = 0n;
-  let sellQty = 0n;
-  let buyValue = 0n;
-  let sellValue = 0n;
+  const aggregate = { buyQty: 0n, sellQty: 0n, buyPQ: 0n, buyP2Q: 0n, sellPQ: 0n, sellP2Q: 0n };
   for (const expectedOrder of expected) {
     const actual = await perps.read.getOrder([expectedOrder.id]);
     assert.equal(getAddress(actual.participant), getAddress(expectedOrder.participant));
     assert.equal(actual.price, expectedOrder.price);
     assert.equal(actual.quantity, expectedOrder.quantity);
     if (actual.quantity > 0n) {
-      buyQty += actual.quantity;
-      buyValue += (actual.price * actual.quantity) / 1_000_000n;
+      aggregate.buyQty += actual.quantity;
+      aggregate.buyPQ += actual.price * actual.quantity;
+      aggregate.buyP2Q += actual.price * actual.price * actual.quantity;
     } else {
-      sellQty -= actual.quantity;
-      sellValue += (actual.price * -actual.quantity) / 1_000_000n;
+      aggregate.sellQty -= actual.quantity;
+      aggregate.sellPQ -= actual.price * actual.quantity;
+      aggregate.sellP2Q -= actual.price * actual.price * actual.quantity;
     }
   }
 
-  assert.deepEqual(await perps.read.getOrderAggregate([user]), {
-    buyQty,
-    sellQty,
-    buyValue,
-    sellValue,
-  });
+  assert.deepEqual(await perps.read.getOrderAggregate([user]), aggregate);
 
   for (const id of removedIds) {
     assert.deepEqual(await perps.read.getOrder([id]), {

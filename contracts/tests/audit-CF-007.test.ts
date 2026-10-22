@@ -19,7 +19,7 @@ const { networkHelpers } = await network.connect();
 describe("CF-007 — decoy orders cannot hide a resting order's fill loss", () => {
   async function setup() {
     const fixture = await networkHelpers.loadFixture(deployPerpsFixture);
-    const { perps, vault, usdcMock } = fixture.contracts;
+    const { perps, usdcMock } = fixture.contracts;
     const { owner, seller: alice, buyer: bob, buyer2: carol, seller2: keeper } = fixture.accounts;
     await perps.write.setTakerFeeBps([0], { account: owner.account });
     await perps.write.setMakerFeeBps([0], { account: owner.account });

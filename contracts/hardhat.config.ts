@@ -51,18 +51,6 @@ export default defineConfig({
     // OZ ERC1967Proxy was deployed without viaIR; matching settings keep
     // artifacts verifiable on Basescan / Tenderly.
     overrides: {
-      // Test-only proxy-state migration harness carries extra mutation helpers.
-      "contracts/mocks/HashPowerPerpsDEXMigrationHarness.sol": {
-        version: "0.8.28",
-        settings: {
-          optimizer: {
-            enabled: true,
-            runs: 1,
-          },
-          viaIR: true,
-          evmVersion: "cancun",
-        },
-      },
       "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol": {
         version: "0.8.28",
         settings: {
@@ -102,16 +90,8 @@ export default defineConfig({
     },
   },
   networks: {
-    // TEMPORARY (both entries): the audit fixes push the venue past EIP-170. Remove before
-    // deploying; the size has to be brought back under 24,576 bytes first. `default` is the
-    // network `hardhat test` runs on when no `--network` is given.
-    default: {
-      type: "edr-simulated",
-      allowUnlimitedContractSize: true,
-    },
     hardhat: {
       type: "edr-simulated",
-      allowUnlimitedContractSize: true,
       mining: {
         auto: true,
       },

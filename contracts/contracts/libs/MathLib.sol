@@ -16,21 +16,24 @@ library MathLib {
         pure
         returns (uint256)
     {
-        if (qty == 0) return 0;
         uint256 mq = mark * qty;
         // Σ q·(p − m)², exact in integers and never negative.
         uint256 pos = p2q + mark * mq;
         uint256 neg = 2 * mark * pq;
-        uint256 spread = pos > neg ? pos - neg : 0;
-        // Exact whenever qty·spread fits, which is every realistic book; the split form only
-        // guards overflow and still rounds up.
-        uint256 root = spread <= type(uint256).max / qty
-            ? Math.sqrt(qty * spread, Math.Rounding.Ceil)
-            : Math.sqrt(qty, Math.Rounding.Ceil) * Math.sqrt(spread, Math.Rounding.Ceil);
+        uint256 spread;
+        unchecked {
+            spread = pos > neg ? pos - neg : 0;
+        }
+        // The venues cap order price and quantity so qty·spread always fits in uint256.
+        uint256 root = Math.sqrt(qty * spread, Math.Rounding.Ceil);
         (uint256 up, uint256 down) = isBuy ? (pq, mq) : (mq, pq);
-        if (up >= down) return Math.ceilDiv(root + (up - down), 2);
-        uint256 gap = down - up;
-        return root > gap ? Math.ceilDiv(root - gap, 2) : 0;
+        // Each subtraction is guarded by the comparison before it; the additions cannot
+        // overflow (root ≤ 2^128, and `up − down` is bounded by the order caps).
+        unchecked {
+            if (up >= down) return (root + (up - down) + 1) / 2;
+            uint256 gap = down - up;
+            return root > gap ? (root - gap + 1) / 2 : 0;
+        }
     }
 
     /// @notice Absolute value of int256, safe for type(int256).min.

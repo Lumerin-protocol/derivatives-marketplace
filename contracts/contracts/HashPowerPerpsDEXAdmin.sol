@@ -11,9 +11,8 @@ import { HashPowerPerpsDEXBase } from "./HashPowerPerpsDEXBase.sol";
 ///         hook. Splitting them out keeps {HashPowerPerpsDEX} to the permissionless
 ///         surface — trading, liquidation and views — so a reader can tell at a glance
 ///         which calls a counterparty can make and which only governance can.
-/// @dev The initializers stay in {HashPowerPerpsDEX}: `initializeV2` is `onlyOwner` too,
-///      but it belongs with `initialize` as deployment/upgrade lifecycle rather than
-///      ongoing governance, and splitting the two apart would read worse than either.
+/// @dev `initialize` stays in {HashPowerPerpsDEX} as deployment lifecycle rather than
+///      ongoing governance.
 /// @dev Declares **no storage**. It sits between {HashPowerPerpsDEXBase} and
 ///      {HashPowerPerpsDEX} purely to partition the function surface, and a stateless
 ///      layer cannot move a slot: state is laid out in linearization order and every
@@ -157,22 +156,6 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
         }
 
         emit FundingParametersUpdated(_fundingRateMaxBps, _fundingPeriod);
-    }
-
-    // ── Upgrade migrations ────────────────────────────────────────────────────
-
-    /// @notice Rebuild all order aggregate fields for accounts with orders predating v2.13.
-    /// @dev Call through `upgradeToAndCall` so legacy orders are migrated atomically
-    ///      with the implementation upgrade.
-    function rebuildOrderAggregateCache(address[] calldata _users) external onlyOwner {
-        _rebuildOrderAggregateCaches(_users);
-    }
-
-    function _rebuildOrderAggregateCaches(address[] calldata _users) internal {
-        uint256 len = _users.length;
-        for (uint256 i = 0; i < len; i++) {
-            _rebuildOrderAggregateCache(_users[i]);
-        }
     }
 
     // ── Escape hatch ──────────────────────────────────────────────────────────

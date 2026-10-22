@@ -39,11 +39,13 @@ abstract contract HashPowerPerpsDEXBase is
     uint8 public constant MAX_ORDERS_PER_PARTICIPANT = 100;
     uint8 public constant QUANTITY_DECIMALS = 6;
     uint256 public constant MAX_PRICE_LEVELS_PER_SIDE = 200;
-    /// @notice Largest |quantity| a single order may carry (raw, `QUANTITY_DECIMALS`).
-    /// @dev The margin engine lifts summed order quantity to WAD (×1e12) and stresses it as
-    ///      int256. 1e24 contracts × `MAX_ORDERS_PER_PARTICIPANT` keeps that sum ~30 orders
-    ///      of magnitude below 2^255, so the cast can never wrap.
-    uint256 internal constant MAX_ORDER_QUANTITY = 1e30;
+    /// @notice Largest |quantity| a single order may carry (raw, `QUANTITY_DECIMALS`; 1e12
+    ///         contracts).
+    /// @dev Two overflow bounds rest on it. The margin engine lifts summed order quantity to
+    ///      WAD and stresses it as int256, so the sum must stay below 2^255. And with
+    ///      `MAX_PRICE` and `MAX_ORDERS_PER_PARTICIPANT` it keeps `MathLib.fillLossBound`'s
+    ///      `qty · Σq(p−m)²` (≤ (Σq·p)² ≈ 1e76) within uint256.
+    uint256 internal constant MAX_ORDER_QUANTITY = 1e18;
     /// @notice Largest order price accepted, in token decimals (~$1e12 per contract).
     /// @dev Oracle-independent, so it binds even when the feed is unusable. Keeps every
     ///      price-derived `int256` (entry value, PnL, fees) far below 2^255, so a price can
@@ -151,7 +153,9 @@ abstract contract HashPowerPerpsDEXBase is
     mapping(address => uint256) internal userBuyOrderQty;
     mapping(address => uint256) internal userSellOrderQty;
 
-    /// @notice Canonical cached totals for a user's remaining resting orders.
+    /// @notice Pre-6.10 cached totals for a user's resting orders.
+    /// @dev Dead since 6.10, superseded by {RestingOrderAggregate}. Kept only so the legacy mapping's
+    ///      type, and therefore the storage layout, is unchanged.
     struct OrderAggregate {
         uint256 buyQty;
         uint256 sellQty;
@@ -159,21 +163,38 @@ abstract contract HashPowerPerpsDEXBase is
         uint256 sellValue;
     }
 
-    /// @dev Appended at the storage tail in v2.13. Never move above the four legacy mappings.
+    /// @dev Dead since 6.10 (appended in v2.13). Never read or written; slot retained for proxy
+    ///      storage compatibility. Never move above the four legacy mappings.
     mapping(address => OrderAggregate) internal userOrderAggregate;
 
-    /// @notice Unscaled price moments of a user's remaining resting orders, per side.
-    /// @dev `Σ price·qty` and `Σ price²·qty` without the `10^QUANTITY_DECIMALS` division
-    ///      `OrderAggregate` values carry, so the fill-loss bound's spread term is exact.
-    struct OrderMoments {
+    /// @notice Canonical cached totals for a user's remaining resting orders, per side: the
+    ///         quantity and the first two price moments.
+    /// @dev A moment is a quantity-weighted sum of a power of price, `Σ q·p^k`. The quantity is
+    ///      the zeroth; the first gives a side's average price and the second its spread, which
+    ///      yields the side's distance from any mark in constant time — the inputs of
+    ///      `MathLib.fillLossBound`. The spread is what stops a deep decoy hiding a marketable
+    ///      order.
+    struct RestingOrderAggregate {
+        /// Σ |qty| over resting bids, in `QUANTITY_DECIMALS`.
+        uint256 buyQty;
+        /// Σ |qty| over resting asks, in `QUANTITY_DECIMALS`.
+        uint256 sellQty;
+        /// First moment of resting bids, Σ price·qty. Price in token decimals, qty in
+        /// `QUANTITY_DECIMALS`, unscaled (no `10^QUANTITY_DECIMALS` division) so the bound's
+        /// spread term stays exact.
         uint256 buyPQ;
+        /// Second moment of resting bids, Σ price²·qty, same units with price squared.
         uint256 buyP2Q;
+        /// First moment of resting asks, Σ price·|qty|, unscaled like `buyPQ`.
         uint256 sellPQ;
+        /// Second moment of resting asks, Σ price²·|qty|.
         uint256 sellP2Q;
     }
 
-    /// @dev Appended at the storage tail in 6.10. Never move above `userOrderAggregate`.
-    mapping(address => OrderMoments) internal userOrderMoments;
+    /// @dev Appended at the storage tail in 6.10. Starts empty on upgrade, so no order may rest
+    ///      when 6.10 goes live: cancel every resting order first. A pre-6.10 order removed
+    ///      afterwards would underflow it (`resetState` alone rebuilds before removing).
+    mapping(address => RestingOrderAggregate) internal userRestingOrderAggregate;
 
     /// @notice Represents an order in the order book
     struct Order {
@@ -350,8 +371,7 @@ abstract contract HashPowerPerpsDEXBase is
     }
 
     /// @dev Validate every read the venue relies on before adopting a portfolio margin
-    ///      engine. The zero address is handled by callers because initializeV2 deliberately
-    ///      permits it while the ongoing governance setter does not.
+    ///      engine. The zero address is rejected by the governance setter.
     function _setPortfolioMargin(IPortfolioMarginEngine _pm) internal {
         address pm = address(_pm);
         _requireContract(pm);
@@ -502,7 +522,7 @@ abstract contract HashPowerPerpsDEXBase is
     /// @dev Absolute qty of resting orders that reduce `_net`.
     function _restingReduceAbs(address _user, int256 _net) internal view returns (uint256 total) {
         if (_net == 0) return 0;
-        OrderAggregate storage aggregate = userOrderAggregate[_user];
+        RestingOrderAggregate storage aggregate = userRestingOrderAggregate[_user];
         return _net > 0 ? aggregate.sellQty : aggregate.buyQty;
     }
 
@@ -687,74 +707,37 @@ abstract contract HashPowerPerpsDEXBase is
 
     /// @dev Add one canonical remaining order to the aggregate.
     function _addOrderAggregate(address _user, bool _isBuy, uint256 _price, uint256 _absQty) internal {
-        OrderAggregate storage aggregate = userOrderAggregate[_user];
-        OrderMoments storage moments = userOrderMoments[_user];
-        uint256 value = _calculateValue(_price, _absQty);
+        RestingOrderAggregate storage aggregate = userRestingOrderAggregate[_user];
         uint256 pq = _price * _absQty;
         if (_isBuy) {
             aggregate.buyQty += _absQty;
-            aggregate.buyValue += value;
-            moments.buyPQ += pq;
-            moments.buyP2Q += pq * _price;
+            aggregate.buyPQ += pq;
+            aggregate.buyP2Q += pq * _price;
         } else {
             aggregate.sellQty += _absQty;
-            aggregate.sellValue += value;
-            moments.sellPQ += pq;
-            moments.sellP2Q += pq * _price;
+            aggregate.sellPQ += pq;
+            aggregate.sellP2Q += pq * _price;
         }
     }
 
     /// @dev Replace an order's old remaining quantity with a smaller canonical remainder.
-    ///      Subtracting `value(old) - value(new)` keeps the cache exactly equal to a full
-    ///      scan while leaving fill notional and fee rounding unchanged.
+    ///      Moments are subtracted for exactly the removed quantity, so the cache stays equal
+    ///      to a full scan.
     function _subtractOrderAggregate(address _user, bool _isBuy, uint256 _price, uint256 _oldAbsQty, uint256 _newAbsQty)
         internal
     {
-        OrderAggregate storage aggregate = userOrderAggregate[_user];
-        OrderMoments storage moments = userOrderMoments[_user];
+        RestingOrderAggregate storage aggregate = userRestingOrderAggregate[_user];
         uint256 qtyReduction = _oldAbsQty - _newAbsQty;
-        uint256 valueReduction = _calculateValue(_price, _oldAbsQty) - _calculateValue(_price, _newAbsQty);
         uint256 pq = _price * qtyReduction;
         if (_isBuy) {
             aggregate.buyQty -= qtyReduction;
-            aggregate.buyValue -= valueReduction;
-            moments.buyPQ -= pq;
-            moments.buyP2Q -= pq * _price;
+            aggregate.buyPQ -= pq;
+            aggregate.buyP2Q -= pq * _price;
         } else {
             aggregate.sellQty -= qtyReduction;
-            aggregate.sellValue -= valueReduction;
-            moments.sellPQ -= pq;
-            moments.sellP2Q -= pq * _price;
+            aggregate.sellPQ -= pq;
+            aggregate.sellP2Q -= pq * _price;
         }
-    }
-
-    /// @dev Replace all four fields from canonical remaining orders. This also removes any
-    ///      historical value dust accumulated by the deprecated incremental mappings.
-    function _rebuildOrderAggregateCache(address _user) internal {
-        OrderAggregate memory aggregate;
-        OrderMoments memory moments;
-        EnumerableSet.Bytes32Set storage ids = participantOrderIdsIndex[_user];
-        uint256 len = ids.length();
-        for (uint256 i = 0; i < len; i++) {
-            Order storage order = orders[ids.at(i)];
-            int256 quantity = order.quantity;
-            uint256 price = order.price;
-            uint256 absQty = M.abs(quantity);
-            uint256 pq = price * absQty;
-            if (quantity > 0) {
-                aggregate.buyQty += absQty;
-                aggregate.buyValue += _calculateValue(price, absQty);
-                moments.buyPQ += pq;
-                moments.buyP2Q += pq * price;
-            } else if (quantity < 0) {
-                aggregate.sellQty += absQty;
-                aggregate.sellValue += _calculateValue(price, absQty);
-                moments.sellPQ += pq;
-                moments.sellP2Q += pq * price;
-            }
-        }
-        userOrderAggregate[_user] = aggregate;
-        userOrderMoments[_user] = moments;
     }
 
     /// @dev Remove one canonical resting order from every per-order accounting structure.
@@ -1283,9 +1266,6 @@ abstract contract HashPowerPerpsDEXBase is
     ///      the monotonic order nonce. Duplicate participants are safe because every cleanup
     ///      operation is idempotent once the participant has no remaining state.
     function _resetStateForParticipant(address _participant) internal {
-        // Historical orders can predate the aggregate cache. Rebuild before subtracting
-        // each order so an atomic upgrade reset cannot underflow on legacy state.
-        _rebuildOrderAggregateCache(_participant);
         bytes32[] memory orderIds = participantOrderIdsIndex[_participant].values();
         uint256 len = orderIds.length;
         for (uint256 i = 0; i < len; i++) {
@@ -1299,8 +1279,7 @@ abstract contract HashPowerPerpsDEXBase is
             _removePriceLevelIfEmpty(queue, price, isBid);
         }
 
-        delete userOrderAggregate[_participant];
-        delete userOrderMoments[_participant];
+        delete userRestingOrderAggregate[_participant];
         delete positions[_participant];
         delete userFundingSnapshot[_participant];
     }

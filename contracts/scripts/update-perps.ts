@@ -24,9 +24,7 @@ import { SafeWallet } from "../lib/safe.ts";
 import { verifyContract } from "../lib/verify.ts";
 import { writeAndWait } from "../lib/writeContract.ts";
 
-// Initializers are versioned and must run in order: `initializeV2` (reinitializer 2)
-// then `initializeV3` (reinitializer 3). Calling V3 first from version 1 permanently
-// skips V2. Fresh proxies from `deploy-perps.ts` already sit on 3.
+// Upgrades run no initializer, so the proxy's init version must not move.
 const TARGET_CODE_VERSION = "6.10.0";
 const UPGRADE_CONFIRMATIONS = 5;
 const DEFAULT_SAFE_GAS_OVERHEAD = 150_000n;
@@ -104,10 +102,6 @@ async function main() {
   const env = requireEnvsSet("PERPS_ADDRESS", "VAULT_ADDRESS");
   const proxyAddress = getAddress(env.PERPS_ADDRESS);
   const vaultAddress = getAddress(env.VAULT_ADDRESS);
-  const pmeAddress =
-    readOptionalAddress("PME_ADDRESS") ??
-    readOptionalAddress("MARGIN_ENGINE_ADDRESS") ??
-    zeroAddress;
   const configuredSafe = readOptionalAddress("SAFE_OWNER_ADDRESS");
   const pointsHookAddress = readOptionalAddress("HOOK_ADDRESS");
   const existingImpl = readOptionalAddress("PERPS_IMPL_ADDRESS");
@@ -129,21 +123,14 @@ async function main() {
     proxyAddress,
     snapshotBlock,
   );
-  const needsInitializeV2 = currentInitVersion < 2n;
-  const needsInitializeV3 = currentInitVersion < 3n;
 
   const wiredEngine = getAddress(
     await perps.read
       .portfolioMargin({ blockNumber: snapshotBlock })
       .catch(() => zeroAddress),
   );
-  const engines = new Set([
-    wiredEngine,
-    needsInitializeV2 ? pmeAddress : zeroAddress,
-  ]);
-  engines.delete(zeroAddress);
-  for (const engine of engines) {
-    await requireEngineVersion(pc, engine, snapshotBlock);
+  if (wiredEngine !== zeroAddress) {
+    await requireEngineVersion(pc, wiredEngine, snapshotBlock);
   }
 
   if (configuredSafe && configuredSafe !== currentOwner) {
@@ -166,13 +153,8 @@ async function main() {
     Owner: currentOwner,
     Version: currentCodeVersion,
     InitVersion: currentInitVersion.toString(),
-    initializeV2: needsInitializeV2 ? "yes" : "skip (already >= 2)",
-    initializeV3: needsInitializeV3 ? "yes" : "skip (already >= 3)",
     Vault: addrUrl(pc, vaultAddress),
-    PME:
-      pmeAddress === zeroAddress
-        ? "(none — wire later)"
-        : addrUrl(pc, pmeAddress),
+    PME: wiredEngine === zeroAddress ? "(none wired)" : addrUrl(pc, wiredEngine),
     "Snapshot block": snapshotBlock,
   });
 
@@ -205,26 +187,8 @@ async function main() {
     );
   }
 
-  // reinitializer(n) permanently skips any lower n. If we still need V2, it
-  // must run before V3 — otherwise initializeV2 is locked out forever.
-  const upgradeCalldata = needsInitializeV2
-    ? encodeFunctionData({
-        abi: newImpl.abi,
-        functionName: "initializeV2",
-        args: [vaultAddress, pmeAddress],
-      })
-    : needsInitializeV3
-      ? encodeFunctionData({
-          abi: newImpl.abi,
-          functionName: "initializeV3",
-        })
-      : "0x";
-  const upgradeCall = needsInitializeV2
-    ? "initializeV2"
-    : needsInitializeV3
-      ? "initializeV3"
-      : "(none)";
-  const needsFollowUpInitializeV3 = needsInitializeV2 && needsInitializeV3;
+  const upgradeCalldata = "0x";
+  const upgradeCall = "(none)";
 
   const upgradeArgs = [newImpl.address, upgradeCalldata] as const;
   await simulateContract(pc, {
@@ -291,25 +255,6 @@ async function main() {
     logStep("Safe TX hash", upgradeTxHash);
     logStep("Safe UI URL", safe.getSafeUITxUrl(upgradeTxHash));
 
-    if (needsFollowUpInitializeV3) {
-      logInfo("Propose initializeV3 via Safe", {
-        note: "Execute after the upgrade transaction",
-      });
-      await logPrompt("Proceed?");
-      const initV3Data = encodeFunctionData({
-        abi: newImpl.abi,
-        functionName: "initializeV3",
-      });
-      const initV3TxHash = await safe.proposeTransaction({
-        data: initV3Data,
-        to: proxyAddress,
-        value: "0",
-        operation: OperationType.Call,
-      });
-      logStep("Safe TX hash", initV3TxHash);
-      logStep("Safe UI URL", safe.getSafeUITxUrl(initV3TxHash));
-    }
-
     if (pointsHookAddress) {
       logInfo("Propose setHook via Safe", { hook: pointsHookAddress });
       await logPrompt("Proceed?");
@@ -341,38 +286,14 @@ async function main() {
       `${txUrl(pc, receipt.transactionHash)} block ${receipt.blockNumber}`,
     );
 
-    let postInitVersion = await readInitializedVersion(
+    const postInitVersion = await readInitializedVersion(
       pc,
       proxyAddress,
       receipt.blockNumber,
     );
-    if (needsInitializeV2 && postInitVersion < 2n) {
+    if (postInitVersion !== currentInitVersion) {
       throw new Error(
-        `initializeV2 did not advance init version (still ${postInitVersion})`,
-      );
-    }
-
-    if (needsFollowUpInitializeV3 && postInitVersion < 3n) {
-      logInfo("initializeV3", { from: postInitVersion.toString() });
-      await logPrompt("Submit initializeV3?");
-      const initV3Simulation = await perps.simulate.initializeV3();
-      const initV3Receipt = await writeAndWait(
-        deployer,
-        initV3Simulation,
-        UPGRADE_CONFIRMATIONS,
-      );
-      logStep("initializeV3", txUrl(pc, initV3Receipt.transactionHash));
-      postInitVersion = await readInitializedVersion(
-        pc,
-        proxyAddress,
-        initV3Receipt.blockNumber,
-      );
-    }
-
-    const expectedInitVersion = needsInitializeV3 ? 3n : currentInitVersion;
-    if (postInitVersion !== expectedInitVersion) {
-      throw new Error(
-        `Init version ${postInitVersion}, expected ${expectedInitVersion}`,
+        `Init version moved from ${currentInitVersion} to ${postInitVersion}`,
       );
     }
     const postCodeVersion = await perps.read.VERSION({
