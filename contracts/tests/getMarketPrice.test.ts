@@ -88,18 +88,18 @@ describe("HashPowerPerpsDEX - getMarketPrice", function () {
     const { perps } = contracts;
 
     const eightDecimalFeed = await viem.deployContract("PriceOracleMock", [
-      parseUnits("85000", 8),
+      parseUnits("85", 8),
       8,
     ]);
     await perps.write.setOracle([eightDecimalFeed.address]);
-    assert.equal(await perps.read.getMarketPrice(), parseUnits("85000", 6));
+    assert.equal(await perps.read.getMarketPrice(), parseUnits("85", 6));
 
     const fourDecimalFeed = await viem.deployContract("PriceOracleMock", [
-      parseUnits("85000", 4),
+      parseUnits("85", 4),
       4,
     ]);
     await perps.write.setOracle([fourDecimalFeed.address]);
-    assert.equal(await perps.read.getMarketPrice(), parseUnits("85000", 6));
+    assert.equal(await perps.read.getMarketPrice(), parseUnits("85", 6));
   });
 
   it("requires six-decimal collateral", async function () {

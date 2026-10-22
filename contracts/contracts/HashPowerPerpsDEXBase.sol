@@ -44,12 +44,12 @@ abstract contract HashPowerPerpsDEXBase is
     ///      `MAX_PRICE` and `MAX_ORDERS_PER_PARTICIPANT` it keeps `MathLib.fillLossBound`'s
     ///      `qty · Σq(p−m)²` (≤ (Σq·p)² ≈ 1e76) within uint256.
     uint256 internal constant MAX_ORDER_QUANTITY = 1e18;
-    /// @notice Largest price any calculation accepts, in token decimals (~$1e12 per contract):
-    ///         order prices and the oracle mark alike.
+    /// @notice Largest price any calculation accepts, in token decimals ($10,000 per contract,
+    ///         ~20x the all-time hashprice high): order prices and the oracle mark alike.
     /// @dev Keeps every price-derived `int256` (entry value, PnL, fees) far below 2^255, so the
     ///      plain casts can never wrap, and keeps the `Σ price²·qty` order moment and
     ///      `MathLib.fillLossBound` within uint256. A feed above it reverts like a stale one.
-    uint256 internal constant MAX_PRICE = 1e18;
+    uint256 public constant MAX_PRICE = 1e10;
     uint256 internal constant BPS = 10_000; // Basis points denominator
     /// @notice Hard ceiling on |makerFeeBps| and |takerFeeBps|: 100 bps (1%).
     /// @dev Keeps a trading fee at most a fifth of the 5% MM spot shock, so the argument

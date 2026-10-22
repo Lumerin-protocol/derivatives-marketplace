@@ -42,7 +42,7 @@ import {
 // with resting orders (further batches follow while still halted). Resume the vault only once
 // every venue is upgraded and verified (`VERIFY_ONLY=true` checks a venue without upgrading).
 const DEFAULT_FORCE_CANCEL_BATCH_SIZE = 20;
-const TARGET_CODE_VERSION = "6.12.0";
+const TARGET_CODE_VERSION = "6.13.0";
 const UPGRADE_CONFIRMATIONS = 5;
 const DEFAULT_SAFE_GAS_OVERHEAD = 150_000n;
 // 6.8.0 calls the engine's `reduceLimits` / `meetsTradeMargin` on every order. Against an

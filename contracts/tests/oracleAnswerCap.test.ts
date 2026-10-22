@@ -6,14 +6,12 @@ import { deployPerpsWithCollateralFixture } from "./fixtures.ts";
 
 const { viem, networkHelpers } = await network.connect();
 
-/** `HashPowerPerpsDEXBase.MAX_PRICE`: the largest price any venue calculation accepts. */
-const MAX_PRICE = 10n ** 18n;
-
 describe("HashPowerPerpsDEX oracle answer cap", function () {
   it("reverts the mark when the feed scales above MAX_PRICE, and accepts MAX_PRICE itself", async function () {
     const { contracts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
     const { perps, priceOracle } = contracts;
     const tick = config.minimumPriceIncrement;
+    const MAX_PRICE = await perps.read.MAX_PRICE();
 
     await priceOracle.write.setPrice([MAX_PRICE, config.oracle.decimals]);
     assert.equal(await perps.read.getMarketPrice(), MAX_PRICE);
@@ -25,6 +23,7 @@ describe("HashPowerPerpsDEX oracle answer cap", function () {
   it("setOracle rejects a feed whose answer scales above MAX_PRICE", async function () {
     const { contracts, config } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
     const { perps } = contracts;
+    const MAX_PRICE = await perps.read.MAX_PRICE();
     const feed = await viem.deployContract("PriceOracleMock", [
       MAX_PRICE + config.minimumPriceIncrement,
       config.oracle.decimals,
@@ -41,7 +40,7 @@ describe("HashPowerPerpsDEX oracle answer cap", function () {
     await perps.write.createOrder([price, 1n, TimeInForce.GTC], { account: buyer.account });
     const [orderId] = await perps.read.getUserOrders([buyer.account.address]);
 
-    await priceOracle.write.setPrice([MAX_PRICE * 1000n, config.oracle.decimals]);
+    await priceOracle.write.setPrice([(await perps.read.MAX_PRICE()) * 1000n, config.oracle.decimals]);
     await perps.write.cancelOrder([orderId], { account: buyer.account });
 
     assert.deepEqual(await perps.read.getUserOrders([buyer.account.address]), []);
