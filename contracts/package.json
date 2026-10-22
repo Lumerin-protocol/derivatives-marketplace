@@ -11,6 +11,7 @@
   "scripts": {
     "format:sol": "forge fmt ./contracts/**/*.sol",
     "test": "hardhat test",
+    "test:gas": "hardhat test --network hardhat tests/gas/perps-gas.test.ts",
     "test-coverage": "hardhat test --coverage",
     "build": "hardhat compile",
     "compile": "hardhat compile",
@@ -31,6 +32,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.2.4",
     "@cyfrin/aderyn": "^0.5.13",
+    "@lsheva/evm-gas-benchmark": "github:lsheva/evm-gas-benchmark#v1.0.2&path:packages/evm-gas-benchmark",
     "@nomicfoundation/hardhat-toolbox-viem": "^5.0.7",
     "@nomicfoundation/hardhat-verify": "^3.0.17",
     "@nomicfoundation/hardhat-viem": "3.0.9",
