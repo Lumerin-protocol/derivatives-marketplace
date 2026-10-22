@@ -26,7 +26,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @dev Lives here rather than in {HashPowerPerpsDEXBase} so that a diff to
     ///      this file and the version it ships under stay in the same place,
     ///      mirroring {Futures}.
-    string public constant VERSION = "6.10.0";
+    string public constant VERSION = "6.11.0";
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ICollateralVault _vault) HashPowerPerpsDEXBase(_vault) { }
@@ -194,16 +194,12 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @dev Shared cancel body for `cancelOrder` / `updateOrders`. Caller must
     ///      have already updated global funding for this tx when needed.
     function _cancelOrder(address _participant, bytes32 _orderId) internal {
-        Order memory order = orders[_orderId];
+        Order storage order = orders[_orderId];
         if (order.participant != _participant) {
             revert OrderNotBelongToSender();
         }
         if (order.quantity == 0) revert OrderNotExists();
-
-        bool isBid = order.quantity > 0;
-        _removeRestingOrder(_orderId, order.participant, order.price, order.quantity);
-        _removePriceLevelIfEmpty(_priceOrderIds(order.price, isBid), order.price, isBid);
-        emit OrderCancelled(_orderId, order.participant);
+        _dropRestingOrder(_orderId, true);
     }
 
     /// @dev In-place size shrink. Keeps the order id in its price queue slot.
@@ -328,7 +324,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @notice Force-cancel a single resting order owned by an underwater user. Permissionless.
     function liquidateOrder(address _user, bytes32 _orderId) external {
         if (_user == BACKSTOP) revert BackstopAccount();
-        Order memory order = orders[_orderId];
+        Order storage order = orders[_orderId];
         if (order.participant != _user) revert OrderNotBelongToUser();
         if (order.quantity == 0) revert OrderNotExists();
 
@@ -348,7 +344,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         uint256 len = _orderIds.length;
         for (uint256 i = 0; i < len; i++) {
             bytes32 orderId = _orderIds[i];
-            Order memory order = orders[orderId];
+            Order storage order = orders[orderId];
             // Skip raced/stale ids before the expensive portfolio MM check.
             if (order.participant != _user || order.quantity == 0) continue;
             if (!_underwater(_user)) break;
@@ -368,16 +364,12 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @dev Cancels a single order on behalf of a (verified-underwater) user. Caller must have
     ///      already verified `_underwater(_user)` and that `_order.participant == _user`.
     ///      Charges a liquidation fee on the order's notional value.
-    function _doLiquidateOrder(address _user, bytes32 _orderId, Order memory _order) internal {
-        bool isBid = _order.quantity > 0;
-        uint256 orderAbsQty = M.abs(_order.quantity);
-        uint256 orderNotional = _calculateValue(_order.price, orderAbsQty);
-        _removeRestingOrder(_orderId, _user, _order.price, _order.quantity);
-        _removePriceLevelIfEmpty(_priceOrderIds(_order.price, isBid), _order.price, isBid);
+    function _doLiquidateOrder(address _user, bytes32 _orderId, Order storage _order) internal {
+        uint256 orderNotional = _calculateValue(_order.price, M.abs(_order.quantity));
+        _dropRestingOrder(_orderId, true);
 
         uint256 liqFee = _chargeLiquidationFee(_user, orderNotional);
 
-        emit OrderCancelled(_orderId, _user);
         emit OrderLiquidated(_orderId, _user, _msgSender(), liqFee);
         _notifyLiquidation(_msgSender(), liqFee);
     }

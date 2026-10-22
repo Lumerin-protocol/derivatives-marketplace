@@ -21,7 +21,7 @@ function derivedAverage(entryValue: bigint, quantity: bigint) {
   return (absEntry * SCALE) / absQty;
 }
 
-describe("HashPowerPerpsDEX exact entry-value upgrade-and-reset", function () {
+describe("HashPowerPerpsDEX exact entry value", function () {
   it("keeps exact values through increase, partial reduce, flip, close, PnL, and risk", async function () {
     const data = await networkHelpers.loadFixture(
       deployPerpsWithCollateralFixture,
@@ -127,32 +127,5 @@ describe("HashPowerPerpsDEX exact entry-value upgrade-and-reset", function () {
       netEntryValue: 0n,
     });
     assert.equal(await getAverageEntryPrice(perps, buyer.account.address), 0n);
-  });
-
-  it("resetState clears a canonical exact-entry position", async function () {
-    const data = await networkHelpers.loadFixture(
-      deployPerpsWithCollateralFixture,
-    );
-    const { contracts, accounts } = data;
-    const { perps } = contracts;
-    const { owner, buyer, seller } = accounts;
-    const price = await perps.read.getMarketPrice();
-    const quantity = 1_000_000n;
-    await perps.write.createOrder(
-      [price, -quantity, TimeInForce.GTC],
-      { account: seller.account },
-    );
-    await perps.write.createOrder(
-      [price, quantity, TimeInForce.GTC],
-      { account: buyer.account },
-    );
-
-    await perps.write.resetState([[buyer.account.address]], {
-      account: owner.account,
-    });
-    assert.deepEqual(await perps.read.getUserPosition([buyer.account.address]), {
-      netQuantity: 0n,
-      netEntryValue: 0n,
-    });
   });
 });

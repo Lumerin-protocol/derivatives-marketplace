@@ -23,9 +23,26 @@ import {
 import { SafeWallet } from "../lib/safe.ts";
 import { verifyContract } from "../lib/verify.ts";
 import { writeAndWait } from "../lib/writeContract.ts";
+import {
+  DEFAULT_BLOCK_CHUNK,
+  collectParticipants,
+  fetchDeploymentBlockFromEtherscan,
+} from "./lib/participants.ts";
+import { ensureVaultHalted } from "./lib/halt.ts";
+import {
+  assertNoRestingOrders,
+  chunk,
+  usersWithRestingOrders,
+} from "./lib/resting-orders.ts";
 
 // Upgrades run no initializer, so the proxy's init version must not move.
-const TARGET_CODE_VERSION = "6.10.0";
+//
+// 6.10 starts a new resting-order aggregate, so orders placed before it must not survive the
+// upgrade: with the shared vault halted, the upgrade call is `forceCancelOrders` for every user
+// with resting orders (further batches follow while still halted). Resume the vault only once
+// every venue is upgraded and verified (`VERIFY_ONLY=true` checks a venue without upgrading).
+const DEFAULT_FORCE_CANCEL_BATCH_SIZE = 20;
+const TARGET_CODE_VERSION = "6.11.0";
 const UPGRADE_CONFIRMATIONS = 5;
 const DEFAULT_SAFE_GAS_OVERHEAD = 150_000n;
 // 6.8.0 calls the engine's `reduceLimits` / `meetsTradeMargin` on every order. Against an
@@ -164,6 +181,49 @@ async function main() {
     );
   }
 
+  const startBlock =
+    readOptionalBigInt("START_BLOCK") ??
+    (await fetchDeploymentBlockFromEtherscan(pc, proxyAddress));
+  const blockChunk = readOptionalBigInt("BLOCK_CHUNK_SIZE") ?? DEFAULT_BLOCK_CHUNK;
+  if (process.env.VERIFY_ONLY === "true") {
+    const candidates = await collectParticipants(pc, proxyAddress, {
+      startBlock,
+      endBlock: snapshotBlock,
+      blockChunk,
+    });
+    await assertNoRestingOrders(pc, proxyAddress, candidates, snapshotBlock);
+    logSuccess(
+      `No resting orders at block ${snapshotBlock} (${candidates.length} participants checked)`,
+    );
+    return;
+  }
+
+  // Listed only once halted, so no user can place an order the cancellation would miss.
+  const ordersBlock = await ensureVaultHalted(pc, vaultAddress, deployer);
+  const candidates = await collectParticipants(pc, proxyAddress, {
+    startBlock,
+    endBlock: ordersBlock,
+    blockChunk,
+  });
+  const usersWithOrders = await usersWithRestingOrders(
+    pc,
+    proxyAddress,
+    candidates,
+    ordersBlock,
+  );
+  const cancelBatches = chunk(
+    usersWithOrders,
+    Number(
+      readOptionalBigInt("FORCE_CANCEL_BATCH_SIZE") ??
+        BigInt(DEFAULT_FORCE_CANCEL_BATCH_SIZE),
+    ),
+  );
+  logInfo("resting orders", {
+    "Orders block": ordersBlock,
+    "Users with resting orders": usersWithOrders.length,
+    "forceCancelOrders batches": cancelBatches.length,
+  });
+
   await logPrompt("Preflight complete. Deploy implementation?");
   const newImpl = existingImpl
     ? await viem.getContractAt("HashPowerPerpsDEX", existingImpl)
@@ -187,8 +247,17 @@ async function main() {
     );
   }
 
-  const upgradeCalldata = "0x";
-  const upgradeCall = "(none)";
+  const [firstBatch, ...followUpBatches] = cancelBatches;
+  const upgradeCalldata = firstBatch
+    ? encodeFunctionData({
+        abi: newImpl.abi,
+        functionName: "forceCancelOrders",
+        args: [firstBatch],
+      })
+    : "0x";
+  const upgradeCall = firstBatch
+    ? `forceCancelOrders(${firstBatch.length} users)`
+    : "(none)";
 
   const upgradeArgs = [newImpl.address, upgradeCalldata] as const;
   await simulateContract(pc, {
@@ -223,7 +292,7 @@ async function main() {
   if (requiredBlockGas > maxAtomicUpgradeGas) {
     throw new Error(
       `Upgrade cannot fit: estimate ${estimatedUpgradeGas} + Safe overhead ${safeGasOverhead} ` +
-        `= ${requiredBlockGas}, limit ${maxAtomicUpgradeGas}.`,
+        `= ${requiredBlockGas}, limit ${maxAtomicUpgradeGas}. Lower FORCE_CANCEL_BATCH_SIZE.`,
     );
   }
   logInfo("upgrade preflight", {
@@ -254,6 +323,23 @@ async function main() {
     });
     logStep("Safe TX hash", upgradeTxHash);
     logStep("Safe UI URL", safe.getSafeUITxUrl(upgradeTxHash));
+
+    for (const [i, batch] of followUpBatches.entries()) {
+      const cancelTxHash = await safe.proposeTransaction({
+        data: encodeFunctionData({
+          abi: newImpl.abi,
+          functionName: "forceCancelOrders",
+          args: [batch],
+        }),
+        to: proxyAddress,
+        value: "0",
+        operation: OperationType.Call,
+      });
+      logStep(
+        `forceCancelOrders batch ${i + 2}/${cancelBatches.length}`,
+        safe.getSafeUITxUrl(cancelTxHash),
+      );
+    }
 
     if (pointsHookAddress) {
       logInfo("Propose setHook via Safe", { hook: pointsHookAddress });
@@ -308,6 +394,21 @@ async function main() {
     logStep("Init version", postInitVersion.toString());
     logStep("Code version", postCodeVersion);
 
+    let verifyBlock = receipt.blockNumber;
+    for (const [i, batch] of followUpBatches.entries()) {
+      const cancelReceipt = await writeAndWait(
+        deployer,
+        await perps.simulate.forceCancelOrders([batch]),
+      );
+      verifyBlock = cancelReceipt.blockNumber;
+      logStep(
+        `forceCancelOrders batch ${i + 2}/${cancelBatches.length}`,
+        txUrl(pc, cancelReceipt.transactionHash),
+      );
+    }
+    await assertNoRestingOrders(pc, proxyAddress, usersWithOrders, verifyBlock);
+    logStep("Resting orders", `none left (${usersWithOrders.length} users cancelled)`);
+
     if (pointsHookAddress) {
       const currentHook = await perps.read.hook();
       if (currentHook.toLowerCase() !== pointsHookAddress.toLowerCase()) {
@@ -321,6 +422,9 @@ async function main() {
   }
 
   logSuccess(addrUrl(pc, proxyAddress));
+  logInfo("next", {
+    Resume: "resume the vault once every venue is upgraded and has no resting orders left",
+  });
 }
 
 main().catch((error) => {

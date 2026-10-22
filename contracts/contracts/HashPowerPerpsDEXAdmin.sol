@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import { AggregatorV3Interface } from "./interfaces/AggregatorV3Interface.sol";
 import { IPortfolioMarginEngine } from "collateral-margin/contracts/contracts/interfaces/IPortfolioMarginEngine.sol";
 import { IPointsHook } from "collateral-margin/contracts/contracts/interfaces/IPointsHook.sol";
+import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import { HashPowerPerpsDEXBase } from "./HashPowerPerpsDEXBase.sol";
 
 /// @title HashPowerPerpsDEXAdmin — owner-only governance surface for {HashPowerPerpsDEX}
@@ -22,6 +23,8 @@ import { HashPowerPerpsDEXBase } from "./HashPowerPerpsDEXBase.sol";
 ///      needed, declare it in {HashPowerPerpsDEXBase} at the end alongside the existing
 ///      gap slots.
 abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
+    using EnumerableSet for EnumerableSet.Bytes32Set;
+
     /// @notice Authorize upgrade (only owner)
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
 
@@ -182,16 +185,19 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
         }
     }
 
-    // ── Testnet maintenance ───────────────────────────────────────────────────
-
-    /// @notice Clear orders, position, and funding snapshot for explicit participants.
-    /// @dev Intended for testnet resets and migrations. The caller must supply the complete
-    ///      participant set; the contract deliberately performs no global enumeration.
-    ///      Global funding, configuration, collateral balances, and the order nonce are untouched.
-    function resetState(address[] calldata _participants) external onlyOwner {
-        uint256 len = _participants.length;
-        for (uint256 i = 0; i < len; i++) {
-            _resetStateForParticipant(_participants[i]);
+    /// @notice Cancel every resting order of the given users. Realizes nothing, so it runs with
+    ///         or without a halt; pair it with `forceClosePositions` to unwind users fully.
+    /// @dev Clears each user's aggregate wholesale instead of subtracting per order, so it also
+    ///      removes orders placed before 6.10, which the aggregate never counted. Run it as the
+    ///      call of any upgrade from before 6.10, for every user with resting orders.
+    function forceCancelOrders(address[] calldata _users) external onlyOwner {
+        for (uint256 i = 0; i < _users.length; i++) {
+            address user = _users[i];
+            bytes32[] memory orderIds = participantOrderIdsIndex[user].values();
+            for (uint256 j = 0; j < orderIds.length; j++) {
+                _dropRestingOrder(orderIds[j], false);
+            }
+            delete userRestingOrderAggregate[user];
         }
     }
 }
