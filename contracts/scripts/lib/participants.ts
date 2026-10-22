@@ -9,7 +9,7 @@ export const DEFAULT_BLOCK_CHUNK = 10_000n;
 const MIN_CHUNK_BLOCKS = 1n;
 const CACHE_VERSION = 1;
 const LIB_DIR = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_CACHE_DIR = join(LIB_DIR, "..", "..", ".cache", "reset-perps-participants");
+const DEFAULT_CACHE_DIR = join(LIB_DIR, "..", "..", ".cache", "perps-participants");
 
 /** Events that create or reference a participant's orders/positions. */
 const ORDER_CREATED_EVENT = parseAbiItem(
