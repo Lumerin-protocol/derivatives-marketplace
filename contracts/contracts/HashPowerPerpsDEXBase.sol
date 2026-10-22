@@ -15,7 +15,6 @@ import { IPortfolioMarginEngine } from "collateral-margin/contracts/contracts/in
 import { IPointsHook } from "collateral-margin/contracts/contracts/interfaces/IPointsHook.sol";
 import { PriceLadderLib } from "./libs/PriceLadderLib.sol";
 import { MathLib as M } from "./libs/MathLib.sol";
-import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import { Versionable } from "./interfaces/Versionable.sol";
 
 /// @title HashPowerPerpsDEXBase — storage layout and internal helpers for {HashPowerPerpsDEX}
@@ -31,7 +30,6 @@ abstract contract HashPowerPerpsDEXBase is
     using EnumerableSet for EnumerableSet.Bytes32Set;
     using EnumerableSet for EnumerableSet.AddressSet;
     using StructuredLinkedList for StructuredLinkedList.List;
-    using SafeCast for uint256;
 
     // Constants
     uint256 public constant MAX_ORACLE_STALENESS = 3600; // 1 hour
@@ -46,11 +44,11 @@ abstract contract HashPowerPerpsDEXBase is
     ///      `MAX_PRICE` and `MAX_ORDERS_PER_PARTICIPANT` it keeps `MathLib.fillLossBound`'s
     ///      `qty · Σq(p−m)²` (≤ (Σq·p)² ≈ 1e76) within uint256.
     uint256 internal constant MAX_ORDER_QUANTITY = 1e18;
-    /// @notice Largest order price accepted, in token decimals (~$1e12 per contract).
-    /// @dev Oracle-independent, so it binds even when the feed is unusable. Keeps every
-    ///      price-derived `int256` (entry value, PnL, fees) far below 2^255, so a price can
-    ///      never wrap into an attacker-chosen negative trade value, and keeps the
-    ///      `Σ price²·qty` order moment within uint256.
+    /// @notice Largest price any calculation accepts, in token decimals (~$1e12 per contract):
+    ///         order prices and the oracle mark alike.
+    /// @dev Keeps every price-derived `int256` (entry value, PnL, fees) far below 2^255, so the
+    ///      plain casts can never wrap, and keeps the `Σ price²·qty` order moment and
+    ///      `MathLib.fillLossBound` within uint256. A feed above it reverts like a stale one.
     uint256 internal constant MAX_PRICE = 1e18;
     uint256 internal constant BPS = 10_000; // Basis points denominator
     /// @notice Hard ceiling on |makerFeeBps| and |takerFeeBps|: 100 bps (1%).
@@ -429,12 +427,14 @@ abstract contract HashPowerPerpsDEXBase is
         return true;
     }
 
-    /// @dev Soft oracle → venue price. Returns 0 when the round is unusable (never reverts).
-    ///      Used by points bonus and funding accrual so a stale feed cannot brick cancels.
+    /// @dev Soft oracle → venue price. Returns 0 when the round is unusable or the price is
+    ///      above `MAX_PRICE` (never reverts). Used by points bonus and funding accrual so a bad
+    ///      feed cannot brick cancels.
     function _softMarketPrice() internal view returns (uint256) {
         (, int256 answer,, uint256 updatedAt,) = priceOracle.latestRoundData();
         if (!_isUsableOracleRound(answer, updatedAt)) return 0;
-        return _getMarketPrice(uint256(answer));
+        uint256 price = _getMarketPrice(uint256(answer));
+        return price > MAX_PRICE ? 0 : price;
     }
 
     /// @dev Oracle reference price for the points price-improvement multiplier, in the same
@@ -491,9 +491,11 @@ abstract contract HashPowerPerpsDEXBase is
         return M.roundToNearest(scaled, minimumPriceIncrement);
     }
 
-    /// @dev Body of {getMarketPrice}: hard-validated oracle price in venue units.
-    function _marketPrice() internal view returns (uint256) {
-        return _getMarketPrice(_getPrice());
+    /// @dev Body of {getMarketPrice}: hard-validated oracle price in venue units. Capped at
+    ///      `MAX_PRICE` like order prices, so every price-derived cast and product stays in range.
+    function _marketPrice() internal view returns (uint256 price) {
+        price = _getMarketPrice(_getPrice());
+        if (price > MAX_PRICE) revert InvalidOracle();
     }
 
     function _activePricesSlice(StructuredLinkedList.List storage priceList, uint256 _maxLevels)
@@ -640,8 +642,8 @@ abstract contract HashPowerPerpsDEXBase is
         uint256 notionalValue = _calculateValue(makerPrice, matchAmt);
 
         // The backstop is unfunded by design: a taker fee would only be booked as BadDebt.
-        int256 takerFee = _taker == BACKSTOP ? int256(0) : notionalValue.toInt256() * int256(takerFeeBps) / int256(BPS);
-        int256 makerFee = notionalValue.toInt256() * int256(makerFeeBps) / int256(BPS);
+        int256 takerFee = _taker == BACKSTOP ? int256(0) : int256(notionalValue) * int256(takerFeeBps) / int256(BPS);
+        int256 makerFee = int256(notionalValue) * int256(makerFeeBps) / int256(BPS);
 
         _createPosition(makerParticipant, _taker, makerPrice, takerQty);
 
@@ -840,7 +842,7 @@ abstract contract HashPowerPerpsDEXBase is
     }
 
     function _signedValue(uint256 _price, int256 _quantity) internal pure returns (int256) {
-        return (_quantity * _price.toInt256()) / int256(10 ** QUANTITY_DECIMALS);
+        return (_quantity * int256(_price)) / int256(10 ** QUANTITY_DECIMALS);
     }
 
     /// @notice Update a user's net position with exact signed entry value

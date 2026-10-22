@@ -84,6 +84,7 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
 
         priceOracle = _oracle;
         oracleDecimals = dec;
+        _marketPrice();
         emit OracleUpdated(oracle);
     }
 
