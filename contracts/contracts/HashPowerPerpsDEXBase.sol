@@ -43,7 +43,7 @@ abstract contract HashPowerPerpsDEXBase is
     ///      WAD and stresses it as int256, so the sum must stay below 2^255. And with
     ///      `MAX_PRICE` and `MAX_ORDERS_PER_PARTICIPANT` it keeps `MathLib.fillLossBound`'s
     ///      `qty · Σq(p−m)²` (≤ (Σq·p)² ≈ 1e60) within uint256.
-    uint256 internal constant MAX_ORDER_QUANTITY = 1e18;
+    uint256 public constant MAX_ORDER_QUANTITY = 1e18;
     /// @notice Largest price any calculation accepts, in token decimals ($10,000 per contract,
     ///         ~20x the all-time hashprice high): order prices and the oracle mark alike.
     /// @dev Keeps every price-derived `int256` (entry value, PnL, fees) far below 2^255, so the

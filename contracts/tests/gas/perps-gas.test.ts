@@ -99,6 +99,7 @@ async function benchmarkViews() {
     ["FUNDING_DECIMALS()", "FUNDING_DECIMALS", []],
     ["MAX_ORACLE_STALENESS()", "MAX_ORACLE_STALENESS", []],
     ["MAX_ORDERS_PER_PARTICIPANT()", "MAX_ORDERS_PER_PARTICIPANT", []],
+    ["MAX_ORDER_QUANTITY()", "MAX_ORDER_QUANTITY", []],
     ["MAX_PRICE()", "MAX_PRICE", []],
     ["MAX_PRICE_LEVELS_PER_SIDE()", "MAX_PRICE_LEVELS_PER_SIDE", []],
     ["QUANTITY_DECIMALS()", "QUANTITY_DECIMALS", []],
@@ -505,7 +506,7 @@ describe("Perps gas benchmark", () => {
 
     const snapshot = gas.snapshot();
     const coverage = assertAbiFunctionCoverage(HashPowerPerpsDEXAbi, snapshot, exclusions);
-    assert.equal(coverage.covered.length, 63);
+    assert.equal(coverage.covered.length, 64);
     assert.deepEqual(coverage.excluded, ["initialize(address,address)", "proxiableUUID()"]);
 
     await mkdir(fileURLToPath(new URL("../../benchmarks", import.meta.url)), { recursive: true });

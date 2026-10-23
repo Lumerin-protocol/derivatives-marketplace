@@ -58,8 +58,27 @@ describe("MathLib.fillLossBound", function () {
       tick: config.minimumPriceIncrement,
       lot: 1_000n * 10n ** BigInt(await perps.read.QUANTITY_DECIMALS()),
       maxOrders: BigInt(await perps.read.MAX_ORDERS_PER_PARTICIPANT()),
+      maxPrice: await perps.read.MAX_PRICE(),
+      maxQty: await perps.read.MAX_ORDER_QUANTITY(),
     };
   }
+
+  it("stays in range and never under-reserves with every order at the caps", async function () {
+    const { bound, tick, maxOrders, maxPrice, maxQty } = await setup();
+    // A full side at the quantity cap, split between the lowest price and MAX_PRICE: the
+    // widest spread, and so the largest `qty · Σq(p−m)²`, the caps allow.
+    const orders: Order[] = [];
+    for (let i = 0n; i < maxOrders; i++) {
+      orders.push({ price: i % 2n === 0n ? tick : maxPrice, qty: maxQty });
+    }
+    for (const at of [tick, maxPrice / 2n, maxPrice]) {
+      for (const isBuy of [true, false]) {
+        const exact = fillLoss(orders, at, isBuy);
+        const got = await bound(orders, at, isBuy);
+        assert.ok(got >= exact, `mark ${at}, ${isBuy ? "bids" : "asks"}: ${got} < ${exact}`);
+      }
+    }
+  });
 
   it("is zero for an empty side", async function () {
     const { bound, mark } = await setup();
