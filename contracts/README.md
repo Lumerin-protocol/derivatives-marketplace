@@ -147,42 +147,49 @@ The hashprice oracle quotes the price of **1 PH/s sustained over one day**, matc
 
 The contract uses the UUPS proxy pattern (OpenZeppelin) so the implementation can be upgraded by the owner without redeploying state.
 
-#### v2.13 order aggregate migration
+#### 6.10 resting-order aggregate
 
-v2.13 replaces four independent order-cache mappings with one appended
-`OrderAggregate` per user. The old mapping slots remain in storage but are dead:
-all reads and writes use the aggregate's buy/sell quantities and values.
+6.10 appends a `RestingOrderAggregate` per user: per side, the resting quantity
+and its first two price moments (`Σ p·q`, `Σ p²·q`), the inputs of the fill-loss
+bound. The v2.13 `OrderAggregate` mapping and the older order-cache mappings
+remain in storage but are dead.
 
-`upgrade:perps` only upgrades the implementation. After upgrading from a version
-before 2.13, immediately run `pnpm rebuild:order-aggregate-cache`. This is a
-deliberately non-atomic migration: existing orders have zero aggregate cache
-until the rebuild transactions complete.
+The new aggregate starts empty, so an order placed before 6.10 cannot be
+cancelled or filled after the upgrade. `pnpm upgrade:perps` therefore cancels
+every resting order as part of the upgrade:
 
-The rebuild script discovers order owners from `OrderCreated` RPC logs over the
-preceding 180 days and confirms candidates against `getUserOrders`. Set
-`EVENT_LOOKBACK_DAYS` to change the search period. It writes in
-`ORDER_CACHE_WRITE_BATCH_SIZE` batches (default 25) and verifies all four fields
-against a canonical order scan.
+1. It halts the shared vault: directly when the deployer owns it, otherwise it
+   proposes `halt()` to the vault's Safe and waits until it executes.
+2. At a halted block it lists users from `OrderCreated` events (from
+   `START_BLOCK`, or the deployment block) and keeps those with resting orders.
+3. It upgrades with `upgradeToAndCall(impl, forceCancelOrders(firstBatch))`,
+   then sends the remaining batches (`FORCE_CANCEL_BATCH_SIZE`, default 20).
+4. It checks that the book is empty and every listed aggregate is zero.
 
-#### Explicit reset and migration participants
+When the venue is Safe-owned, the upgrade and the batches are proposed instead;
+once they execute, run the script again with `VERIFY_ONLY=true` to check the
+venue. Resume the vault manually once every venue verifies.
+
+#### Forced settlement
 
 The contract does not enumerate position holders on chain. The legacy
 `usersWithPositions` storage slot remains dead and untouched solely for proxy
 layout compatibility.
 
-Testnet resets require an explicit comma-separated participant list:
+To empty the venue for a migration, halt the vault and pass explicit account
+lists, built from the subgraph or event history, to two owner calls:
 
-```sh
-PERPS_ADDRESS=0x... RESET_PARTICIPANTS=0x...,0x... pnpm reset:perps
-```
+- `forceCancelOrders(address[])` cancels every resting order of each account and
+  emits `OrderCancelled` per order.
+- `forceClosePositions(address[])` settles funding (`FundingSettled` when any
+  is due), then closes each position at the oracle mark against the insurance
+  fund and emits `PositionLiquidated` with a zero fee.
 
-The script deduplicates addresses and calls `resetState(address[])` in
-`RESET_BATCH_SIZE` batches (default 25). Only supplied accounts have their
-orders, position, and funding snapshot cleared; collateral, global funding, and
-the monotonic order nonce are preserved. Operators must build a complete list
-from authoritative configuration or indexed event history. Any future net-entry
-position migration must likewise accept explicit participant arrays and must not
-read the dead enumeration slot.
+`forceClosePositions` reverts with `NotHalted` unless the vault is halted;
+`forceCancelOrders` runs either way and checkpoints funding first. Batch them with
+`halt()` and `resume()` in one Safe transaction. Every change emits the same
+events as a user cancel or a liquidation, so the subgraph stays in step with the
+chain and its start block never has to move.
 
 ### Funding Fees
 

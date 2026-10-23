@@ -801,6 +801,32 @@
   },
   {
     "inputs": [],
+    "name": "MAX_ORDER_QUANTITY",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "MAX_PRICE",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "MAX_PRICE_LEVELS_PER_SIDE",
     "outputs": [
       {
@@ -951,6 +977,19 @@
         "type": "address[]"
       }
     ],
+    "name": "forceCancelOrders",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address[]",
+        "name": "_users",
+        "type": "address[]"
+      }
+    ],
     "name": "forceClosePositions",
     "outputs": [],
     "stateMutability": "nonpayable",
@@ -1055,16 +1094,26 @@
           },
           {
             "internalType": "uint256",
-            "name": "buyValue",
+            "name": "buyPQ",
             "type": "uint256"
           },
           {
             "internalType": "uint256",
-            "name": "sellValue",
+            "name": "buyP2Q",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "sellPQ",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "sellP2Q",
             "type": "uint256"
           }
         ],
-        "internalType": "struct HashPowerPerpsDEXBase.OrderAggregate",
+        "internalType": "struct HashPowerPerpsDEXBase.RestingOrderAggregate",
         "name": "aggregate_",
         "type": "tuple"
       }
@@ -1315,31 +1364,6 @@
     "type": "function"
   },
   {
-    "inputs": [
-      {
-        "internalType": "contract ICollateralVault",
-        "name": "_vault",
-        "type": "address"
-      },
-      {
-        "internalType": "contract IPortfolioMarginEngine",
-        "name": "_pm",
-        "type": "address"
-      }
-    ],
-    "name": "initializeV2",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "initializeV3",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
     "inputs": [],
     "name": "lastFundingUpdateTime",
     "outputs": [
@@ -1526,19 +1550,6 @@
   {
     "inputs": [
       {
-        "internalType": "address[]",
-        "name": "_users",
-        "type": "address[]"
-      }
-    ],
-    "name": "rebuildOrderAggregateCache",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
         "internalType": "bytes32",
         "name": "_orderId",
         "type": "bytes32"
@@ -1557,19 +1568,6 @@
   {
     "inputs": [],
     "name": "renounceOwnership",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address[]",
-        "name": "_participants",
-        "type": "address[]"
-      }
-    ],
-    "name": "resetState",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"

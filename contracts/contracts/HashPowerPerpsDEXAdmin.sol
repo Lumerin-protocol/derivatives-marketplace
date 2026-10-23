@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import { AggregatorV3Interface } from "./interfaces/AggregatorV3Interface.sol";
 import { IPortfolioMarginEngine } from "collateral-margin/contracts/contracts/interfaces/IPortfolioMarginEngine.sol";
 import { IPointsHook } from "collateral-margin/contracts/contracts/interfaces/IPointsHook.sol";
+import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import { HashPowerPerpsDEXBase } from "./HashPowerPerpsDEXBase.sol";
 
 /// @title HashPowerPerpsDEXAdmin — owner-only governance surface for {HashPowerPerpsDEX}
@@ -11,9 +12,8 @@ import { HashPowerPerpsDEXBase } from "./HashPowerPerpsDEXBase.sol";
 ///         hook. Splitting them out keeps {HashPowerPerpsDEX} to the permissionless
 ///         surface — trading, liquidation and views — so a reader can tell at a glance
 ///         which calls a counterparty can make and which only governance can.
-/// @dev The initializers stay in {HashPowerPerpsDEX}: `initializeV2` is `onlyOwner` too,
-///      but it belongs with `initialize` as deployment/upgrade lifecycle rather than
-///      ongoing governance, and splitting the two apart would read worse than either.
+/// @dev `initialize` stays in {HashPowerPerpsDEX} as deployment lifecycle rather than
+///      ongoing governance.
 /// @dev Declares **no storage**. It sits between {HashPowerPerpsDEXBase} and
 ///      {HashPowerPerpsDEX} purely to partition the function surface, and a stateless
 ///      layer cannot move a slot: state is laid out in linearization order and every
@@ -23,6 +23,8 @@ import { HashPowerPerpsDEXBase } from "./HashPowerPerpsDEXBase.sol";
 ///      needed, declare it in {HashPowerPerpsDEXBase} at the end alongside the existing
 ///      gap slots.
 abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
+    using EnumerableSet for EnumerableSet.Bytes32Set;
+
     /// @notice Authorize upgrade (only owner)
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
 
@@ -82,6 +84,7 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
 
         priceOracle = _oracle;
         oracleDecimals = dec;
+        _marketPrice();
         emit OracleUpdated(oracle);
     }
 
@@ -159,22 +162,6 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
         emit FundingParametersUpdated(_fundingRateMaxBps, _fundingPeriod);
     }
 
-    // ── Upgrade migrations ────────────────────────────────────────────────────
-
-    /// @notice Rebuild all order aggregate fields for accounts with orders predating v2.13.
-    /// @dev Call through `upgradeToAndCall` so legacy orders are migrated atomically
-    ///      with the implementation upgrade.
-    function rebuildOrderAggregateCache(address[] calldata _users) external onlyOwner {
-        _rebuildOrderAggregateCaches(_users);
-    }
-
-    function _rebuildOrderAggregateCaches(address[] calldata _users) internal {
-        uint256 len = _users.length;
-        for (uint256 i = 0; i < len; i++) {
-            _rebuildOrderAggregateCache(_users[i]);
-        }
-    }
-
     // ── Escape hatch ──────────────────────────────────────────────────────────
 
     /// @notice Close the given users' positions at the current mark, realizing PnL against the
@@ -182,7 +169,7 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
     ///         with the users'. Emits `PositionLiquidated` so indexers need nothing new.
     /// @dev Only while the vault is halted, so no fill can land between users. Funding is settled
     ///      per user first. Flat users are skipped. Resting orders are left alone; they carry no
-    ///      exposure until they fill.
+    ///      exposure until they fill, and {forceCancelOrders} removes them.
     function forceClosePositions(address[] calldata _users) external onlyOwner {
         if (!vault.halted()) revert NotHalted();
         _updateGlobalFunding();
@@ -199,16 +186,22 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
         }
     }
 
-    // ── Testnet maintenance ───────────────────────────────────────────────────
-
-    /// @notice Clear orders, position, and funding snapshot for explicit participants.
-    /// @dev Intended for testnet resets and migrations. The caller must supply the complete
-    ///      participant set; the contract deliberately performs no global enumeration.
-    ///      Global funding, configuration, collateral balances, and the order nonce are untouched.
-    function resetState(address[] calldata _participants) external onlyOwner {
-        uint256 len = _participants.length;
-        for (uint256 i = 0; i < len; i++) {
-            _resetStateForParticipant(_participants[i]);
+    /// @notice Cancel every resting order of the given users, emitting `OrderCancelled` per order
+    ///         like a user's own cancel. Realizes nothing, so it runs with or without a halt;
+    ///         pair it with `forceClosePositions` to unwind users fully.
+    /// @dev Clears each user's aggregate wholesale instead of subtracting per order, so it also
+    ///      removes orders placed before 6.10, which the aggregate never counted. Run it as the
+    ///      call of any upgrade from before 6.10, for every user with resting orders.
+    function forceCancelOrders(address[] calldata _users) external onlyOwner {
+        // Funding accrues off the book mid, so checkpoint it before the book changes.
+        _updateGlobalFunding();
+        for (uint256 i = 0; i < _users.length; i++) {
+            address user = _users[i];
+            bytes32[] memory orderIds = participantOrderIdsIndex[user].values();
+            for (uint256 j = 0; j < orderIds.length; j++) {
+                _dropRestingOrder(orderIds[j], false);
+            }
+            delete userRestingOrderAggregate[user];
         }
     }
 }

@@ -92,7 +92,13 @@ async function main() {
   logStep("Deployed", addrUrl(pc, perpsImpl.address));
 
   console.log("Verifying HashPowerPerpsDEX implementation...");
-  await verifyContract(perpsImpl.address, args);
+  if (
+    !(await verifyContract(perpsImpl.address, args, undefined, {
+      contract: "contracts/HashPowerPerpsDEX.sol:HashPowerPerpsDEX",
+    }))
+  ) {
+    throw new Error(`Basescan did not verify implementation ${perpsImpl.address}`);
+  }
   logStep("Verified", addrUrl(pc, perpsImpl.address));
 
   // Deploy HashPowerPerpsDEX proxy
@@ -115,13 +121,23 @@ async function main() {
   ]);
   logStep("Deployed", addrUrl(pc, perpsProxy.address));
 
-  const perps = await viem.getContractAt("HashPowerPerpsDEX", perpsProxy.address);
-  // Fresh proxies have a zeroed slot already; consume migration version 3 now so
-  // a later upgrade cannot reset revenue accrued by this deployment.
-  const initV3Res = await perps.simulate.initializeV3();
-  const initV3Receipt = await writeAndWait(deployer, initV3Res);
-  logStep("Initialized revenue slot", txUrl(pc, initV3Receipt.transactionHash));
+  console.log("Verifying HashPowerPerpsDEX proxy...");
+  if (
+    !(await verifyContract(
+      perpsProxy.address,
+      [perpsImpl.address, encodedInitFn],
+      undefined,
+      {
+        contract:
+          "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol:ERC1967Proxy",
+      },
+    ))
+  ) {
+    throw new Error(`Basescan did not verify proxy ${perpsProxy.address}`);
+  }
+  logStep("Verified", addrUrl(pc, perpsProxy.address));
 
+  const perps = await viem.getContractAt("HashPowerPerpsDEX", perpsProxy.address);
   // Set fees
   logInfo("Set fees", {
     takerFeeBps: env.TAKER_FEE_BPS,
