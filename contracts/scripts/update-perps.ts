@@ -186,6 +186,11 @@ async function main() {
     (await fetchDeploymentBlockFromEtherscan(pc, proxyAddress));
   const blockChunk = readOptionalBigInt("BLOCK_CHUNK_SIZE") ?? DEFAULT_BLOCK_CHUNK;
   if (process.env.VERIFY_ONLY === "true") {
+    if (currentCodeVersion !== TARGET_CODE_VERSION) {
+      throw new Error(
+        `Proxy VERSION is ${currentCodeVersion}, expected ${TARGET_CODE_VERSION}; has the upgrade executed?`,
+      );
+    }
     const candidates = await collectParticipants(pc, proxyAddress, {
       startBlock,
       endBlock: snapshotBlock,

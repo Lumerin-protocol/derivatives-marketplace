@@ -147,22 +147,28 @@ The hashprice oracle quotes the price of **1 PH/s sustained over one day**, matc
 
 The contract uses the UUPS proxy pattern (OpenZeppelin) so the implementation can be upgraded by the owner without redeploying state.
 
-#### v2.13 order aggregate migration
+#### 6.10 resting-order aggregate
 
-v2.13 replaces four independent order-cache mappings with one appended
-`OrderAggregate` per user. The old mapping slots remain in storage but are dead:
-all reads and writes use the aggregate's buy/sell quantities and values.
+6.10 appends a `RestingOrderAggregate` per user: per side, the resting quantity
+and its first two price moments (`Σ p·q`, `Σ p²·q`), the inputs of the fill-loss
+bound. The v2.13 `OrderAggregate` mapping and the older order-cache mappings
+remain in storage but are dead.
 
-`upgrade:perps` only upgrades the implementation. After upgrading from a version
-before 2.13, immediately run `pnpm rebuild:order-aggregate-cache`. This is a
-deliberately non-atomic migration: existing orders have zero aggregate cache
-until the rebuild transactions complete.
+The new aggregate starts empty, so an order placed before 6.10 cannot be
+cancelled or filled after the upgrade. `pnpm upgrade:perps` therefore cancels
+every resting order as part of the upgrade:
 
-The rebuild script discovers order owners from `OrderCreated` RPC logs over the
-preceding 180 days and confirms candidates against `getUserOrders`. Set
-`EVENT_LOOKBACK_DAYS` to change the search period. It writes in
-`ORDER_CACHE_WRITE_BATCH_SIZE` batches (default 25) and verifies all four fields
-against a canonical order scan.
+1. It halts the shared vault: directly when the deployer owns it, otherwise it
+   proposes `halt()` to the vault's Safe and waits until it executes.
+2. At a halted block it lists users from `OrderCreated` events (from
+   `START_BLOCK`, or the deployment block) and keeps those with resting orders.
+3. It upgrades with `upgradeToAndCall(impl, forceCancelOrders(firstBatch))`,
+   then sends the remaining batches (`FORCE_CANCEL_BATCH_SIZE`, default 20).
+4. It checks that the book is empty and every listed aggregate is zero.
+
+When the venue is Safe-owned, the upgrade and the batches are proposed instead;
+once they execute, run the script again with `VERIFY_ONLY=true` to check the
+venue. Resume the vault manually once every venue verifies.
 
 #### Forced settlement
 
