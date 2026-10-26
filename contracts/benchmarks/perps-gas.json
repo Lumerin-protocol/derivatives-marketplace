@@ -86,56 +86,56 @@
     },
     {
       "function": "collectedFeesBalance()",
-      "gas": "37846",
+      "gas": "37868",
       "id": "collectedFeesBalance()::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "createOrder(uint256,int256,uint8)",
-      "gas": "294792",
+      "gas": "298667",
       "id": "createOrder(uint256,int256,uint8)::full match against one maker",
       "kind": "transaction",
       "scenario": "full match against one maker"
     },
     {
       "function": "createOrder(uint256,int256,uint8)",
-      "gas": "322298",
+      "gas": "326145",
       "id": "createOrder(uint256,int256,uint8)::resting order, existing level",
       "kind": "transaction",
       "scenario": "resting order, existing level"
     },
     {
       "function": "createOrder(uint256,int256,uint8)",
-      "gas": "493482",
+      "gas": "497329",
       "id": "createOrder(uint256,int256,uint8)::resting order, new level",
       "kind": "transaction",
       "scenario": "resting order, new level"
     },
     {
       "function": "createOrder(uint256,int256,uint8)",
-      "gas": "359407",
+      "gas": "362529",
       "id": "createOrder(uint256,int256,uint8)::two-level fill",
       "kind": "transaction",
       "scenario": "two-level fill"
     },
     {
       "function": "createOrders((uint256,int256,uint8)[])",
-      "gas": "494713",
+      "gas": "498560",
       "id": "createOrders((uint256,int256,uint8)[])::batch-1",
       "kind": "transaction",
       "scenario": "batch-1"
     },
     {
       "function": "createOrders((uint256,int256,uint8)[])",
-      "gas": "2639669",
+      "gas": "2643516",
       "id": "createOrders((uint256,int256,uint8)[])::batch-10",
       "kind": "transaction",
       "scenario": "batch-10"
     },
     {
       "function": "createOrders((uint256,int256,uint8)[])",
-      "gas": "1448035",
+      "gas": "1451882",
       "id": "createOrders((uint256,int256,uint8)[])::batch-5",
       "kind": "transaction",
       "scenario": "batch-5"
@@ -156,7 +156,7 @@
     },
     {
       "function": "forceClosePositions(address[])",
-      "gas": "70332",
+      "gas": "70385",
       "id": "forceClosePositions(address[])::two users at the mark while halted",
       "kind": "transaction",
       "scenario": "two users at the mark while halted"
@@ -303,31 +303,38 @@
     },
     {
       "function": "liquidateOrder(address,bytes32)",
-      "gas": "198291",
+      "gas": "202253",
       "id": "liquidateOrder(address,bytes32)::one underwater resting order",
       "kind": "transaction",
       "scenario": "one underwater resting order"
     },
     {
       "function": "liquidateOrders(address,bytes32[])",
-      "gas": "267900",
+      "gas": "272639",
       "id": "liquidateOrders(address,bytes32[])::batch-2",
       "kind": "transaction",
       "scenario": "batch-2"
     },
     {
       "function": "liquidatePosition(address,uint256)",
-      "gas": "251206",
+      "gas": "278710",
       "id": "liquidatePosition(address,uint256)::full close, no orders",
       "kind": "transaction",
       "scenario": "full close, no orders"
     },
     {
       "function": "liquidatePosition(address,uint256)",
-      "gas": "269455",
-      "id": "liquidatePosition(address,uint256)::partial close",
+      "gas": "296981",
+      "id": "liquidatePosition(address,uint256)::partial close, first debt accrual",
       "kind": "transaction",
-      "scenario": "partial close"
+      "scenario": "partial close, first debt accrual"
+    },
+    {
+      "function": "liquidatePosition(address,uint256)",
+      "gas": "226642",
+      "id": "liquidatePosition(address,uint256)::partial close, subsequent debt accrual",
+      "kind": "transaction",
+      "scenario": "partial close, subsequent debt accrual"
     },
     {
       "function": "liquidationFeeBps()",
@@ -485,7 +492,7 @@
     },
     {
       "function": "unwindBackstop(uint256)",
-      "gas": "200672",
+      "gas": "202663",
       "id": "unwindBackstop(uint256)::buy one contract from a resting ask",
       "kind": "transaction",
       "scenario": "buy one contract from a resting ask"
@@ -499,7 +506,7 @@
     },
     {
       "function": "updateOrders(bytes32[],(bytes32,int256)[],(uint256,int256,uint8)[])",
-      "gas": "420261",
+      "gas": "424108",
       "id": "updateOrders(bytes32[],(bytes32,int256)[],(uint256,int256,uint8)[])::cancel-1-reduce-1-create-1",
       "kind": "transaction",
       "scenario": "cancel-1-reduce-1-create-1"
@@ -527,7 +534,7 @@
     },
     {
       "function": "withdrawCollectedFees()",
-      "gas": "134356",
+      "gas": "138264",
       "id": "withdrawCollectedFees()::nonzero fee balance",
       "kind": "transaction",
       "scenario": "nonzero fee balance"

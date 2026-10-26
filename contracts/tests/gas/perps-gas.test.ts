@@ -293,19 +293,19 @@ async function benchmarkOrderMaintenance() {
   }
 }
 
-/** Seller short one contract on minimum collateral; doubling the mark leaves it underwater. */
-async function underwaterSeller(withRestingOrders: boolean) {
+/** Seller short `quantity` on minimum collateral; doubling the mark leaves it underwater. */
+async function underwaterSeller(withRestingOrders: boolean, quantity = "1") {
   const data = await fresh();
   const { perps, priceOracle, vault } = data.contracts;
   const { owner, seller, buyer } = data.accounts;
-  const one = units(data, "1");
+  const positionQuantity = units(data, quantity);
   const mark = await perps.read.getMarketPrice();
   const tick = data.config.minimumPriceIncrement;
-  const minimum = data.utils.getMinimumCollateral(mark, one);
+  const minimum = data.utils.getMinimumCollateral(mark, positionQuantity);
   await perps.write.setLiquidationFeeBps([100], { account: owner.account });
   await vault.write.deposit([withRestingOrders ? minimum * 2n : minimum], { account: seller.account });
   await vault.write.deposit([minimum * 3n], { account: buyer.account });
-  await openPosition(data, one);
+  await openPosition(data, positionQuantity);
   if (withRestingOrders) {
     const rest = units(data, "0.1");
     await perps.write.createOrder([mark + 5n * tick, -rest, TimeInForce.GTC], { account: seller.account });
@@ -328,15 +328,31 @@ async function benchmarkLiquidations() {
     );
   }
   {
-    const data = await underwaterSeller(false);
-    const { perps } = data.contracts;
+    const data = await underwaterSeller(false, "2");
+    const { perps, vault } = data.contracts;
     const { seller, buyer2, pc } = data.accounts;
+    const closeQuantity = units(data, "0.5");
     await recordTransaction(
       pc,
       "liquidatePosition(address,uint256)",
-      "partial close",
-      perps.write.liquidatePosition([seller.account.address, units(data, "0.5")], { account: buyer2.account }),
+      "partial close, first debt accrual",
+      perps.write.liquidatePosition([seller.account.address, closeQuantity], { account: buyer2.account }),
     );
+    const firstDebt = await vault.read.accountDebt([seller.account.address]);
+    assert.ok(firstDebt > 0n);
+    // Restore the same amount of spendable collateral the first close began with. The
+    // account remains underwater because its debt is part of MM, while the second close
+    // measures the established-account path (existing debt and backstop position).
+    const movedMark = await perps.read.getMarketPrice();
+    const initialCollateral = data.utils.getMinimumCollateral(movedMark / 2n, units(data, "2"));
+    await vault.write.deposit([initialCollateral], { account: seller.account });
+    await recordTransaction(
+      pc,
+      "liquidatePosition(address,uint256)",
+      "partial close, subsequent debt accrual",
+      perps.write.liquidatePosition([seller.account.address, closeQuantity], { account: buyer2.account }),
+    );
+    assert.ok((await vault.read.accountDebt([seller.account.address])) > firstDebt);
   }
   {
     const data = await underwaterSeller(true);
