@@ -13,8 +13,9 @@ locals {
   # 15 minutes of Base blocks at 2 seconds. Same window as the age alarm.
   perps_subgraph_behind_blocks = 450
   perps_subgraph_eval_periods  = 3
-  perps_chain_id               = var.account_lifecycle == "prd" ? "8453" : "84532"
-  perps_alerts_topic_name      = var.account_lifecycle == "prd" ? "titanio-lmn-devops-alerts" : "titanio-dev-dev-alerts"
+  perps_chain_id = var.account_lifecycle == "prd" ? "8453" : "84532"
+  # foundation-core operational-alerting (lookup by name). Composite pages critical.
+  perps_alerts_topic_name = var.account_lifecycle == "prd" ? "titanio-${local.perps_env_suffix}-hpdx-page" : "titanio-${local.perps_env_suffix}-hpdx-alerts"
 }
 
 data "aws_sns_topic" "perps_alerts" {

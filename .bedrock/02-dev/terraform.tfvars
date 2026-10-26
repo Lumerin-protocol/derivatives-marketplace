@@ -57,22 +57,10 @@ gs_subgraphs = {
 }
 
 ########################################
-# Monitoring Configuration
-# Note: monitoring resources are controlled by perpskeeper_service.create
-# and marketmaker_service.create in 05_*_mon.tf — these vars are reserved
-# for future use when a monitoring variable block is added to 00_variables.tf
-########################################
-# monitoring = {
-#   create                    = true
-#   create_alarms             = true
-#   create_dashboards         = true
-#   create_metric_filters     = true
-#   create_synthetics_canary  = true  # Canary only in production
-#   notifications_enabled     = true  # Disabled to reduce noise in dev
-#   dev_alerts_topic_name     = "titanio-dev-dev-alerts"
-#   devops_alerts_topic_name  = "titanio-dev-dev-alerts"
-#   dashboard_period          = 300
-# }
+# Perps subgraph monitor looks up foundation-core topics by name:
+#   titanio-dev-hpdx-alerts (Slack; critical composite in non-prod)
+# Legacy perpskeeper/marketmaker services are create=false; their mon modules
+# gate on those flags. Shared monitoring{} block reserved for future use.
 
 # DEV environment
 # monitoring_schedule = {
