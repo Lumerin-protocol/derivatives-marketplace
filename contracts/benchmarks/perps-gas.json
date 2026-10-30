@@ -156,7 +156,7 @@
     },
     {
       "function": "forceClosePositions(address[])",
-      "gas": "70385",
+      "gas": "116922",
       "id": "forceClosePositions(address[])::two users at the mark while halted",
       "kind": "transaction",
       "scenario": "two users at the mark while halted"
@@ -317,21 +317,21 @@
     },
     {
       "function": "liquidatePosition(address,uint256)",
-      "gas": "278710",
+      "gas": "279053",
       "id": "liquidatePosition(address,uint256)::full close, no orders",
       "kind": "transaction",
       "scenario": "full close, no orders"
     },
     {
       "function": "liquidatePosition(address,uint256)",
-      "gas": "296981",
+      "gas": "297127",
       "id": "liquidatePosition(address,uint256)::partial close, first debt accrual",
       "kind": "transaction",
       "scenario": "partial close, first debt accrual"
     },
     {
       "function": "liquidatePosition(address,uint256)",
-      "gas": "226642",
+      "gas": "226788",
       "id": "liquidatePosition(address,uint256)::partial close, subsequent debt accrual",
       "kind": "transaction",
       "scenario": "partial close, subsequent debt accrual"

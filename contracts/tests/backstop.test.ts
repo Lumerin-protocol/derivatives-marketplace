@@ -379,7 +379,7 @@ describe("HashPowerPerpsDEX - protocol backstop", function () {
       );
     });
 
-    it("closes every user at the mark with no fee and no hand-off, skipping flat users", async function () {
+    it("closes every user at the mark with no fee through the backstop, which ends flat, skipping flat users", async function () {
       const data = await networkHelpers.loadFixture(backstopFixture);
       const { perps, vault } = data.contracts;
       const { owner, seller, buyer, buyer2, pc } = data.accounts;
@@ -402,7 +402,7 @@ describe("HashPowerPerpsDEX - protocol backstop", function () {
       assert.equal(bySeller.args.closedQuantity, -qty);
       assert.equal(bySeller.args.liquidatorFee, 0n);
       assert.equal(bySeller.args.pnl, -(data.value(mark, qty) - data.value(entry, qty)));
-      assert.equal(parseEventLogs({ logs: receipt.logs, abi: perps.abi, eventName: "BackstopAssigned" }).length, 0);
+      assert.equal(parseEventLogs({ logs: receipt.logs, abi: perps.abi, eventName: "BackstopAssigned" }).length, 2);
       assert.equal(await vault.read.insuranceFundBalance(), fundBefore, "PnL nets through the fund");
     });
   });

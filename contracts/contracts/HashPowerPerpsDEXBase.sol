@@ -904,18 +904,6 @@ abstract contract HashPowerPerpsDEXBase is
 
     // ── Internal helpers: margin / liquidation ────────────────────────────────
 
-    /// @dev The backstop inherits the liquidated quantity (same sign as the user's position) so
-    ///      positions keep summing to zero: the user's counterparties are untouched and the
-    ///      backstop now faces them. Funding is settled first so the inherited size accrues from
-    ///      now. An opposite backstop leg nets and realizes against the fund; what the backstop
-    ///      cannot pay is recorded as `BadDebt` by the vault. No margin check: the backstop is a
-    ///      ledger for protocol exposure, not a margined trader.
-    function _handOffToBackstop(address _user, int256 _signedClose, uint256 _mark) internal {
-        _settleFunding(BACKSTOP);
-        _updateUserPosition(BACKSTOP, _signedClose, _mark, false);
-        emit BackstopAssigned(_user, _signedClose, _mark);
-    }
-
     /// @dev Limit price `_bps` away from `_mark` on the taker's side, rounded to the tick toward
     ///      the mark so the result is always inside the band and always tick-aligned.
     function _bandPrice(uint256 _mark, bool _isBuy, uint16 _bps) internal pure returns (uint256) {
@@ -924,55 +912,29 @@ abstract contract HashPowerPerpsDEXBase is
         return raw / minimumPriceIncrement * minimumPriceIncrement;
     }
 
-    /// @dev Closes `_closeAbs` (< |netQuantity|) of a verified-underwater user's position at the
-    ///      mark, realizes PnL on the closed slice via {_settleReducedPosition}, and scales
-    ///      the exact entry value with `netQuantity`. Does NOT pay the fee and does NOT
-    ///      emit — the caller applies the incentive gate and emits `PositionLiquidated`.
-    ///      Returns the realized `pnl` on the closed slice and the SIGNED closed quantity (same
-    ///      sign as the position). Callers MUST have already checked the underwater / orders-clear
-    ///      / partial invariants.
-    function _doPartialLiquidatePosition(
-        address _user,
-        Position memory _position,
-        uint256 _closeAbs,
-        uint256 _currentPrice
-    )
-        internal
-        returns (int256 pnl, int256 signedClose)
-    {
-        bool isLong = _position.netQuantity > 0;
-        signedClose = M.toSigned(isLong, _closeAbs);
-        int256 entryValue = _position.netEntryValue;
-        uint256 absNet = M.abs(_position.netQuantity);
-        int256 remainingEntryValue = (entryValue * int256(absNet - _closeAbs)) / int256(absNet);
-
-        pnl = _settleReducedPosition(_user, _currentPrice, signedClose, entryValue - remainingEntryValue, false);
-
-        // signedClose has the position's sign, so subtracting it moves netQuantity toward zero.
+    /// @dev The one path that closes a user's position outside the book (liquidation and
+    ///      `forceClosePositions`): closes `_signedClose` (same sign as the position) at `_mark`,
+    ///      realizing the exact entry-value slice against the fund, and the backstop inherits it so
+    ///      positions keep summing to zero: the user's counterparties are untouched and the
+    ///      backstop now faces them. The backstop's funding is settled first so the inherited size
+    ///      accrues from now; an opposite backstop leg nets and realizes against the fund, and what
+    ///      it cannot pay is recorded as `BadDebt` by the vault. No fee and no margin check: the
+    ///      backstop is a ledger for protocol exposure, not a margined trader.
+    function _closeToBackstop(address _user, int256 _signedClose, uint256 _mark) internal returns (int256 pnl) {
         Position storage position = positions[_user];
-        position.netQuantity = _position.netQuantity - signedClose;
-        position.netEntryValue = remainingEntryValue;
-    }
-
-    /// @dev Closes the user's position and settles PnL against the insurance fund. Caller must
-    ///      have verified all predicates. Charges a liquidation fee on the closed notional
-    ///      (computed as `currentPrice * |closedQuantity| / 10^QUANTITY_DECIMALS`).
-    ///      Does NOT emit — caller runs the over-liquidation guard, then emits/notifies.
-    function _doLiquidatePosition(address _user, uint256 _currentPrice)
-        internal
-        returns (int256 pnl, int256 closedQuantity, uint256 liqFee)
-    {
-        Position memory position = positions[_user];
+        int256 netQuantity = position.netQuantity;
         int256 entryValue = position.netEntryValue;
-        closedQuantity = position.netQuantity;
-        pnl = _signedValue(_currentPrice, closedQuantity) - entryValue;
+        int256 remainingEntryValue = (entryValue * (netQuantity - _signedClose)) / netQuantity;
 
-        _transferPnl(_insuranceFundAccount(), _user, pnl);
+        pnl = _settleReducedPosition(_user, _mark, _signedClose, entryValue - remainingEntryValue, false);
 
-        uint256 closedNotional = _calculateValue(_currentPrice, M.abs(closedQuantity));
-        liqFee = _chargeLiquidationFee(_user, closedNotional);
+        // _signedClose has the position's sign, so subtracting it moves netQuantity toward zero.
+        position.netQuantity = netQuantity - _signedClose;
+        position.netEntryValue = remainingEntryValue;
 
-        delete positions[_user];
+        _settleFunding(BACKSTOP);
+        _updateUserPosition(BACKSTOP, _signedClose, _mark, false);
+        emit BackstopAssigned(_user, _signedClose, _mark);
     }
 
     /// @notice Settle a reduced portion of a position (when offsetting)

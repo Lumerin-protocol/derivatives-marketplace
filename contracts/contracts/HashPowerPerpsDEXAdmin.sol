@@ -164,11 +164,13 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
 
     // ── Escape hatch ──────────────────────────────────────────────────────────
 
-    /// @notice Close the given users' positions at the current mark, realizing PnL against the
-    ///         insurance fund. No fee, no backstop hand-off: the fund's implicit position closes
-    ///         with the users'. Emits `PositionLiquidated` so indexers need nothing new.
+    /// @notice Close the given users' positions at the current mark with no fee, handing each to
+    ///         the backstop like a liquidation, so positions keep summing to zero: closing a
+    ///         one-sided set moves its net onto the backstop, closing every user leaves it flat.
+    ///         Emits `BackstopAssigned` and `PositionLiquidated` so indexers need nothing new.
     /// @dev Only while the vault is halted, so no fill can land between users. Funding is settled
-    ///      per user first. Flat users are skipped. Resting orders are left alone; they carry no
+    ///      per user first. Flat users are skipped. Listing the backstop itself only re-marks its
+    ///      position (realized against the fund, size unchanged). Resting orders are left alone; they carry no
     ///      exposure until they fill, and {forceCancelOrders} removes them.
     function forceClosePositions(address[] calldata _users) external onlyOwner {
         if (!vault.halted()) revert NotHalted();
@@ -177,12 +179,10 @@ abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
         for (uint256 i = 0; i < _users.length; i++) {
             address user = _users[i];
             _settleFunding(user);
-            Position memory position = positions[user];
-            if (position.netQuantity == 0) continue;
-            int256 pnl = _signedValue(mark, position.netQuantity) - position.netEntryValue;
-            _transferPnl(_insuranceFundAccount(), user, pnl);
-            delete positions[user];
-            emit PositionLiquidated(user, _msgSender(), position.netQuantity, pnl, 0);
+            int256 netQty = positions[user].netQuantity;
+            if (netQty == 0) continue;
+            int256 pnl = _closeToBackstop(user, netQty, mark);
+            emit PositionLiquidated(user, _msgSender(), netQty, pnl, 0);
         }
     }
 

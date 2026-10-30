@@ -26,7 +26,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @dev Lives here rather than in {HashPowerPerpsDEXBase} so that a diff to
     ///      this file and the version it ships under stay in the same place,
     ///      mirroring {Futures}.
-    string public constant VERSION = "6.14.1";
+    string public constant VERSION = "6.14.2";
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ICollateralVault _vault) HashPowerPerpsDEXBase(_vault) { }
@@ -254,29 +254,16 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         _settleFunding(_user);
         if (!_underwater(_user)) revert NotLiquidatable();
 
-        uint256 absNet = M.abs(position.netQuantity);
-        uint256 closeAbs = _closeQty < absNet ? _closeQty : absNet;
+        uint256 closeAbs = M.min(_closeQty, M.abs(position.netQuantity));
         uint256 currentPrice = getMarketPrice();
 
-        // Full close still runs the portfolio OverLiquidation guard: residual risk can remain
-        // on other venues (Futures / options) sharing this PME. Guard before emit/notify so
-        // an oversize close does not pay log/hook gas on the revert path.
-        if (closeAbs == absNet) {
-            (int256 pnl, int256 closedQuantity, uint256 liqFee) = _doLiquidatePosition(_user, currentPrice);
-            _handOffToBackstop(_user, closedQuantity, currentPrice);
-            _revertIfOverLiquidated(_user);
-            emit PositionLiquidated(_user, _msgSender(), closedQuantity, pnl, liqFee);
-            _notifyLiquidation(_msgSender(), liqFee);
-            return;
-        }
+        int256 signedClose = M.toSigned(position.netQuantity > 0, closeAbs);
+        int256 pnl = _closeToBackstop(_user, signedClose, currentPrice);
+        uint256 liqFee = _chargeLiquidationFee(_user, _calculateValue(currentPrice, closeAbs));
 
-        (int256 pnl, int256 signedClose) = _doPartialLiquidatePosition(_user, position, closeAbs, currentPrice);
-        _handOffToBackstop(_user, signedClose, currentPrice);
-
-        // Charge liquidation fee on the closed notional
-        uint256 closedNotional = _calculateValue(currentPrice, closeAbs);
-        uint256 liqFee = _chargeLiquidationFee(_user, closedNotional);
-
+        // Full closes run the portfolio OverLiquidation guard too: residual risk can remain on
+        // other venues (Futures / options) sharing this PME. Guard before emit/notify so an
+        // oversize close does not pay log/hook gas on the revert path.
         _revertIfOverLiquidated(_user);
 
         emit PositionLiquidated(_user, _msgSender(), signedClose, pnl, liqFee);
