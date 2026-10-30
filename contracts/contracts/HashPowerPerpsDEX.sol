@@ -26,7 +26,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @dev Lives here rather than in {HashPowerPerpsDEXBase} so that a diff to
     ///      this file and the version it ships under stay in the same place,
     ///      mirroring {Futures}.
-    string public constant VERSION = "6.14.0";
+    string public constant VERSION = "6.14.1";
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ICollateralVault _vault) HashPowerPerpsDEXBase(_vault) { }
@@ -286,11 +286,12 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @notice Reduce the protocol backstop's position by up to `_qty` contracts as a taker, inside
     ///         `mark ± backstopUnwindBandBps`, and pay the caller `backstopUnwindFeeBps` of the
     ///         filled notional at the mark from the fee pot.
-    /// @dev Permissionless and allowed while the vault is halted: unwinding only shrinks protocol
-    ///      exposure. Reduce-only by construction. Reverts `TimeInForceNotFilled` when nothing
+    /// @dev Permissionless. Reverts `TradingHalted` while the vault is halted, since a fill would
+    ///      open positions users cannot reduce until it clears. Reduce-only by construction. Reverts `TimeInForceNotFilled` when nothing
     ///      inside the band fills, so callers can simulate before sending. The fee is capped at
     ///      the fee pot balance. Funding on the backstop is settled before the fill like any taker.
     function unwindBackstop(uint256 _qty) external {
+        _requireTradingOpen();
         if (_qty == 0) revert InvalidQty();
         int256 net = positions[BACKSTOP].netQuantity;
         if (net == 0) revert PositionNotExists();
