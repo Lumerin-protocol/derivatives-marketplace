@@ -172,13 +172,12 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition", function () {
         remaining.reduce((total, order) => total - order.quantity, 0n),
       );
       assert.equal(
-        aggregateAfter.sellValue,
-        remaining.reduce(
-          (total, order) =>
-            total +
-            (order.price * -order.quantity) / 10n ** BigInt(data.config.quantityDecimals),
-          0n,
-        ),
+        aggregateAfter.sellPQ,
+        remaining.reduce((total, order) => total + order.price * -order.quantity, 0n),
+      );
+      assert.equal(
+        aggregateAfter.sellP2Q,
+        remaining.reduce((total, order) => total + order.price * order.price * -order.quantity, 0n),
       );
 
       const events = parseEventLogs({ abi: perps.abi, logs: receipt.logs });
@@ -251,8 +250,10 @@ describe("HashPowerPerpsDEX - liquidateOrder/liquidatePosition", function () {
       assert.deepEqual(await perps.read.getOrderAggregate([seller.account.address]), {
         buyQty: 0n,
         sellQty: 0n,
-        buyValue: 0n,
-        sellValue: 0n,
+        buyPQ: 0n,
+        buyP2Q: 0n,
+        sellPQ: 0n,
+        sellP2Q: 0n,
       });
       assert.equal(liqBalanceAfter - liqBalanceBefore, 0n);
     });

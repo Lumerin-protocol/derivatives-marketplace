@@ -70,48 +70,6 @@ describe("HashPowerPerpsDEX - dependency validation", function () {
       );
     });
 
-    it("initializeV2 rejects a supplied vault that differs from the immutable", async function () {
-      const { contracts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
-      const { perps, pme, usdcMock } = contracts;
-      const strayVault = await deployVault(usdcMock.address);
-
-      await viem.assertions.revertWithCustomError(
-        perps.write.initializeV2([strayVault.address, pme.address]),
-        perps,
-        "VaultMismatch",
-      );
-    });
-
-    it("initializeV2 permits zero PME for atomic upgrades that wire it later", async function () {
-      const { contracts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
-      const { perps, vault } = contracts;
-
-      await perps.write.initializeV2([vault.address, zeroAddress]);
-
-      assert.equal(await perps.read.portfolioMargin(), zeroAddress);
-    });
-
-    it("initializeV2 validates a nonzero PME through the setter path", async function () {
-      const { contracts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
-      const { perps, vault } = contracts;
-      const missingImShock = await deployCapabilityMock(vault.address, 3);
-
-      await viem.assertions.revertWithCustomError(
-        perps.write.initializeV2([vault.address, missingImShock.address]),
-        perps,
-        "InvalidDependency",
-      );
-    });
-
-    it("initializeV2 adopts a valid nonzero PME", async function () {
-      const { contracts } = await networkHelpers.loadFixture(deployPerpsWithCollateralFixture);
-      const { perps, vault } = contracts;
-      const engine = await deployEngine(vault.address);
-
-      await perps.write.initializeV2([vault.address, engine.address]);
-
-      assert.equal(await perps.read.portfolioMargin(), getAddress(engine.address));
-    });
   });
 
   describe("setPortfolioMargin", function () {

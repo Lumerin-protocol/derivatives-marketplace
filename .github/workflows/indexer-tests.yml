@@ -71,7 +71,8 @@ jobs:
     name: Indexer Tests
     needs: config-scope
     if: needs.config-scope.result == 'success' && needs.config-scope.outputs.run == 'true'
-    runs-on: ubuntu-latest
+    # matchstick ships no binary for Ubuntu 26, which ubuntu-latest became in 2026-10.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
 
     steps:

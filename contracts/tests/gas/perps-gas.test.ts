@@ -99,6 +99,8 @@ async function benchmarkViews() {
     ["FUNDING_DECIMALS()", "FUNDING_DECIMALS", []],
     ["MAX_ORACLE_STALENESS()", "MAX_ORACLE_STALENESS", []],
     ["MAX_ORDERS_PER_PARTICIPANT()", "MAX_ORDERS_PER_PARTICIPANT", []],
+    ["MAX_ORDER_QUANTITY()", "MAX_ORDER_QUANTITY", []],
+    ["MAX_PRICE()", "MAX_PRICE", []],
     ["MAX_PRICE_LEVELS_PER_SIDE()", "MAX_PRICE_LEVELS_PER_SIDE", []],
     ["QUANTITY_DECIMALS()", "QUANTITY_DECIMALS", []],
     ["UPGRADE_INTERFACE_VERSION()", "UPGRADE_INTERFACE_VERSION", []],
@@ -291,19 +293,19 @@ async function benchmarkOrderMaintenance() {
   }
 }
 
-/** Seller short one contract on minimum collateral; doubling the mark leaves it underwater. */
-async function underwaterSeller(withRestingOrders: boolean) {
+/** Seller short `quantity` on minimum collateral; doubling the mark leaves it underwater. */
+async function underwaterSeller(withRestingOrders: boolean, quantity = "1") {
   const data = await fresh();
   const { perps, priceOracle, vault } = data.contracts;
   const { owner, seller, buyer } = data.accounts;
-  const one = units(data, "1");
+  const positionQuantity = units(data, quantity);
   const mark = await perps.read.getMarketPrice();
   const tick = data.config.minimumPriceIncrement;
-  const minimum = data.utils.getMinimumCollateral(mark, one);
+  const minimum = data.utils.getMinimumCollateral(mark, positionQuantity);
   await perps.write.setLiquidationFeeBps([100], { account: owner.account });
   await vault.write.deposit([withRestingOrders ? minimum * 2n : minimum], { account: seller.account });
   await vault.write.deposit([minimum * 3n], { account: buyer.account });
-  await openPosition(data, one);
+  await openPosition(data, positionQuantity);
   if (withRestingOrders) {
     const rest = units(data, "0.1");
     await perps.write.createOrder([mark + 5n * tick, -rest, TimeInForce.GTC], { account: seller.account });
@@ -326,15 +328,31 @@ async function benchmarkLiquidations() {
     );
   }
   {
-    const data = await underwaterSeller(false);
-    const { perps } = data.contracts;
+    const data = await underwaterSeller(false, "2");
+    const { perps, vault } = data.contracts;
     const { seller, buyer2, pc } = data.accounts;
+    const closeQuantity = units(data, "0.5");
     await recordTransaction(
       pc,
       "liquidatePosition(address,uint256)",
-      "partial close",
-      perps.write.liquidatePosition([seller.account.address, units(data, "0.5")], { account: buyer2.account }),
+      "partial close, first debt accrual",
+      perps.write.liquidatePosition([seller.account.address, closeQuantity], { account: buyer2.account }),
     );
+    const firstDebt = await vault.read.accountDebt([seller.account.address]);
+    assert.ok(firstDebt > 0n);
+    // Restore the same amount of spendable collateral the first close began with. The
+    // account remains underwater because its debt is part of MM, while the second close
+    // measures the established-account path (existing debt and backstop position).
+    const movedMark = await perps.read.getMarketPrice();
+    const initialCollateral = data.utils.getMinimumCollateral(movedMark / 2n, units(data, "2"));
+    await vault.write.deposit([initialCollateral], { account: seller.account });
+    await recordTransaction(
+      pc,
+      "liquidatePosition(address,uint256)",
+      "partial close, subsequent debt accrual",
+      perps.write.liquidatePosition([seller.account.address, closeQuantity], { account: buyer2.account }),
+    );
+    assert.ok((await vault.read.accountDebt([seller.account.address])) > firstDebt);
   }
   {
     const data = await underwaterSeller(true);
@@ -471,21 +489,11 @@ async function benchmarkAdminAndLifecycle() {
     const users = [data.accounts.seller.account.address, data.accounts.buyer.account.address];
     await recordTransaction(
       data.accounts.pc,
-      "rebuildOrderAggregateCache(address[])",
+      "forceCancelOrders(address[])",
       "two users with one order each",
-      perps.write.rebuildOrderAggregateCache([users], owner(data)),
-    );
-    await recordTransaction(
-      data.accounts.pc,
-      "resetState(address[])",
-      "two participants with order-and-position state",
-      perps.write.resetState([users], owner(data)),
+      perps.write.forceCancelOrders([users], owner(data)),
     );
   }
-  await admin("initializeV2(address,address)", "fresh proxy", (d) =>
-    d.contracts.perps.write.initializeV2([d.contracts.vault.address, d.contracts.pme.address], owner(d)),
-  );
-  await admin("initializeV3()", "fresh proxy", (d) => d.contracts.perps.write.initializeV3(owner(d)));
   {
     const data = await fresh();
     const implementation = await viem.deployContract("HashPowerPerpsDEX", [data.contracts.vault.address]);
@@ -514,7 +522,7 @@ describe("Perps gas benchmark", () => {
 
     const snapshot = gas.snapshot();
     const coverage = assertAbiFunctionCoverage(HashPowerPerpsDEXAbi, snapshot, exclusions);
-    assert.equal(coverage.covered.length, 65);
+    assert.equal(coverage.covered.length, 64);
     assert.deepEqual(coverage.excluded, ["initialize(address,address)", "proxiableUUID()"]);
 
     await mkdir(fileURLToPath(new URL("../../benchmarks", import.meta.url)), { recursive: true });

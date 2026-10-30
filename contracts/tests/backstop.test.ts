@@ -278,7 +278,7 @@ describe("HashPowerPerpsDEX - protocol backstop", function () {
       assert.equal(await vault.read.balanceOf([data.backstop]), 0n);
     });
 
-    it("stays open while the vault is halted", async function () {
+    it("reverts TradingHalted while the vault is halted", async function () {
       const data = await networkHelpers.loadFixture(backstopFixture);
       const { perps, vault } = data.contracts;
       const { owner, buyer, buyer2 } = data.accounts;
@@ -289,8 +289,12 @@ describe("HashPowerPerpsDEX - protocol backstop", function () {
       await perps.write.createOrder([mark, -one, TimeInForce.GTC], { account: buyer.account });
       await vault.write.halt({ account: owner.account });
 
-      await perps.write.unwindBackstop([one], { account: buyer2.account });
-      assert.equal((await perps.read.getUserPosition([data.backstop])).netQuantity, -(qty - one));
+      await viem.assertions.revertWithCustomError(
+        perps.write.unwindBackstop([one], { account: buyer2.account }),
+        perps,
+        "TradingHalted",
+      );
+      assert.equal((await perps.read.getUserPosition([data.backstop])).netQuantity, -qty);
     });
 
     it("rejects zero quantity and a flat backstop", async function () {
@@ -375,7 +379,7 @@ describe("HashPowerPerpsDEX - protocol backstop", function () {
       );
     });
 
-    it("closes every user at the mark with no fee and no hand-off, skipping flat users", async function () {
+    it("closes every user at the mark with no fee through the backstop, which ends flat, skipping flat users", async function () {
       const data = await networkHelpers.loadFixture(backstopFixture);
       const { perps, vault } = data.contracts;
       const { owner, seller, buyer, buyer2, pc } = data.accounts;
@@ -398,7 +402,7 @@ describe("HashPowerPerpsDEX - protocol backstop", function () {
       assert.equal(bySeller.args.closedQuantity, -qty);
       assert.equal(bySeller.args.liquidatorFee, 0n);
       assert.equal(bySeller.args.pnl, -(data.value(mark, qty) - data.value(entry, qty)));
-      assert.equal(parseEventLogs({ logs: receipt.logs, abi: perps.abi, eventName: "BackstopAssigned" }).length, 0);
+      assert.equal(parseEventLogs({ logs: receipt.logs, abi: perps.abi, eventName: "BackstopAssigned" }).length, 2);
       assert.equal(await vault.read.insuranceFundBalance(), fundBefore, "PnL nets through the fund");
     });
   });
