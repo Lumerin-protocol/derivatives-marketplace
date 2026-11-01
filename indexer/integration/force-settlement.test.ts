@@ -174,7 +174,22 @@ describe("forced settlement: the indexer follows forceCancelOrders and forceClos
     const snap = await matchstick.indexSnapshot([]);
     await assertMatchesChain(snap, fixture);
 
-    const trades = snap.saved("Trade").filter((tr) => String(tr.transactionHash).toLowerCase() === hash);
+    const txTrades = snap.saved("Trade").filter((tr) => String(tr.transactionHash).toLowerCase() === hash);
+    const assigned = parseEventLogs({ abi: perps.abi, logs: receipt.logs, eventName: "BackstopAssigned" });
+    assert.equal(assigned.length, users.length, "every forced close hands its quantity to the backstop");
+    const backstop = await perps.read.BACKSTOP();
+    const backstopNet = (await perps.read.getUserPosition([backstop])).netQuantity;
+    assert.equal(backstopNet, 0n, "positions are conserved: the users net to zero, so the backstop ends flat");
+    const assignments = txTrades.filter((tr) => tr.isBackstopAssignment === true);
+    assert.equal(assignments.length, 1, "one backstop trade per (tx, session); the backstop opens and closes one");
+    const [assignment] = assignments;
+    assert.equal(String(assignment.user).toLowerCase(), id(backstop));
+    const handedOver = assigned.reduce((sum, log) => sum + log.args.quantity, 0n);
+    assert.equal(big(assignment.tradeQuantity), handedOver, "the backstop trade carries every handed-over quantity");
+    assert.equal(big(assignment.netQuantityAfter), backstopNet);
+    assert.equal(big(snap.get("User", id(backstop), "netQuantity")), backstopNet, "indexed backstop matches the chain");
+    assert.equal(snap.get("PositionSession", String(assignment.positionSession), "status"), "CLOSE");
+    const trades = txTrades.filter((tr) => tr.isBackstopAssignment !== true);
     assert.equal(trades.length, users.length);
     for (const trade of trades) {
       assert.equal(trade.isLiquidation, true, "a forced close is indexed as a liquidation");
