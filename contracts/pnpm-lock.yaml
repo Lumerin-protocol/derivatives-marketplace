@@ -27,8 +27,8 @@ importers:
         specifier: ^3.9.1
         version: 3.9.1(@nomicfoundation/hardhat-ethers@3.1.3(ethers@6.17.0)(hardhat@3.9.1)(supports-color@7.2.0))(@nomicfoundation/hardhat-verify@3.0.17(hardhat@3.9.1))(ethers@6.17.0)(hardhat@3.9.1)(supports-color@7.2.0)
       collateral-margin:
-        specifier: github:Lumerin-protocol/collateral-margin#ea1ec4a1fe82437ab98e3f4371a1c33cd0cc8273
-        version: https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/ea1ec4a1fe82437ab98e3f4371a1c33cd0cc8273
+        specifier: github:Lumerin-protocol/collateral-margin#34e32258cc40753c35d25915399d2e00d558b920
+        version: https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/34e32258cc40753c35d25915399d2e00d558b920
       hashprice-oracle:
         specifier: github:Lumerin-protocol/hashprice-oracle.git#main
         version: https://codeload.github.com/Lumerin-protocol/hashprice-oracle/tar.gz/b65adbfeb7e6c4417747bfd3d94b6e89e162ed50
@@ -1463,8 +1463,8 @@ packages:
     resolution: {integrity: sha512-JQHZ2QMW6l3aH/j6xCqQThY/9OH4D/9ls34cgkUBiEeocRTU04tHfKPBsUK1PqZCUQM7GiA0IIXJSuXHI64Kbg==}
     engines: {node: '>=0.8'}
 
-  collateral-margin@https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/ea1ec4a1fe82437ab98e3f4371a1c33cd0cc8273:
-    resolution: {gitHosted: true, integrity: sha512-6enzrtrE57YTHWpJE8mgwA61r20nKY1kIBNe2d+K86ZOr4k4HjCiw6q+hKrJOFT/ZBcrISwcVVQw7nVopP84Zw==, tarball: https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/ea1ec4a1fe82437ab98e3f4371a1c33cd0cc8273}
+  collateral-margin@https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/34e32258cc40753c35d25915399d2e00d558b920:
+    resolution: {gitHosted: true, integrity: sha512-7X5GzMxDrpStXXPHPYZPrB1/+1aa/EQUEJDomjCNY+xaMiz/RPIskKI2zsSTW+dcrf5Kux2gPzuiby+CnqtJVw==, tarball: https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/34e32258cc40753c35d25915399d2e00d558b920}
     version: 1.0.0
 
   color-convert@2.0.1:
@@ -4638,7 +4638,7 @@ snapshots:
   clone@1.0.4:
     optional: true
 
-  collateral-margin@https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/ea1ec4a1fe82437ab98e3f4371a1c33cd0cc8273: {}
+  collateral-margin@https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/34e32258cc40753c35d25915399d2e00d558b920: {}
 
   color-convert@2.0.1:
     dependencies:

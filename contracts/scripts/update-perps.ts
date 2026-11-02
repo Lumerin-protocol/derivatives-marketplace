@@ -6,7 +6,6 @@ import {
   encodeFunctionData,
   getAddress,
   isAddress,
-  parseAbi,
   zeroAddress,
 } from "viem";
 import { estimateContractGas, simulateContract } from "viem/actions";
@@ -28,6 +27,7 @@ import {
   collectParticipants,
   fetchDeploymentBlockFromEtherscan,
 } from "./lib/participants.ts";
+import { requireUpgradeDependencies } from "./lib/dependencies.ts";
 import { ensureVaultHalted } from "./lib/halt.ts";
 import {
   assertNoRestingOrders,
@@ -41,14 +41,12 @@ import {
 // upgrade: with the shared vault halted, the upgrade call is `forceCancelOrders` for every user
 // with resting orders (further batches follow while still halted). Resume the vault only once
 // every venue is upgraded and verified (`VERIFY_ONLY=true` checks a venue without upgrading).
+// The vault and the engine are upgraded before the venues; `requireUpgradeDependencies`
+// enforces it.
 const DEFAULT_FORCE_CANCEL_BATCH_SIZE = 20;
 const TARGET_CODE_VERSION = "6.14.3";
 const UPGRADE_CONFIRMATIONS = 5;
 const DEFAULT_SAFE_GAS_OVERHEAD = 150_000n;
-// 6.8.0 calls the engine's `reduceLimits` / `meetsTradeMargin` on every order. Against an
-// older engine every order reverts, so the engine has to be upgraded first.
-const MIN_ENGINE_VERSION = "2.2.0";
-const VERSION_ABI = parseAbi(["function VERSION() view returns (string)"]);
 
 // ERC-7201 namespaced storage slot for OpenZeppelin's `Initializable`.
 const INITIALIZABLE_STORAGE_SLOT: Hex =
@@ -80,37 +78,6 @@ async function readInitializedVersion(
   });
   if (!raw || raw === "0x" || raw === "0x0") return 0n;
   return BigInt(raw) & 0xffffffffffffffffn;
-}
-
-/** Dotted-version comparison; an unreadable version never passes. */
-function versionAtLeast(version: string, min: string): boolean {
-  const have = version.split(".").map(Number);
-  const want = min.split(".").map(Number);
-  for (let i = 0; i < want.length; i++) {
-    const part = have[i] ?? 0;
-    if (part !== want[i]) return part > want[i];
-  }
-  return true;
-}
-
-async function requireEngineVersion(
-  pc: PublicClient,
-  engine: Address,
-  blockNumber?: bigint,
-): Promise<void> {
-  const version = await pc
-    .readContract({
-      address: engine,
-      abi: VERSION_ABI,
-      functionName: "VERSION",
-      blockNumber,
-    })
-    .catch(() => "unknown");
-  if (!versionAtLeast(version, MIN_ENGINE_VERSION)) {
-    throw new Error(
-      `PortfolioMarginEngine ${engine} is at ${version}; upgrade it to ${MIN_ENGINE_VERSION} or later before this venue`,
-    );
-  }
 }
 
 async function main() {
@@ -146,9 +113,12 @@ async function main() {
       .portfolioMargin({ blockNumber: snapshotBlock })
       .catch(() => zeroAddress),
   );
-  if (wiredEngine !== zeroAddress) {
-    await requireEngineVersion(pc, wiredEngine, snapshotBlock);
-  }
+  await requireUpgradeDependencies(pc, {
+    venue: proxyAddress,
+    vault: vaultAddress,
+    engines: wiredEngine === zeroAddress ? [] : [wiredEngine],
+    blockNumber: snapshotBlock,
+  });
 
   if (configuredSafe && configuredSafe !== currentOwner) {
     throw new Error(

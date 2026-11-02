@@ -158,13 +158,16 @@ The new aggregate starts empty, so an order placed before 6.10 cannot be
 cancelled or filled after the upgrade. `pnpm upgrade:perps` therefore cancels
 every resting order as part of the upgrade:
 
-1. It halts the shared vault: directly when the deployer owns it, otherwise it
+1. It stops unless `VAULT_ADDRESS` is the venue's current `vault()`, the vault is at
+   1.4.3 or later and the engine at 2.6.0 or later. Upgrade them in that order first;
+   the keeper and the UI follow the venues.
+2. It halts the shared vault: directly when the deployer owns it, otherwise it
    proposes `halt()` to the vault's Safe and waits until it executes.
-2. At a halted block it lists users from `OrderCreated` events (from
+3. At a halted block it lists users from `OrderCreated` events (from
    `START_BLOCK`, or the deployment block) and keeps those with resting orders.
-3. It upgrades with `upgradeToAndCall(impl, forceCancelOrders(firstBatch))`,
+4. It upgrades with `upgradeToAndCall(impl, forceCancelOrders(firstBatch))`,
    then sends the remaining batches (`FORCE_CANCEL_BATCH_SIZE`, default 20).
-4. It checks that the book is empty and every listed aggregate is zero.
+5. It checks that the book is empty and every listed aggregate is zero.
 
 When the venue is Safe-owned, the upgrade and the batches are proposed instead;
 once they execute, run the script again with `VERIFY_ONLY=true` to check the
