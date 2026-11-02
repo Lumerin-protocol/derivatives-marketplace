@@ -32,7 +32,7 @@ abstract contract HashPowerPerpsDEXBase is
     using StructuredLinkedList for StructuredLinkedList.List;
 
     // Constants
-    uint256 public constant MAX_ORACLE_STALENESS = 3600; // 1 hour
+    uint256 public constant MAX_ORACLE_STALENESS = 7200; // 2 hours: hashprice updates only on a Bitcoin block
     uint8 public constant FUNDING_DECIMALS = 18;
     uint8 public constant MAX_ORDERS_PER_PARTICIPANT = 100;
     uint8 public constant QUANTITY_DECIMALS = 6;

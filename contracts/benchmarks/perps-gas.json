@@ -317,21 +317,21 @@
     },
     {
       "function": "liquidatePosition(address,uint256)",
-      "gas": "279053",
+      "gas": "279075",
       "id": "liquidatePosition(address,uint256)::full close, no orders",
       "kind": "transaction",
       "scenario": "full close, no orders"
     },
     {
       "function": "liquidatePosition(address,uint256)",
-      "gas": "297127",
+      "gas": "297149",
       "id": "liquidatePosition(address,uint256)::partial close, first debt accrual",
       "kind": "transaction",
       "scenario": "partial close, first debt accrual"
     },
     {
       "function": "liquidatePosition(address,uint256)",
-      "gas": "226788",
+      "gas": "226810",
       "id": "liquidatePosition(address,uint256)::partial close, subsequent debt accrual",
       "kind": "transaction",
       "scenario": "partial close, subsequent debt accrual"
@@ -457,7 +457,7 @@
     },
     {
       "function": "setPortfolioMargin(address)",
-      "gas": "49862",
+      "gas": "49928",
       "id": "setPortfolioMargin(address)::revalidate-current-engine",
       "kind": "transaction",
       "scenario": "revalidate-current-engine"

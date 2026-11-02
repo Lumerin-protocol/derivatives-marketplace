@@ -201,7 +201,8 @@ describe("HashPowerPerpsDEX - dependency validation", function () {
       const now = BigInt(await networkHelpers.time.latest());
 
       const staleFeed = await viem.deployContract("PriceOracleMock", [LIVE_PRICE, ORACLE_DECIMALS]);
-      await staleFeed.write.setRoundData([LIVE_PRICE, 1n, now - 3601n, 1n]);
+      const staleAt = now - (await perps.read.MAX_ORACLE_STALENESS()) - 1n;
+      await staleFeed.write.setRoundData([LIVE_PRICE, 1n, staleAt, 1n]);
       await viem.assertions.revertWithCustomError(
         perps.write.setOracle([staleFeed.address]),
         perps,

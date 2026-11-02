@@ -37,16 +37,26 @@ describe("HashPowerPerpsDEX - getMarketPrice", function () {
 
     await priceOracle.write.freezeTimestamp();
 
-    await networkHelpers.time.increase(3601);
+    await networkHelpers.time.increase(Number(await perps.read.MAX_ORACLE_STALENESS()) + 1);
 
     await viem.assertions.revertWithCustomError(perps.read.getMarketPrice(), perps, "OracleStale");
+  });
+
+  it("N18: serves the mark from a price 72 minutes old, like the 2026-11-02 gap on prd", async function () {
+    const { contracts } = await networkHelpers.loadFixture(deployPerpsFixture);
+    const { perps, priceOracle } = contracts;
+
+    await priceOracle.write.freezeTimestamp();
+    await networkHelpers.time.increase(72 * 60);
+
+    await assert.doesNotReject(perps.read.getMarketPrice());
   });
 
   it("accepts the exact staleness boundary and exposes it", async function () {
     const { contracts } = await networkHelpers.loadFixture(deployPerpsFixture);
     const { perps, priceOracle } = contracts;
     const maxStaleness = await perps.read.MAX_ORACLE_STALENESS();
-    assert.equal(maxStaleness, 3600n);
+    assert.equal(maxStaleness, 7200n);
 
     await priceOracle.write.freezeTimestamp();
     await networkHelpers.time.increase(Number(maxStaleness));
