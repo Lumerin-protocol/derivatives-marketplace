@@ -256,13 +256,20 @@ async function feedFixture(setup: FeedSetup) {
   const glideBlocks = await glideUSD.read.GLIDE_BLOCKS();
   const glideStart = halving - glideBlocks - (await glideUSD.read.GLIDE_END_BLOCKS());
   const relay = (height: bigint) => btc.write.setBlock([Number(height), HASHPRICE_FEES, HASHPRICE_DIFFICULTY]);
-  await relay(glideStart - 10n);
+  // 30 days before the glide: far enough that the feed promises a fixed factor.
+  const start = glideStart - 30n * 144n;
+  await relay(start);
   await pme.write.setOracle([hashpriceUSD.address], { account: owner.account });
   await perps.write.setOracle([setup === "index feed" ? hashpriceUSD.address : glideUSD.address], {
     account: owner.account,
   });
+  // Into the glide at the target block time, as the relay would deliver it.
   const enterGlide = async () => {
-    if (setup === "glide feed, during the glide") await relay(glideStart + glideBlocks / 2n);
+    if (setup !== "glide feed, during the glide") return;
+    const height = glideStart + glideBlocks / 2n;
+    await networkHelpers.time.increase(Number((height - start) * 600n));
+    await relay(height);
+    await btcUsd.write.setPrice([BTC_USD, 8]);
   };
   return { ...data, btcUsd, enterGlide };
 }

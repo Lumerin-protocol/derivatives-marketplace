@@ -79,7 +79,7 @@
     },
     {
       "function": "cancelOrder(bytes32)",
-      "gas": "108771",
+      "gas": "108787",
       "id": "cancelOrder(bytes32)::resting order",
       "kind": "transaction",
       "scenario": "resting order"
@@ -93,91 +93,91 @@
     },
     {
       "function": "createOrder(uint256,int256,uint8)",
-      "gas": "306197",
+      "gas": "306449",
       "id": "createOrder(uint256,int256,uint8)::full match against one maker",
       "kind": "transaction",
       "scenario": "full match against one maker"
     },
     {
       "function": "createOrder(uint256,int256,uint8)",
-      "gas": "264124",
+      "gas": "257343",
       "id": "createOrder(uint256,int256,uint8)::glide feed, before the glide: full match, both sides holding positions",
       "kind": "transaction",
       "scenario": "glide feed, before the glide: full match, both sides holding positions"
     },
     {
       "function": "createOrder(uint256,int256,uint8)",
-      "gas": "530884",
+      "gas": "522409",
       "id": "createOrder(uint256,int256,uint8)::glide feed, before the glide: resting order, new level",
       "kind": "transaction",
       "scenario": "glide feed, before the glide: resting order, new level"
     },
     {
       "function": "createOrder(uint256,int256,uint8)",
-      "gas": "268472",
+      "gas": "270587",
       "id": "createOrder(uint256,int256,uint8)::glide feed, during the glide: full match, both sides holding positions",
       "kind": "transaction",
       "scenario": "glide feed, during the glide: full match, both sides holding positions"
     },
     {
       "function": "createOrder(uint256,int256,uint8)",
-      "gas": "563452",
+      "gas": "566096",
       "id": "createOrder(uint256,int256,uint8)::glide feed, during the glide: resting order, new level",
       "kind": "transaction",
       "scenario": "glide feed, during the glide: resting order, new level"
     },
     {
       "function": "createOrder(uint256,int256,uint8)",
-      "gas": "249796",
+      "gas": "249997",
       "id": "createOrder(uint256,int256,uint8)::index feed: full match, both sides holding positions",
       "kind": "transaction",
       "scenario": "index feed: full match, both sides holding positions"
     },
     {
       "function": "createOrder(uint256,int256,uint8)",
-      "gas": "512975",
+      "gas": "513227",
       "id": "createOrder(uint256,int256,uint8)::index feed: resting order, new level",
       "kind": "transaction",
       "scenario": "index feed: resting order, new level"
     },
     {
       "function": "createOrder(uint256,int256,uint8)",
-      "gas": "331096",
+      "gas": "331116",
       "id": "createOrder(uint256,int256,uint8)::resting order, existing level",
       "kind": "transaction",
       "scenario": "resting order, existing level"
     },
     {
       "function": "createOrder(uint256,int256,uint8)",
-      "gas": "502280",
+      "gas": "502300",
       "id": "createOrder(uint256,int256,uint8)::resting order, new level",
       "kind": "transaction",
       "scenario": "resting order, new level"
     },
     {
       "function": "createOrder(uint256,int256,uint8)",
-      "gas": "368961",
+      "gas": "369163",
       "id": "createOrder(uint256,int256,uint8)::two-level fill",
       "kind": "transaction",
       "scenario": "two-level fill"
     },
     {
       "function": "createOrders((uint256,int256,uint8)[])",
-      "gas": "503511",
+      "gas": "503531",
       "id": "createOrders((uint256,int256,uint8)[])::batch-1",
       "kind": "transaction",
       "scenario": "batch-1"
     },
     {
       "function": "createOrders((uint256,int256,uint8)[])",
-      "gas": "2648361",
+      "gas": "2648381",
       "id": "createOrders((uint256,int256,uint8)[])::batch-10",
       "kind": "transaction",
       "scenario": "batch-10"
     },
     {
       "function": "createOrders((uint256,int256,uint8)[])",
-      "gas": "1456786",
+      "gas": "1456806",
       "id": "createOrders((uint256,int256,uint8)[])::batch-5",
       "kind": "transaction",
       "scenario": "batch-5"
@@ -198,14 +198,14 @@
     },
     {
       "function": "forceCancelOrders(address[])",
-      "gas": "187418",
+      "gas": "187434",
       "id": "forceCancelOrders(address[])::two users with one order each",
       "kind": "transaction",
       "scenario": "two users with one order each"
     },
     {
       "function": "forceClosePositions(address[])",
-      "gas": "123752",
+      "gas": "123768",
       "id": "forceClosePositions(address[])::two users at the mark while halted",
       "kind": "transaction",
       "scenario": "two users at the mark while halted"
@@ -261,28 +261,28 @@
     },
     {
       "function": "getExposureView(address)",
-      "gas": "95273",
+      "gas": "95969",
       "id": "getExposureView(address)::glide feed, before the glide: position and order",
       "kind": "view",
       "scenario": "glide feed, before the glide: position and order"
     },
     {
       "function": "getExposureView(address)",
-      "gas": "98009",
+      "gas": "98355",
       "id": "getExposureView(address)::glide feed, during the glide: position and order",
       "kind": "view",
       "scenario": "glide feed, during the glide: position and order"
     },
     {
       "function": "getExposureView(address)",
-      "gas": "91120",
+      "gas": "91355",
       "id": "getExposureView(address)::index feed: position and order",
       "kind": "view",
       "scenario": "index feed: position and order"
     },
     {
       "function": "getExposureView(address)",
-      "gas": "72464",
+      "gas": "72699",
       "id": "getExposureView(address)::representative",
       "kind": "view",
       "scenario": "representative"
@@ -373,14 +373,14 @@
     },
     {
       "function": "getRiskView(address)",
-      "gas": "72022",
+      "gas": "72256",
       "id": "getRiskView(address)::representative",
       "kind": "view",
       "scenario": "representative"
     },
     {
       "function": "getUnrealizedPnl(address)",
-      "gas": "55023",
+      "gas": "55257",
       "id": "getUnrealizedPnl(address)::representative",
       "kind": "view",
       "scenario": "representative"
@@ -422,56 +422,56 @@
     },
     {
       "function": "liquidateOrder(address,bytes32)",
-      "gas": "207687",
+      "gas": "207939",
       "id": "liquidateOrder(address,bytes32)::one underwater resting order",
       "kind": "transaction",
       "scenario": "one underwater resting order"
     },
     {
       "function": "liquidateOrders(address,bytes32[])",
-      "gas": "279378",
+      "gas": "279765",
       "id": "liquidateOrders(address,bytes32[])::batch-2",
       "kind": "transaction",
       "scenario": "batch-2"
     },
     {
       "function": "liquidatePosition(address,uint256)",
-      "gas": "287769",
+      "gas": "288021",
       "id": "liquidatePosition(address,uint256)::full close, no orders",
       "kind": "transaction",
       "scenario": "full close, no orders"
     },
     {
       "function": "liquidatePosition(address,uint256)",
-      "gas": "336795",
+      "gas": "328341",
       "id": "liquidatePosition(address,uint256)::glide feed, before the glide: full close",
       "kind": "transaction",
       "scenario": "glide feed, before the glide: full close"
     },
     {
       "function": "liquidatePosition(address,uint256)",
-      "gas": "389135",
+      "gas": "391801",
       "id": "liquidatePosition(address,uint256)::glide feed, during the glide: full close",
       "kind": "transaction",
       "scenario": "glide feed, during the glide: full close"
     },
     {
       "function": "liquidatePosition(address,uint256)",
-      "gas": "315959",
+      "gas": "316211",
       "id": "liquidatePosition(address,uint256)::index feed: full close",
       "kind": "transaction",
       "scenario": "index feed: full close"
     },
     {
       "function": "liquidatePosition(address,uint256)",
-      "gas": "307208",
+      "gas": "307692",
       "id": "liquidatePosition(address,uint256)::partial close, first debt accrual",
       "kind": "transaction",
       "scenario": "partial close, first debt accrual"
     },
     {
       "function": "liquidatePosition(address,uint256)",
-      "gas": "236393",
+      "gas": "236877",
       "id": "liquidatePosition(address,uint256)::partial close, subsequent debt accrual",
       "kind": "transaction",
       "scenario": "partial close, subsequent debt accrual"
@@ -534,7 +534,7 @@
     },
     {
       "function": "reduceOrderSize(bytes32,int256)",
-      "gas": "58668",
+      "gas": "58688",
       "id": "reduceOrderSize(bytes32,int256)::two-to-one",
       "kind": "transaction",
       "scenario": "two-to-one"
@@ -548,7 +548,7 @@
     },
     {
       "function": "setFundingParameters(uint256,uint256)",
-      "gas": "102107",
+      "gas": "102127",
       "id": "setFundingParameters(uint256,uint256)::100bps-1day",
       "kind": "transaction",
       "scenario": "100bps-1day"
@@ -590,7 +590,7 @@
     },
     {
       "function": "setOracle(address)",
-      "gas": "58217",
+      "gas": "60455",
       "id": "setOracle(address)::replace-live-feed",
       "kind": "transaction",
       "scenario": "replace-live-feed"
@@ -632,49 +632,49 @@
     },
     {
       "function": "unwindBackstop(uint256)",
-      "gas": "207170",
+      "gas": "207186",
       "id": "unwindBackstop(uint256)::buy one contract from a resting ask",
       "kind": "transaction",
       "scenario": "buy one contract from a resting ask"
     },
     {
       "function": "updateFunding()",
-      "gas": "67659",
+      "gas": "32999",
       "id": "updateFunding()::glide feed, before the glide: no book",
       "kind": "transaction",
       "scenario": "glide feed, before the glide: no book"
     },
     {
       "function": "updateFunding()",
-      "gas": "67755",
+      "gas": "70057",
       "id": "updateFunding()::glide feed, during the glide: no book",
       "kind": "transaction",
       "scenario": "glide feed, during the glide: no book"
     },
     {
       "function": "updateFunding()",
-      "gas": "30857",
+      "gas": "30877",
       "id": "updateFunding()::index feed: no book",
       "kind": "transaction",
       "scenario": "index feed: no book"
     },
     {
       "function": "updateFunding()",
-      "gas": "91097",
+      "gas": "91117",
       "id": "updateFunding()::two-sided book after an hour",
       "kind": "transaction",
       "scenario": "two-sided book after an hour"
     },
     {
       "function": "updateOrders(bytes32[],(bytes32,int256)[],(uint256,int256,uint8)[])",
-      "gas": "429103",
+      "gas": "429123",
       "id": "updateOrders(bytes32[],(bytes32,int256)[],(uint256,int256,uint8)[])::cancel-1-reduce-1-create-1",
       "kind": "transaction",
       "scenario": "cancel-1-reduce-1-create-1"
     },
     {
       "function": "updateOrders(bytes32[],(bytes32,int256)[],(uint256,int256,uint8)[])",
-      "gas": "110093",
+      "gas": "110109",
       "id": "updateOrders(bytes32[],(bytes32,int256)[],(uint256,int256,uint8)[])::cancel-only",
       "kind": "transaction",
       "scenario": "cancel-only"

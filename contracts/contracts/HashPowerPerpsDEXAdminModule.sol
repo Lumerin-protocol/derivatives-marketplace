@@ -19,7 +19,7 @@ contract HashPowerPerpsDEXAdminModule is HashPowerPerpsDEXBase {
     using EnumerableSet for EnumerableSet.Bytes32Set;
 
     /// @notice {HashPowerPerpsDEX.VERSION} of the implementation that creates this module.
-    string public constant VERSION = "6.16.2";
+    string public constant VERSION = "6.17.0";
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ICollateralVault _vault) HashPowerPerpsDEXBase(_vault) { }

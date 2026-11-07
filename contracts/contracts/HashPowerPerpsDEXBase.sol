@@ -215,6 +215,9 @@ abstract contract HashPowerPerpsDEXBase is
     DriftState internal driftState;
     /// @dev Per-user snapshot of `DriftState.cumulativePerUnit`, like `userFundingSnapshot`.
     mapping(address => int256) internal userDriftSnapshot;
+    /// @dev The feed's `factorFixedUntil` at the last accrual: until then the factor cannot change,
+    ///      so funding updates skip reading the feed for drift. Appended in 6.17.0.
+    uint256 internal driftFixedUntil;
 
     /// @notice Represents an order in the order book
     struct Order {
@@ -1291,8 +1294,18 @@ abstract contract HashPowerPerpsDEXBase is
     ///      `_marketPrice()` and reverts; soft returns mark 0 and the stored state on an unusable
     ///      feed. Drift is unchanged when the schedule or the mark is unusable.
     function _markAndDrift(bool _hard) internal view returns (uint256 mark, DriftState memory state) {
+        (mark, state,) = _markDriftAndFixedUntil(_hard);
+    }
+
+    /// @dev {_markAndDrift} plus the feed's `factorFixedUntil` (0 without a schedule or on an
+    ///      unusable feed).
+    function _markDriftAndFixedUntil(bool _hard)
+        internal
+        view
+        returns (uint256 mark, DriftState memory state, uint256 fixedUntil)
+    {
         state = driftState;
-        if (!state.scheduled) return (_hard ? _marketPrice() : _softMarketPrice(), state);
+        if (!state.scheduled) return (_hard ? _marketPrice() : _softMarketPrice(), state, 0);
 
         int256 answer;
         uint256 updatedAt;
@@ -1300,25 +1313,30 @@ abstract contract HashPowerPerpsDEXBase is
         uint256 endFactor;
         uint256 epoch;
         if (_hard) {
-            (answer, updatedAt, factor, endFactor, epoch) =
+            (answer, updatedAt, factor, endFactor, epoch, fixedUntil) =
                 IScheduledMarkOracle(address(priceOracle)).latestMarkAndSchedule();
             _validateOracleRound(answer, updatedAt);
             mark = _getMarketPrice(uint256(answer));
             if (mark > MAX_PRICE) revert InvalidOracle();
         } else {
             try IScheduledMarkOracle(address(priceOracle)).latestMarkAndSchedule() returns (
-                int256 readMark, uint256 readUpdatedAt, uint256 readFactor, uint256 readEndFactor, uint256 readEpoch
+                int256 readMark,
+                uint256 readUpdatedAt,
+                uint256 readFactor,
+                uint256 readEndFactor,
+                uint256 readEpoch,
+                uint256 readFixedUntil
             ) {
-                (answer, updatedAt, factor, endFactor, epoch) =
-                    (readMark, readUpdatedAt, readFactor, readEndFactor, readEpoch);
+                (answer, updatedAt, factor, endFactor, epoch, fixedUntil) =
+                    (readMark, readUpdatedAt, readFactor, readEndFactor, readEpoch, readFixedUntil);
             } catch {
-                return (0, state);
+                return (0, state, 0);
             }
-            if (!_isUsableOracleRound(answer, updatedAt)) return (0, state);
+            if (!_isUsableOracleRound(answer, updatedAt)) return (0, state, 0);
             mark = _getMarketPrice(uint256(answer));
-            if (mark > MAX_PRICE) return (0, state);
+            if (mark > MAX_PRICE) return (0, state, 0);
         }
-        if (!_validSchedule(factor, endFactor, epoch)) return (mark, state);
+        if (!_validSchedule(factor, endFactor, epoch)) return (mark, state, 0);
 
         int256 m = int256(mark);
         int256 f = int256(factor);
@@ -1345,16 +1363,21 @@ abstract contract HashPowerPerpsDEXBase is
             && _epoch <= type(uint32).max;
     }
 
-    /// @notice Accrue drift up to now (writes state).
-    /// @return mark The soft mark read for it (0 without a schedule or on an unusable feed)
+    /// @notice Accrue drift up to now (writes state). Skips the feed while its factor is fixed: the
+    ///      feed stops promising that `FACTOR_FIXED_MIN_LEAD` (3 days) before the glide, so blocks
+    ///      would have to arrive 3 days early for a skipped read to miss a factor change.
+    /// @return mark The soft mark read for it (0 when not read or on an unusable feed)
     function _updateDrift() internal returns (uint256 mark) {
         DriftState memory before = driftState;
-        if (!before.scheduled) return 0;
+        if (!before.scheduled || block.timestamp < driftFixedUntil) return 0;
         DriftState memory state;
-        (mark, state) = _markAndDrift(false);
+        uint256 fixedUntil;
+        (mark, state, fixedUntil) = _markDriftAndFixedUntil(false);
         int256 delta = int256(state.cumulativePerUnit) - before.cumulativePerUnit;
         if (delta != 0) emit DriftUpdated(delta, state.cumulativePerUnit);
         driftState = state;
+        // Reads happen only once the stored time has passed, so this writes at most once per span.
+        if (fixedUntil != 0) driftFixedUntil = fixedUntil;
     }
 
     /// @dev Start the drift schedule of a newly set oracle, keeping the sum already accrued. A
@@ -1362,16 +1385,19 @@ abstract contract HashPowerPerpsDEXBase is
     function _resetDrift(AggregatorV3Interface _oracle) internal {
         DriftState memory state = driftState;
         state.scheduled = false;
+        uint256 fixedUntil;
         try IScheduledMarkOracle(address(_oracle)).latestMarkAndSchedule() returns (
-            int256, uint256, uint256 f, uint256 e, uint256 ep
+            int256, uint256, uint256 f, uint256 e, uint256 ep, uint256 readFixedUntil
         ) {
             if (_validSchedule(f, e, ep)) {
                 state.factor = uint64(f);
                 state.endFactor = uint64(e);
                 state.epoch = uint32(ep);
                 state.scheduled = true;
+                fixedUntil = readFixedUntil;
             }
         } catch { }
+        driftFixedUntil = fixedUntil;
         driftState = state;
     }
 

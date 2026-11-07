@@ -56,7 +56,9 @@ describe("Perps drift funding (N25)", function () {
     const { buyer: alice, seller: bob, buyer2: keeper } = s.accounts;
     const fundBefore = await vault.read.insuranceFundBalance();
 
-    // One write half way through the glide: drift accrues and folds on the next settle.
+    // One keeper write half way through the glide, blocks at the target time: drift accrues and
+    // folds on the next settle.
+    await networkHelpers.time.increase(Number((s.glideBlocks / 2n) * 600n));
     await s.relay(s.glideStart + s.glideBlocks / 2n);
     await perps.write.updateFunding({ account: keeper.account });
     assert.ok((await perps.read.cumulativeDriftPerUnit()) > 0n, "longs are owed drift half way through");
@@ -72,6 +74,33 @@ describe("Perps drift funding (N25)", function () {
     assert.equal((await perps.read.getUserPosition([alice.account.address])).netQuantity, 0n);
     // The mark fell about 49.5% and drift paid it back: both sides end where they started, up to
     // rounding to the price tick (0.005 per contract) and drift's integer division.
+    const tolerance = parseUnits("1", 6);
+    for (const who of [alice, bob]) {
+      const balance = await vault.read.balanceOf([who.account.address]);
+      const diff = balance > s.deposit ? balance - s.deposit : s.deposit - balance;
+      assert.ok(diff <= tolerance, `${who.account.address} ended ${balance} against ${s.deposit}`);
+    }
+    const fundDiff = (await vault.read.insuranceFundBalance()) - fundBefore;
+    assert.ok(fundDiff <= tolerance && -fundDiff <= tolerance, `insurance fund moved by ${fundDiff}`);
+  });
+
+  it("a relay burst into the glide from within 3 days of its start: every path reads, both sides settle", async function () {
+    const s = await driftFixture("glide");
+    const { perps, vault } = s.contracts;
+    const { buyer: alice, seller: bob, buyer2: keeper } = s.accounts;
+    const fundBefore = await vault.read.insuranceFundBalance();
+
+    // Half the glide relayed at once, no time passing. The positions were opened a block before
+    // the glide, inside the feed's 3-day lead, so no read is skipped and the update accrues.
+    await s.relay(s.glideStart + s.glideBlocks / 2n);
+    await perps.write.updateFunding({ account: keeper.account });
+    assert.ok((await perps.read.cumulativeDriftPerUnit()) > 0n, "the update read the feed");
+
+    await s.relay(s.halving);
+    const exit = await perps.read.getMarketPrice();
+    await perps.write.createOrder([exit, s.qty, TimeInForce.GTC], { account: bob.account });
+    await perps.write.createOrder([exit, -s.qty, TimeInForce.GTC], { account: alice.account });
+
     const tolerance = parseUnits("1", 6);
     for (const who of [alice, bob]) {
       const balance = await vault.read.balanceOf([who.account.address]);
