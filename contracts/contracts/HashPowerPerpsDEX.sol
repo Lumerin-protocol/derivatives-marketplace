@@ -27,7 +27,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @dev Lives here rather than in {HashPowerPerpsDEXBase} so that a diff to
     ///      this file and the version it ships under stay in the same place,
     ///      mirroring {Futures}.
-    string public constant VERSION = "6.15.0";
+    string public constant VERSION = "6.16.0";
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ICollateralVault _vault) HashPowerPerpsDEXBase(_vault) { }
@@ -500,8 +500,9 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         if (position.netQuantity != 0) {
             // Mark PnL only. Funding travels in `pendingFunding`; netting it in here too
             // would have the engine charge the same debt twice (it adds both terms).
-            // This deliberately differs from `getUnrealizedPnl`, which is a UX view.
-            view_.unrealizedPnl = _calculatePositionPnl(position, currentPrice);
+            // This deliberately differs from `getUnrealizedPnl`, which is a UX view. Drift is
+            // part of the position's PnL (it offsets the mark's scheduled decline), not funding.
+            view_.unrealizedPnl = _calculatePositionPnl(position, currentPrice) + _pendingDrift(_user);
         }
         view_.pendingFunding = _pendingFunding(_user, currentPrice);
 
@@ -522,10 +523,22 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     function getUnrealizedPnl(address _user) external view returns (int256) {
         Position memory position = positions[_user];
         if (position.netQuantity == 0) return 0;
-        int256 pnl = _calculatePositionPnl(position, getMarketPrice());
+        int256 pnl = _calculatePositionPnl(position, getMarketPrice()) + _pendingDrift(_user);
         // Subtract pending funding (positive funding = user owes = reduces PnL)
         pnl -= getPendingFunding(_user);
         return pnl;
+    }
+
+    /// @notice Σ of the mark's scheduled decline paid to longs, per contract (collateral token
+    ///         units × 10^12). Rises when the oracle's schedule factor falls.
+    function cumulativeDriftPerUnit() external view returns (int256) {
+        return driftState.cumulativePerUnit;
+    }
+
+    /// @notice Drift accrued on the user's position and not yet folded into its entry value
+    ///         (collateral token units; positive = the user gains). Included in the PnL views.
+    function getPendingDrift(address _user) external view returns (int256) {
+        return _pendingDrift(_user);
     }
 
     /// @notice Active bid/ask price levels (bids high→low, asks low→high).

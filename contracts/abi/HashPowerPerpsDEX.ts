@@ -310,6 +310,44 @@ export const HashPowerPerpsDEXAbi = [
     "anonymous": false,
     "inputs": [
       {
+        "indexed": true,
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "int256",
+        "name": "amount",
+        "type": "int256"
+      }
+    ],
+    "name": "DriftSettled",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "int256",
+        "name": "delta",
+        "type": "int256"
+      },
+      {
+        "indexed": false,
+        "internalType": "int256",
+        "name": "cumulativePerUnit",
+        "type": "int256"
+      }
+    ],
+    "name": "DriftUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
         "indexed": false,
         "internalType": "uint256",
         "name": "maxBps",
@@ -958,6 +996,19 @@ export const HashPowerPerpsDEXAbi = [
   },
   {
     "inputs": [],
+    "name": "cumulativeDriftPerUnit",
+    "outputs": [
+      {
+        "internalType": "int256",
+        "name": "",
+        "type": "int256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "cumulativeFundingPerUnit",
     "outputs": [
       {
@@ -1196,6 +1247,25 @@ export const HashPowerPerpsDEXAbi = [
         "internalType": "uint256[]",
         "name": "asks",
         "type": "uint256[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      }
+    ],
+    "name": "getPendingDrift",
+    "outputs": [
+      {
+        "internalType": "int256",
+        "name": "",
+        "type": "int256"
       }
     ],
     "stateMutability": "view",

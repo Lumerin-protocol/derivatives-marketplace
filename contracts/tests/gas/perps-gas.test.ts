@@ -106,6 +106,7 @@ async function benchmarkViews() {
     ["UPGRADE_INTERFACE_VERSION()", "UPGRADE_INTERFACE_VERSION", []],
     ["VERSION()", "VERSION", []],
     ["collectedFeesBalance()", "collectedFeesBalance", []],
+    ["cumulativeDriftPerUnit()", "cumulativeDriftPerUnit", []],
     ["cumulativeFundingPerUnit()", "cumulativeFundingPerUnit", []],
     ["fundingPeriod()", "fundingPeriod", []],
     ["fundingRateMaxBps()", "fundingRateMaxBps", []],
@@ -114,6 +115,7 @@ async function benchmarkViews() {
     ["getOrder(bytes32)", "getOrder", [orderId]],
     ["getOrderAggregate(address)", "getOrderAggregate", [user]],
     ["getOrderBookPrices(uint256)", "getOrderBookPrices", [200n]],
+    ["getPendingDrift(address)", "getPendingDrift", [user]],
     ["getPendingFunding(address)", "getPendingFunding", [user]],
     ["getQuantityAtPrice(uint256,bool)", "getQuantityAtPrice", [mark - tick, true]],
     ["getRiskView(address)", "getRiskView", [user]],
@@ -525,7 +527,7 @@ describe("Perps gas benchmark", () => {
 
     const snapshot = gas.snapshot();
     const coverage = assertAbiFunctionCoverage(HashPowerPerpsDEXAbi, snapshot, exclusions);
-    assert.equal(coverage.covered.length, 65);
+    assert.equal(coverage.covered.length, 67);
     assert.deepEqual(coverage.excluded, ["initialize(address,address)", "proxiableUUID()"]);
 
     await mkdir(fileURLToPath(new URL("../../benchmarks", import.meta.url)), { recursive: true });

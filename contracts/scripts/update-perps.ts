@@ -44,7 +44,7 @@ import {
 // The vault and the engine are upgraded before the venues; `requireUpgradeDependencies`
 // enforces it.
 const DEFAULT_FORCE_CANCEL_BATCH_SIZE = 20;
-const TARGET_CODE_VERSION = "6.15.0";
+const TARGET_CODE_VERSION = "6.16.0";
 const UPGRADE_CONFIRMATIONS = 5;
 const DEFAULT_SAFE_GAS_OVERHEAD = 150_000n;
 

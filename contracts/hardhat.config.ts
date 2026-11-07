@@ -93,11 +93,18 @@ export default defineConfig({
     },
   },
   networks: {
+    // CF-321 branch only: the venue exceeds EIP-170 until its size work lands. The compiler still
+    // warns; mainnet would reject the deployment.
+    default: {
+      type: "edr-simulated",
+      allowUnlimitedContractSize: true,
+    },
     hardhat: {
       type: "edr-simulated",
       mining: {
         auto: true,
       },
+      allowUnlimitedContractSize: true,
     },
     localhost: {
       type: "http",

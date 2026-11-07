@@ -10,6 +10,7 @@ import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/I
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import { AggregatorV3Interface } from "./interfaces/AggregatorV3Interface.sol";
+import { IScheduledMarkOracle } from "./interfaces/IScheduledMarkOracle.sol";
 import { ICollateralVault } from "collateral-margin/contracts/contracts/interfaces/ICollateralVault.sol";
 import { IPortfolioMarginEngine } from "collateral-margin/contracts/contracts/interfaces/IPortfolioMarginEngine.sol";
 import { IPointsHook } from "collateral-margin/contracts/contracts/interfaces/IPointsHook.sol";
@@ -51,6 +52,8 @@ abstract contract HashPowerPerpsDEXBase is
     ///      `MathLib.fillLossBound` within uint256. A feed above it reverts like a stale one.
     uint256 public constant MAX_PRICE = 1e10;
     uint256 internal constant BPS = 10_000; // Basis points denominator
+    uint256 internal constant WAD = 1e18; // Fixed-point unit of the oracle's schedule factors
+    uint8 internal constant DRIFT_DECIMALS = 12; // Extra precision of the per-unit drift sum
     /// @notice Hard ceiling on |makerFeeBps| and |takerFeeBps|: 100 bps (1%).
     /// @dev Keeps a trading fee at most a fifth of the 5% MM spot shock, so the argument
     ///      that the MM floor already covers the unreserved fee holds by construction
@@ -194,6 +197,25 @@ abstract contract HashPowerPerpsDEXBase is
     ///      order removed any other way (cancel, fill) would underflow it.
     mapping(address => RestingOrderAggregate) internal userRestingOrderAggregate;
 
+    /// @dev Drift funding state, one slot so a feed without a schedule costs a single read:
+    ///      Σ of the mark's scheduled decline paid to longs per unit (token decimals ×
+    ///      10^DRIFT_DECIMALS; at `MAX_PRICE` int80 holds about 120 halvings), the oracle's
+    ///      schedule factor and end factor (WAD) at the last accrual and its epoch, whether the
+    ///      oracle has a schedule (set by `setOracle`), and whether any drift ever accrued.
+    struct DriftState {
+        int80 cumulativePerUnit;
+        uint64 factor;
+        uint64 endFactor;
+        uint32 epoch;
+        bool scheduled;
+        bool accrued;
+    }
+
+    /// @dev Appended at the storage tail in 6.16, with the mapping below.
+    DriftState internal driftState;
+    /// @dev Per-user snapshot of `DriftState.cumulativePerUnit`, like `userFundingSnapshot`.
+    mapping(address => int256) internal userDriftSnapshot;
+
     /// @notice Represents an order in the order book
     struct Order {
         address participant;
@@ -264,6 +286,9 @@ abstract contract HashPowerPerpsDEXBase is
     event FundingUpdated(int256 fundingRate, int256 cumulativeFundingPerUnit, uint256 timestamp);
     event FundingSettled(address indexed user, int256 amount);
     event FundingParametersUpdated(uint256 maxBps, uint256 period);
+    event DriftUpdated(int256 delta, int256 cumulativePerUnit);
+    /// @param amount Drift folded into the position's entry value; positive = the user gains.
+    event DriftSettled(address indexed user, int256 amount);
     /// @dev Deprecated compatibility event retained with the legacy setter.
     event MinimumMarginPerOrderUpdated(uint256 newMinimumMarginPerOrder);
     /// @notice Emitted whenever the points hook address changes.
@@ -857,6 +882,7 @@ abstract contract HashPowerPerpsDEXBase is
             position.netQuantity = _quantity;
             position.netEntryValue = tradeValue;
             userFundingSnapshot[_user] = cumulativeFundingPerUnit;
+            _snapshotDrift(_user);
             return;
         }
 
@@ -893,6 +919,7 @@ abstract contract HashPowerPerpsDEXBase is
             position.netQuantity = openQty;
             position.netEntryValue = _signedValue(_tradePrice, openQty);
             userFundingSnapshot[_user] = cumulativeFundingPerUnit;
+            _snapshotDrift(_user);
         } else if (position.netQuantity + _quantity == 0) {
             position.netQuantity = 0;
             position.netEntryValue = 0;
@@ -1171,6 +1198,7 @@ abstract contract HashPowerPerpsDEXBase is
     ///      two-sided but the oracle round is unusable, skip entirely (do not advance
     ///      `lastFundingUpdateTime`) so a later live update can catch up the elapsed window.
     function _updateGlobalFunding() internal {
+        _updateDrift();
         if (lastFundingUpdateTime == 0 || fundingPeriod == 0) return;
 
         // Accrual needs a mid and an index. Empty book → no accrual but still bump the
@@ -1200,6 +1228,7 @@ abstract contract HashPowerPerpsDEXBase is
     /// @dev Must be called before any position change so funding is settled at the old size.
     /// @param _user The user whose funding is being settled
     function _settleFunding(address _user) internal {
+        _settleDrift(_user);
         // When funding isn't configured, skip storage reads and calculations.
         if (lastFundingUpdateTime == 0 || fundingPeriod == 0) return;
 
@@ -1246,4 +1275,123 @@ abstract contract HashPowerPerpsDEXBase is
         return (position.netQuantity * delta) / (int256(10 ** QUANTITY_DECIMALS) * int256(10 ** FUNDING_DECIMALS));
     }
 
+    // ── Internal helpers: drift funding ───────────────────────────────────────
+
+    /// @dev Drift funding: a mark that follows the index times a known schedule (a halving glide)
+    ///      falls by the schedule while the index stands still. Longs are paid that decline and
+    ///      shorts pay it, so holding through the schedule is neutral and no one, the backstop
+    ///      included, carries it. Paid per unit at the index: a factor move from f0 to f1 is worth
+    ///      index × (f0 − f1) = mark × (f0 − f1) / f1, exact while the index is unchanged between
+    ///      accruals. When the epoch changes the old segment is first paid down to its end factor,
+    ///      at the index before the step (the new index / that end factor), then the new one from 1.
+    ///      Folded into each position's entry value rather than settled in cash: the counterparty's
+    ///      matching mark gain is unrealized, so cash would put it in debt mid-position.
+    /// @return state The drift state as of now; unchanged when the feed or the mark is unusable
+    function _currentDrift() internal view returns (DriftState memory state) {
+        state = driftState;
+        if (!state.scheduled) return state;
+
+        uint256 factor;
+        uint256 endFactor;
+        uint256 epoch;
+        try IScheduledMarkOracle(address(priceOracle)).latestSchedule() returns (
+            uint256 readFactor, uint256 readEndFactor, uint256 readEpoch
+        ) {
+            (factor, endFactor, epoch) = (readFactor, readEndFactor, readEpoch);
+        } catch {
+            return state;
+        }
+        if (!_validSchedule(factor, endFactor, epoch)) return state;
+        uint256 mark = _softMarketPrice();
+        if (mark == 0) return state;
+
+        int256 m = int256(mark);
+        int256 f = int256(factor);
+        int256 scale = int256(10 ** DRIFT_DECIMALS);
+        int256 f0 = int256(uint256(state.factor));
+        int256 drift;
+        if (epoch == state.epoch) {
+            drift = m * (f0 - f) * scale / f;
+        } else {
+            int256 e0 = int256(uint256(state.endFactor));
+            drift = m * int256(WAD) * (f0 - e0) / f * scale / e0 + m * (int256(WAD) - f) * scale / f;
+        }
+        int256 cumulative = state.cumulativePerUnit + drift;
+        if (cumulative > type(int80).max || cumulative < type(int80).min) revert InvalidOracle();
+        state.cumulativePerUnit = int80(cumulative);
+        state.factor = uint64(factor);
+        state.endFactor = uint64(endFactor);
+        state.epoch = uint32(epoch);
+        if (drift != 0) state.accrued = true;
+    }
+
+    function _validSchedule(uint256 _factor, uint256 _endFactor, uint256 _epoch) internal pure returns (bool) {
+        return _factor != 0 && _factor <= WAD && _endFactor != 0 && _endFactor <= WAD && _epoch != 0
+            && _epoch <= type(uint32).max;
+    }
+
+    /// @notice Accrue drift up to now (writes state).
+    function _updateDrift() internal {
+        DriftState memory before = driftState;
+        if (!before.scheduled) return;
+        DriftState memory state = _currentDrift();
+        int256 delta = int256(state.cumulativePerUnit) - before.cumulativePerUnit;
+        if (delta != 0) emit DriftUpdated(delta, state.cumulativePerUnit);
+        driftState = state;
+    }
+
+    /// @dev Start the drift schedule of a newly set oracle, keeping the sum already accrued. A
+    ///      feed without a schedule, or with an unusable one, pays no drift.
+    function _resetDrift(AggregatorV3Interface _oracle) internal {
+        DriftState memory state = driftState;
+        state.scheduled = false;
+        try IScheduledMarkOracle(address(_oracle)).latestSchedule() returns (uint256 f, uint256 e, uint256 ep) {
+            if (_validSchedule(f, e, ep)) {
+                state.factor = uint64(f);
+                state.endFactor = uint64(e);
+                state.epoch = uint32(ep);
+                state.scheduled = true;
+            }
+        } catch { }
+        driftState = state;
+    }
+
+    /// @dev Start a new position's drift at the current sum. Before any drift has accrued every
+    ///      snapshot is unused (settlement and the views skip them), so nothing is written.
+    function _snapshotDrift(address _user) internal {
+        DriftState memory state = driftState;
+        if (state.accrued) userDriftSnapshot[_user] = state.cumulativePerUnit;
+    }
+
+    /// @notice Fold a user's accrued drift into its position's entry value.
+    /// @dev Must run before any position change, like funding, so drift is paid at the old size.
+    ///      Until any drift has accrued every snapshot is 0, so the per-user read is skipped.
+    function _settleDrift(address _user) internal {
+        DriftState memory state = driftState;
+        if (!state.accrued) return;
+        int256 snapshot = userDriftSnapshot[_user];
+        if (snapshot == state.cumulativePerUnit) return;
+        userDriftSnapshot[_user] = state.cumulativePerUnit;
+
+        Position storage position = positions[_user];
+        if (position.netQuantity == 0) return;
+        int256 drift = _driftOn(position.netQuantity, state.cumulativePerUnit - snapshot);
+        if (drift == 0) return;
+        position.netEntryValue -= drift;
+        emit DriftSettled(_user, drift);
+    }
+
+    /// @dev Drift a user has accrued and not yet folded in (token units; positive = the user
+    ///      gains). Part of the position's unrealized PnL.
+    function _pendingDrift(address _user) internal view returns (int256) {
+        int256 netQuantity = positions[_user].netQuantity;
+        if (netQuantity == 0) return 0;
+        DriftState memory state = _currentDrift();
+        if (!state.accrued) return 0;
+        return _driftOn(netQuantity, state.cumulativePerUnit - userDriftSnapshot[_user]);
+    }
+
+    function _driftOn(int256 _netQuantity, int256 _deltaPerUnit) internal pure returns (int256) {
+        return (_netQuantity * _deltaPerUnit) / (int256(10 ** QUANTITY_DECIMALS) * int256(10 ** DRIFT_DECIMALS));
+    }
 }
