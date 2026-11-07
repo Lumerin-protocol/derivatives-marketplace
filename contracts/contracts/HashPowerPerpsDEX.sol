@@ -12,6 +12,7 @@ import { IPortfolioMarginEngine } from "collateral-margin/contracts/contracts/in
 import { MathLib as M } from "./libs/MathLib.sol";
 import { HashPowerPerpsDEXBase } from "./HashPowerPerpsDEXBase.sol";
 import { HashPowerPerpsDEXAdmin } from "./HashPowerPerpsDEXAdmin.sol";
+import { HashPowerPerpsDEXAdminModule } from "./HashPowerPerpsDEXAdminModule.sol";
 
 /// @title HashPower Perps DEX
 /// @notice Perpetual trading contract with on-chain order book
@@ -27,10 +28,10 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @dev Lives here rather than in {HashPowerPerpsDEXBase} so that a diff to
     ///      this file and the version it ships under stay in the same place,
     ///      mirroring {Futures}.
-    string public constant VERSION = "6.16.0";
+    string public constant VERSION = "6.16.1";
 
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor(ICollateralVault _vault) HashPowerPerpsDEXBase(_vault) { }
+    constructor(ICollateralVault _vault) HashPowerPerpsDEXBase(_vault) HashPowerPerpsDEXAdmin(_vault) { }
 
     /// @notice Initialize the contract
     /// @param _priceOracle The Chainlink-style price oracle
@@ -41,7 +42,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         __Ownable_init(_msgSender());
         __UUPSUpgradeable_init();
 
-        setOracle(_priceOracle);
+        _delegateCallAdminModule(abi.encodeCall(HashPowerPerpsDEXAdminModule.setOracle, (_priceOracle)));
     }
 
     /// @notice Get current market price from oracle
