@@ -1198,7 +1198,7 @@ abstract contract HashPowerPerpsDEXBase is
     ///      two-sided but the oracle round is unusable, skip entirely (do not advance
     ///      `lastFundingUpdateTime`) so a later live update can catch up the elapsed window.
     function _updateGlobalFunding() internal {
-        _updateDrift();
+        uint256 scheduledMark = _updateDrift();
         if (lastFundingUpdateTime == 0 || fundingPeriod == 0) return;
 
         // Accrual needs a mid and an index. Empty book → no accrual but still bump the
@@ -1208,7 +1208,7 @@ abstract contract HashPowerPerpsDEXBase is
         uint256 bestAsk = _bestAskPrice();
         uint256 indexPrice;
         if (bestBid != 0 && bestAsk != 0) {
-            indexPrice = _softMarketPrice();
+            indexPrice = scheduledMark != 0 ? scheduledMark : _softMarketPrice();
             if (indexPrice == 0) return;
         }
 
@@ -1286,24 +1286,39 @@ abstract contract HashPowerPerpsDEXBase is
     ///      at the index before the step (the new index / that end factor), then the new one from 1.
     ///      Folded into each position's entry value rather than settled in cash: the counterparty's
     ///      matching mark gain is unrealized, so cash would put it in debt mid-position.
-    /// @return state The drift state as of now; unchanged when the feed or the mark is unusable
-    function _currentDrift() internal view returns (DriftState memory state) {
+    /// @dev The mark and the drift state as of now, from one feed read when the feed has a schedule
+    ///      (otherwise the plain mark and the stored state). `_hard` validates the mark like
+    ///      `_marketPrice()` and reverts; soft returns mark 0 and the stored state on an unusable
+    ///      feed. Drift is unchanged when the schedule or the mark is unusable.
+    function _markAndDrift(bool _hard) internal view returns (uint256 mark, DriftState memory state) {
         state = driftState;
-        if (!state.scheduled) return state;
+        if (!state.scheduled) return (_hard ? _marketPrice() : _softMarketPrice(), state);
 
+        int256 answer;
+        uint256 updatedAt;
         uint256 factor;
         uint256 endFactor;
         uint256 epoch;
-        try IScheduledMarkOracle(address(priceOracle)).latestSchedule() returns (
-            uint256 readFactor, uint256 readEndFactor, uint256 readEpoch
-        ) {
-            (factor, endFactor, epoch) = (readFactor, readEndFactor, readEpoch);
-        } catch {
-            return state;
+        if (_hard) {
+            (answer, updatedAt, factor, endFactor, epoch) =
+                IScheduledMarkOracle(address(priceOracle)).latestMarkAndSchedule();
+            _validateOracleRound(answer, updatedAt);
+            mark = _getMarketPrice(uint256(answer));
+            if (mark > MAX_PRICE) revert InvalidOracle();
+        } else {
+            try IScheduledMarkOracle(address(priceOracle)).latestMarkAndSchedule() returns (
+                int256 readMark, uint256 readUpdatedAt, uint256 readFactor, uint256 readEndFactor, uint256 readEpoch
+            ) {
+                (answer, updatedAt, factor, endFactor, epoch) =
+                    (readMark, readUpdatedAt, readFactor, readEndFactor, readEpoch);
+            } catch {
+                return (0, state);
+            }
+            if (!_isUsableOracleRound(answer, updatedAt)) return (0, state);
+            mark = _getMarketPrice(uint256(answer));
+            if (mark > MAX_PRICE) return (0, state);
         }
-        if (!_validSchedule(factor, endFactor, epoch)) return state;
-        uint256 mark = _softMarketPrice();
-        if (mark == 0) return state;
+        if (!_validSchedule(factor, endFactor, epoch)) return (mark, state);
 
         int256 m = int256(mark);
         int256 f = int256(factor);
@@ -1331,10 +1346,12 @@ abstract contract HashPowerPerpsDEXBase is
     }
 
     /// @notice Accrue drift up to now (writes state).
-    function _updateDrift() internal {
+    /// @return mark The soft mark read for it (0 without a schedule or on an unusable feed)
+    function _updateDrift() internal returns (uint256 mark) {
         DriftState memory before = driftState;
-        if (!before.scheduled) return;
-        DriftState memory state = _currentDrift();
+        if (!before.scheduled) return 0;
+        DriftState memory state;
+        (mark, state) = _markAndDrift(false);
         int256 delta = int256(state.cumulativePerUnit) - before.cumulativePerUnit;
         if (delta != 0) emit DriftUpdated(delta, state.cumulativePerUnit);
         driftState = state;
@@ -1345,7 +1362,9 @@ abstract contract HashPowerPerpsDEXBase is
     function _resetDrift(AggregatorV3Interface _oracle) internal {
         DriftState memory state = driftState;
         state.scheduled = false;
-        try IScheduledMarkOracle(address(_oracle)).latestSchedule() returns (uint256 f, uint256 e, uint256 ep) {
+        try IScheduledMarkOracle(address(_oracle)).latestMarkAndSchedule() returns (
+            int256, uint256, uint256 f, uint256 e, uint256 ep
+        ) {
             if (_validSchedule(f, e, ep)) {
                 state.factor = uint64(f);
                 state.endFactor = uint64(e);
@@ -1381,14 +1400,12 @@ abstract contract HashPowerPerpsDEXBase is
         emit DriftSettled(_user, drift);
     }
 
-    /// @dev Drift a user has accrued and not yet folded in (token units; positive = the user
-    ///      gains). Part of the position's unrealized PnL.
-    function _pendingDrift(address _user) internal view returns (int256) {
+    /// @dev Drift a user has accrued and not yet folded in, given the current drift state (token
+    ///      units; positive = the user gains). Part of the position's unrealized PnL.
+    function _pendingDrift(address _user, DriftState memory _state) internal view returns (int256) {
         int256 netQuantity = positions[_user].netQuantity;
-        if (netQuantity == 0) return 0;
-        DriftState memory state = _currentDrift();
-        if (!state.accrued) return 0;
-        return _driftOn(netQuantity, state.cumulativePerUnit - userDriftSnapshot[_user]);
+        if (netQuantity == 0 || !_state.accrued) return 0;
+        return _driftOn(netQuantity, _state.cumulativePerUnit - userDriftSnapshot[_user]);
     }
 
     function _driftOn(int256 _netQuantity, int256 _deltaPerUnit) internal pure returns (int256) {

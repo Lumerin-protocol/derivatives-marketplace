@@ -28,7 +28,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @dev Lives here rather than in {HashPowerPerpsDEXBase} so that a diff to
     ///      this file and the version it ships under stay in the same place,
     ///      mirroring {Futures}.
-    string public constant VERSION = "6.16.1";
+    string public constant VERSION = "6.16.2";
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ICollateralVault _vault) HashPowerPerpsDEXBase(_vault) HashPowerPerpsDEXAdmin(_vault) { }
@@ -495,7 +495,10 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         uint256 sellQty = aggregate.sellQty;
         if (position.netQuantity == 0 && buyQty == 0 && sellQty == 0) return (view_, 0);
 
-        currentPrice = getMarketPrice();
+        // Drift is part of a position's PnL only; an order-only account skips its state read.
+        DriftState memory drift;
+        if (position.netQuantity != 0) (currentPrice, drift) = _markAndDrift(true);
+        else currentPrice = getMarketPrice();
 
         view_.netPositionDelta = position.netQuantity;
         if (position.netQuantity != 0) {
@@ -503,7 +506,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
             // would have the engine charge the same debt twice (it adds both terms).
             // This deliberately differs from `getUnrealizedPnl`, which is a UX view. Drift is
             // part of the position's PnL (it offsets the mark's scheduled decline), not funding.
-            view_.unrealizedPnl = _calculatePositionPnl(position, currentPrice) + _pendingDrift(_user);
+            view_.unrealizedPnl = _calculatePositionPnl(position, currentPrice) + _pendingDrift(_user, drift);
         }
         view_.pendingFunding = _pendingFunding(_user, currentPrice);
 
@@ -524,7 +527,8 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     function getUnrealizedPnl(address _user) external view returns (int256) {
         Position memory position = positions[_user];
         if (position.netQuantity == 0) return 0;
-        int256 pnl = _calculatePositionPnl(position, getMarketPrice()) + _pendingDrift(_user);
+        (uint256 mark, DriftState memory drift) = _markAndDrift(true);
+        int256 pnl = _calculatePositionPnl(position, mark) + _pendingDrift(_user, drift);
         // Subtract pending funding (positive funding = user owes = reduces PnL)
         pnl -= getPendingFunding(_user);
         return pnl;
@@ -539,7 +543,9 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @notice Drift accrued on the user's position and not yet folded into its entry value
     ///         (collateral token units; positive = the user gains). Included in the PnL views.
     function getPendingDrift(address _user) external view returns (int256) {
-        return _pendingDrift(_user);
+        DriftState memory drift = driftState;
+        if (drift.scheduled) (, drift) = _markAndDrift(false);
+        return _pendingDrift(_user, drift);
     }
 
     /// @notice Active bid/ask price levels (bids high→low, asks low→high).
