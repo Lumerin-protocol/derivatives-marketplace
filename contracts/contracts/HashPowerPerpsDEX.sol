@@ -7,6 +7,7 @@ import { StructuredLinkedList } from "solidity-linked-list/contracts/StructuredL
 import { AggregatorV3Interface } from "./interfaces/AggregatorV3Interface.sol";
 import { ICollateralVault } from "collateral-margin/contracts/contracts/interfaces/ICollateralVault.sol";
 import { ILinearMarket } from "collateral-margin/contracts/contracts/interfaces/ILinearMarket.sol";
+import { ILinearMarketExposure } from "collateral-margin/contracts/contracts/interfaces/ILinearMarketExposure.sol";
 import { IPortfolioMarginEngine } from "collateral-margin/contracts/contracts/interfaces/IPortfolioMarginEngine.sol";
 import { MathLib as M } from "./libs/MathLib.sol";
 import { HashPowerPerpsDEXBase } from "./HashPowerPerpsDEXBase.sol";
@@ -26,7 +27,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @dev Lives here rather than in {HashPowerPerpsDEXBase} so that a diff to
     ///      this file and the version it ships under stay in the same place,
     ///      mirroring {Futures}.
-    string public constant VERSION = "6.14.3";
+    string public constant VERSION = "6.15.0";
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ICollateralVault _vault) HashPowerPerpsDEXBase(_vault) { }
@@ -455,22 +456,45 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         return positions[_user];
     }
 
-    /// @notice ILinearMarket: all per-user margin inputs in a single call
-    ///         (saves the portfolio margin engine external-call gas).
-    /// @dev Resting orders are reported as raw per-side delta and instant fill loss, not as
-    ///      a margin figure. The engine nets the deltas into portfolio net delta before
-    ///      stressing, which is exact and cross-product — the former venue-local
-    ///      "reducing" credit netted only against this venue's position, so an account
-    ///      long perps and short futures had a perps sell order credited as risk-reducing
-    ///      when filling it would take the portfolio genuinely short.
+    /// @notice ILinearMarketExposure: all per-user margin inputs in a single call, with the
+    ///         position and resting orders valued at the mark (contracts × mark).
+    /// @dev The engine reads this and shocks the exposure by a percentage, so the mark need not
+    ///      be the index it stresses.
+    function getExposureView(address _user) external view returns (ILinearMarketExposure.ExposureView memory view_) {
+        (ILinearMarket.RiskView memory risk, uint256 mark) = _riskView(_user);
+        uint256 scale = 10 ** QUANTITY_DECIMALS;
+        view_.netPositionExposure = risk.netPositionDelta * int256(mark) / int256(scale);
+        view_.unrealizedPnl = risk.unrealizedPnl;
+        view_.pendingFunding = risk.pendingFunding;
+        view_.buyOrderExposure = risk.buyOrderDelta * mark / scale;
+        view_.sellOrderExposure = risk.sellOrderDelta * mark / scale;
+        view_.buyOrderFillLoss = risk.buyOrderFillLoss;
+        view_.sellOrderFillLoss = risk.sellOrderFillLoss;
+    }
+
+    /// @notice ILinearMarket: all per-user margin inputs in a single call, with deltas in
+    ///         contracts.
+    /// @dev Deprecated for margin: the engine reads `getExposureView`, and this only for a venue
+    ///      without it, valuing the deltas at its index.
     function getRiskView(address _user) external view returns (ILinearMarket.RiskView memory view_) {
+        (view_,) = _riskView(_user);
+    }
+
+    /// @dev Resting orders are reported as raw per-side delta and instant fill loss, not as
+    ///      a margin figure. The engine nets them into the portfolio before stressing, which
+    ///      is exact and cross-product — the former venue-local "reducing" credit netted only
+    ///      against this venue's position, so an account long perps and short futures had a
+    ///      perps sell order credited as risk-reducing when filling it would take the
+    ///      portfolio genuinely short. Also returns the mark it priced at (0 when the account
+    ///      holds nothing).
+    function _riskView(address _user) private view returns (ILinearMarket.RiskView memory view_, uint256 currentPrice) {
         Position memory position = positions[_user];
         RestingOrderAggregate storage aggregate = userRestingOrderAggregate[_user];
         uint256 buyQty = aggregate.buyQty;
         uint256 sellQty = aggregate.sellQty;
-        if (position.netQuantity == 0 && buyQty == 0 && sellQty == 0) return view_;
+        if (position.netQuantity == 0 && buyQty == 0 && sellQty == 0) return (view_, 0);
 
-        uint256 currentPrice = getMarketPrice();
+        currentPrice = getMarketPrice();
 
         view_.netPositionDelta = position.netQuantity;
         if (position.netQuantity != 0) {

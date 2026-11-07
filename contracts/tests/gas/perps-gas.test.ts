@@ -109,6 +109,7 @@ async function benchmarkViews() {
     ["cumulativeFundingPerUnit()", "cumulativeFundingPerUnit", []],
     ["fundingPeriod()", "fundingPeriod", []],
     ["fundingRateMaxBps()", "fundingRateMaxBps", []],
+    ["getExposureView(address)", "getExposureView", [user]],
     ["getMarketPrice()", "getMarketPrice", []],
     ["getOrder(bytes32)", "getOrder", [orderId]],
     ["getOrderAggregate(address)", "getOrderAggregate", [user]],
@@ -139,7 +140,8 @@ async function benchmarkViews() {
   }
 }
 
-/** Risk view cost as a participant's resting book grows, up to `MAX_ORDERS_PER_PARTICIPANT`. */
+/** Risk view cost as a participant's resting book grows, up to `MAX_ORDERS_PER_PARTICIPANT`;
+ *  `getExposureView` is the engine's read, `getRiskView` the deprecated one. */
 async function benchmarkScaledRiskViews() {
   for (const count of [0, 1, 10, 50, 100]) {
     const data = await fresh();
@@ -151,6 +153,7 @@ async function benchmarkScaledRiskViews() {
     for (let i = 0; i < intents.length; i += 10) {
       await perps.write.createOrders([intents.slice(i, i + 10)], { account: buyer.account });
     }
+    await recordView(pc, perps, "getExposureView(address)", "getExposureView", [buyer.account.address], `${count}-orders`);
     await recordView(pc, perps, "getRiskView(address)", "getRiskView", [buyer.account.address], `${count}-orders`);
   }
 }
@@ -522,7 +525,7 @@ describe("Perps gas benchmark", () => {
 
     const snapshot = gas.snapshot();
     const coverage = assertAbiFunctionCoverage(HashPowerPerpsDEXAbi, snapshot, exclusions);
-    assert.equal(coverage.covered.length, 64);
+    assert.equal(coverage.covered.length, 65);
     assert.deepEqual(coverage.excluded, ["initialize(address,address)", "proxiableUUID()"]);
 
     await mkdir(fileURLToPath(new URL("../../benchmarks", import.meta.url)), { recursive: true });
