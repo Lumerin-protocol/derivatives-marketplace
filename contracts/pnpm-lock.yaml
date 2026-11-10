@@ -27,11 +27,11 @@ importers:
         specifier: ^3.9.1
         version: 3.9.1(@nomicfoundation/hardhat-ethers@3.1.3(ethers@6.17.0)(hardhat@3.9.1)(supports-color@7.2.0))(@nomicfoundation/hardhat-verify@3.0.17(hardhat@3.9.1))(ethers@6.17.0)(hardhat@3.9.1)(supports-color@7.2.0)
       collateral-margin:
-        specifier: github:Lumerin-protocol/collateral-margin#34e32258cc40753c35d25915399d2e00d558b920
-        version: https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/34e32258cc40753c35d25915399d2e00d558b920
+        specifier: github:Lumerin-protocol/collateral-margin#1002e15262b12e249876ad5efbc6e2c39a0a6f96
+        version: https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/1002e15262b12e249876ad5efbc6e2c39a0a6f96
       hashprice-oracle:
-        specifier: github:Lumerin-protocol/hashprice-oracle.git#main
-        version: https://codeload.github.com/Lumerin-protocol/hashprice-oracle/tar.gz/b65adbfeb7e6c4417747bfd3d94b6e89e162ed50
+        specifier: github:Lumerin-protocol/hashprice-oracle#70e5a697f61077d60cef91b1079bb87be8c91030
+        version: https://codeload.github.com/Lumerin-protocol/hashprice-oracle/tar.gz/70e5a697f61077d60cef91b1079bb87be8c91030
       multicall3:
         specifier: github:mds1/multicall3
         version: '@multicall/multicall3@https://codeload.github.com/mds1/multicall3/tar.gz/b667d67ecfa5361a81e8f110234ce242613b0012'
@@ -1463,8 +1463,8 @@ packages:
     resolution: {integrity: sha512-JQHZ2QMW6l3aH/j6xCqQThY/9OH4D/9ls34cgkUBiEeocRTU04tHfKPBsUK1PqZCUQM7GiA0IIXJSuXHI64Kbg==}
     engines: {node: '>=0.8'}
 
-  collateral-margin@https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/34e32258cc40753c35d25915399d2e00d558b920:
-    resolution: {gitHosted: true, integrity: sha512-7X5GzMxDrpStXXPHPYZPrB1/+1aa/EQUEJDomjCNY+xaMiz/RPIskKI2zsSTW+dcrf5Kux2gPzuiby+CnqtJVw==, tarball: https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/34e32258cc40753c35d25915399d2e00d558b920}
+  collateral-margin@https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/1002e15262b12e249876ad5efbc6e2c39a0a6f96:
+    resolution: {gitHosted: true, integrity: sha512-eEpqfqWV5hG6lPaXPuhH4mjNMnlY1X8fEqey3d31NYZt661sLIDD+7xdMgYgfDFvYGA05+pbZCg/qwaqBfCF8w==, tarball: https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/1002e15262b12e249876ad5efbc6e2c39a0a6f96}
     version: 1.0.0
 
   color-convert@2.0.1:
@@ -1788,8 +1788,8 @@ packages:
   hash.js@1.1.7:
     resolution: {integrity: sha512-taOaskGt4z4SOANNseOviYDvjEJinIkRgmp7LbKP2YTTmVxWBl87s/uzK9r+44BclBSp2X7K1hqeNfz9JbBeXA==}
 
-  hashprice-oracle@https://codeload.github.com/Lumerin-protocol/hashprice-oracle/tar.gz/b65adbfeb7e6c4417747bfd3d94b6e89e162ed50:
-    resolution: {gitHosted: true, tarball: https://codeload.github.com/Lumerin-protocol/hashprice-oracle/tar.gz/b65adbfeb7e6c4417747bfd3d94b6e89e162ed50}
+  hashprice-oracle@https://codeload.github.com/Lumerin-protocol/hashprice-oracle/tar.gz/70e5a697f61077d60cef91b1079bb87be8c91030:
+    resolution: {gitHosted: true, integrity: sha512-a+AgKN7MVxbLYYxNiO612tYrd4bHfoAnoUnxb68WkaVquxmRSfan/wCqYEgyTy9qj5gOPNsxJyWvJjBzoPSiBA==, tarball: https://codeload.github.com/Lumerin-protocol/hashprice-oracle/tar.gz/70e5a697f61077d60cef91b1079bb87be8c91030}
     version: 1.0.0
 
   hasown@2.0.2:
@@ -4638,7 +4638,7 @@ snapshots:
   clone@1.0.4:
     optional: true
 
-  collateral-margin@https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/34e32258cc40753c35d25915399d2e00d558b920: {}
+  collateral-margin@https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/1002e15262b12e249876ad5efbc6e2c39a0a6f96: {}
 
   color-convert@2.0.1:
     dependencies:
@@ -5064,7 +5064,7 @@ snapshots:
       inherits: 2.0.4
       minimalistic-assert: 1.0.1
 
-  hashprice-oracle@https://codeload.github.com/Lumerin-protocol/hashprice-oracle/tar.gz/b65adbfeb7e6c4417747bfd3d94b6e89e162ed50: {}
+  hashprice-oracle@https://codeload.github.com/Lumerin-protocol/hashprice-oracle/tar.gz/70e5a697f61077d60cef91b1079bb87be8c91030: {}
 
   hasown@2.0.2:
     dependencies:

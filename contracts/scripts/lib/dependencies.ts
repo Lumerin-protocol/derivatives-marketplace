@@ -3,8 +3,9 @@ import { type Address, type PublicClient, getAddress, parseAbi } from "viem";
 // Upgrade order: the vault (`update-collateral-vault.ts`), then the engine
 // (`update-portfolio-margin-engine.ts`), then both venues while the vault is halted, then the
 // keeper and the UI; resume the vault last. A venue upgraded early still runs, but without the
-// vault's account debt and halt fixes or the engine's debt term.
-export const MIN_ENGINE_VERSION = "2.6.0";
+// vault's account debt and halt fixes or the engine's debt term, and an engine before 2.6.1
+// reads its deltas at the index instead of its exposure at the mark (N24).
+export const MIN_ENGINE_VERSION = "2.6.1";
 export const MIN_VAULT_VERSION = "1.4.3";
 const VERSION_ABI = parseAbi(["function VERSION() view returns (string)"]);
 const VENUE_ABI = parseAbi(["function vault() view returns (address)"]);

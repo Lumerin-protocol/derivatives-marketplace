@@ -11,6 +11,7 @@ import { IPortfolioMarginEngine } from "collateral-margin/contracts/contracts/in
 import { MathLib as M } from "./libs/MathLib.sol";
 import { HashPowerPerpsDEXBase } from "./HashPowerPerpsDEXBase.sol";
 import { HashPowerPerpsDEXAdmin } from "./HashPowerPerpsDEXAdmin.sol";
+import { HashPowerPerpsDEXAdminModule } from "./HashPowerPerpsDEXAdminModule.sol";
 
 /// @title HashPower Perps DEX
 /// @notice Perpetual trading contract with on-chain order book
@@ -26,10 +27,10 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @dev Lives here rather than in {HashPowerPerpsDEXBase} so that a diff to
     ///      this file and the version it ships under stay in the same place,
     ///      mirroring {Futures}.
-    string public constant VERSION = "6.14.3";
+    string public constant VERSION = "6.17.0";
 
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor(ICollateralVault _vault) HashPowerPerpsDEXBase(_vault) { }
+    constructor(ICollateralVault _vault) HashPowerPerpsDEXBase(_vault) HashPowerPerpsDEXAdmin(_vault) { }
 
     /// @notice Initialize the contract
     /// @param _priceOracle The Chainlink-style price oracle
@@ -40,7 +41,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         __Ownable_init(_msgSender());
         __UUPSUpgradeable_init();
 
-        setOracle(_priceOracle);
+        _delegateCallAdminModule(abi.encodeCall(HashPowerPerpsDEXAdminModule.setOracle, (_priceOracle)));
     }
 
     /// @notice Get current market price from oracle
@@ -455,29 +456,56 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         return positions[_user];
     }
 
-    /// @notice ILinearMarket: all per-user margin inputs in a single call
-    ///         (saves the portfolio margin engine external-call gas).
-    /// @dev Resting orders are reported as raw per-side delta and instant fill loss, not as
-    ///      a margin figure. The engine nets the deltas into portfolio net delta before
-    ///      stressing, which is exact and cross-product — the former venue-local
-    ///      "reducing" credit netted only against this venue's position, so an account
-    ///      long perps and short futures had a perps sell order credited as risk-reducing
-    ///      when filling it would take the portfolio genuinely short.
+    /// @notice ILinearMarket: all per-user margin inputs in a single call, with the
+    ///         position and resting orders valued at the mark (contracts × mark).
+    /// @dev The engine reads this and shocks the exposure by a percentage, so the mark need not
+    ///      be the index it stresses.
+    function getExposureView(address _user) external view returns (ILinearMarket.ExposureView memory view_) {
+        (ILinearMarket.RiskView memory risk, uint256 mark) = _riskView(_user);
+        uint256 scale = 10 ** QUANTITY_DECIMALS;
+        view_.netPositionExposure = risk.netPositionDelta * int256(mark) / int256(scale);
+        view_.unrealizedPnl = risk.unrealizedPnl;
+        view_.pendingFunding = risk.pendingFunding;
+        view_.buyOrderExposure = risk.buyOrderDelta * mark / scale;
+        view_.sellOrderExposure = risk.sellOrderDelta * mark / scale;
+        view_.buyOrderFillLoss = risk.buyOrderFillLoss;
+        view_.sellOrderFillLoss = risk.sellOrderFillLoss;
+    }
+
+    /// @notice ILinearMarket: all per-user margin inputs in a single call, with deltas in
+    ///         contracts.
+    /// @dev Deprecated for margin: the engine reads `getExposureView`, and this only for a venue
+    ///      without it, valuing the deltas at its index.
     function getRiskView(address _user) external view returns (ILinearMarket.RiskView memory view_) {
+        (view_,) = _riskView(_user);
+    }
+
+    /// @dev Resting orders are reported as raw per-side delta and instant fill loss, not as
+    ///      a margin figure. The engine nets them into the portfolio before stressing, which
+    ///      is exact and cross-product — the former venue-local "reducing" credit netted only
+    ///      against this venue's position, so an account long perps and short futures had a
+    ///      perps sell order credited as risk-reducing when filling it would take the
+    ///      portfolio genuinely short. Also returns the mark it priced at (0 when the account
+    ///      holds nothing).
+    function _riskView(address _user) private view returns (ILinearMarket.RiskView memory view_, uint256 currentPrice) {
         Position memory position = positions[_user];
         RestingOrderAggregate storage aggregate = userRestingOrderAggregate[_user];
         uint256 buyQty = aggregate.buyQty;
         uint256 sellQty = aggregate.sellQty;
-        if (position.netQuantity == 0 && buyQty == 0 && sellQty == 0) return view_;
+        if (position.netQuantity == 0 && buyQty == 0 && sellQty == 0) return (view_, 0);
 
-        uint256 currentPrice = getMarketPrice();
+        // Drift is part of a position's PnL only; an order-only account skips its state read.
+        DriftState memory drift;
+        if (position.netQuantity != 0) (currentPrice, drift) = _markAndDrift(true);
+        else currentPrice = getMarketPrice();
 
         view_.netPositionDelta = position.netQuantity;
         if (position.netQuantity != 0) {
             // Mark PnL only. Funding travels in `pendingFunding`; netting it in here too
             // would have the engine charge the same debt twice (it adds both terms).
-            // This deliberately differs from `getUnrealizedPnl`, which is a UX view.
-            view_.unrealizedPnl = _calculatePositionPnl(position, currentPrice);
+            // This deliberately differs from `getUnrealizedPnl`, which is a UX view. Drift is
+            // part of the position's PnL (it offsets the mark's scheduled decline), not funding.
+            view_.unrealizedPnl = _calculatePositionPnl(position, currentPrice) + _pendingDrift(_user, drift);
         }
         view_.pendingFunding = _pendingFunding(_user, currentPrice);
 
@@ -498,10 +526,25 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     function getUnrealizedPnl(address _user) external view returns (int256) {
         Position memory position = positions[_user];
         if (position.netQuantity == 0) return 0;
-        int256 pnl = _calculatePositionPnl(position, getMarketPrice());
+        (uint256 mark, DriftState memory drift) = _markAndDrift(true);
+        int256 pnl = _calculatePositionPnl(position, mark) + _pendingDrift(_user, drift);
         // Subtract pending funding (positive funding = user owes = reduces PnL)
         pnl -= getPendingFunding(_user);
         return pnl;
+    }
+
+    /// @notice Σ of the mark's scheduled decline paid to longs, per contract (collateral token
+    ///         units × 10^12). Rises when the oracle's schedule factor falls.
+    function cumulativeDriftPerUnit() external view returns (int256) {
+        return driftState.cumulativePerUnit;
+    }
+
+    /// @notice Drift accrued on the user's position and not yet folded into its entry value
+    ///         (collateral token units; positive = the user gains). Included in the PnL views.
+    function getPendingDrift(address _user) external view returns (int256) {
+        DriftState memory drift = driftState;
+        if (drift.scheduled) (, drift) = _markAndDrift(false);
+        return _pendingDrift(_user, drift);
     }
 
     /// @notice Active bid/ask price levels (bids high→low, asks low→high).

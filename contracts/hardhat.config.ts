@@ -81,6 +81,9 @@ export default defineConfig({
       "collateral-margin/contracts/contracts/interfaces/IOptionsEnginePortfolioView.sol",
       "collateral-margin/contracts/contracts/mocks/PerpsDEXMock.sol",
       "collateral-margin/contracts/contracts/mocks/OptionsEngineMock.sol",
+      "hashprice-oracle/contracts/contracts/HashpriceGlideUSD.sol",
+      "hashprice-oracle/contracts/contracts/HashpriceUSD.sol",
+      "hashprice-oracle/contracts/contracts/mocks/HashpriceBTCMock.sol",
     ],
   },
   verify: {
