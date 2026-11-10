@@ -1,178 +1,41 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { network } from "hardhat";
-import { encodeFunctionData, parseUnits, zeroAddress } from "viem";
+import { parseUnits } from "viem";
 import { TimeInForce } from "../fixtures/timeInForce.ts";
 import { deployPerpsWithCollateralFixture } from "./fixtures.ts";
 
-const { viem, networkHelpers } = await network.connect();
+const { networkHelpers } = await network.connect();
 
 type Fixture = Awaited<ReturnType<typeof deployPerpsWithCollateralFixture>>;
 type Perps = Fixture["contracts"]["perps"];
 
-async function assertCacheMatchesScan(perps: Perps, user: `0x${string}`, quantityDecimals: number) {
-  let buyQty = 0n;
-  let sellQty = 0n;
-  let buyValue = 0n;
-  let sellValue = 0n;
-  const scale = 10n ** BigInt(quantityDecimals);
-  const ids = await perps.read.getUserOrders([user]);
-  for (const id of ids) {
-    const order = await perps.read.getOrder([id]);
-    if (order.quantity > 0n) {
-      buyQty += order.quantity;
-      buyValue += (order.price * order.quantity) / scale;
-    } else {
-      const absQty = -order.quantity;
-      sellQty += absQty;
-      sellValue += (order.price * absQty) / scale;
+const EMPTY_AGGREGATE = { buyQty: 0n, sellQty: 0n, buyPQ: 0n, buyP2Q: 0n, sellPQ: 0n, sellP2Q: 0n };
+
+/** Expected cache for one side's orders: quantity and unscaled Σp·q, Σp²·q per side. */
+function aggregateOf(orders: { price: bigint; quantity: bigint }[]) {
+  const aggregate = { ...EMPTY_AGGREGATE };
+  for (const { price, quantity } of orders) {
+    if (quantity > 0n) {
+      aggregate.buyQty += quantity;
+      aggregate.buyPQ += price * quantity;
+      aggregate.buyP2Q += price * price * quantity;
+    } else if (quantity < 0n) {
+      aggregate.sellQty -= quantity;
+      aggregate.sellPQ -= price * quantity;
+      aggregate.sellP2Q -= price * price * quantity;
     }
   }
-  assert.deepEqual(await perps.read.getOrderAggregate([user]), {
-    buyQty,
-    sellQty,
-    buyValue,
-    sellValue,
-  });
+  return aggregate;
+}
+
+async function assertCacheMatchesScan(perps: Perps, user: `0x${string}`) {
+  const ids = await perps.read.getUserOrders([user]);
+  const orders = await Promise.all(ids.map((id) => perps.read.getOrder([id])));
+  assert.deepEqual(await perps.read.getOrderAggregate([user]), aggregateOf(orders));
 }
 
 describe("HashPowerPerpsDEX order aggregate cache migration", function () {
-  it("atomically rebuilds old proxy orders into the new aggregate", async function () {
-    const { contracts, accounts, config } = await networkHelpers.loadFixture(
-      deployPerpsWithCollateralFixture,
-    );
-    const { perps, vault } = contracts;
-    const { owner, buyer } = accounts;
-    const price = await perps.read.getMarketPrice();
-    const tick = config.minimumPriceIncrement;
-    const buyQty = parseUnits("1.25", config.quantityDecimals);
-    const sellQty = parseUnits("2.5", config.quantityDecimals);
-    const buyPrice = price - tick;
-    const sellPrice = price + tick;
-
-    await perps.write.createOrder([buyPrice, buyQty, TimeInForce.GTC], {
-      account: buyer.account,
-    });
-    await perps.write.createOrder([sellPrice, -sellQty, TimeInForce.GTC], {
-      account: buyer.account,
-    });
-
-    const harnessImpl = await viem.deployContract("HashPowerPerpsDEXMigrationHarness", [
-      vault.address,
-    ]);
-    await perps.write.upgradeToAndCall([harnessImpl.address, "0x"], {
-      account: owner.account,
-    });
-    const harness = await viem.getContractAt(
-      "HashPowerPerpsDEXMigrationHarness",
-      perps.address,
-    );
-    await harness.write.clearOrderAggregateCache([buyer.account.address], {
-      account: owner.account,
-    });
-    assert.deepEqual(await harness.read.getOrderAggregate([buyer.account.address]), {
-      buyQty: 0n,
-      sellQty: 0n,
-      buyValue: 0n,
-      sellValue: 0n,
-    });
-    const zeroRisk = await harness.read.getRiskView([buyer.account.address]);
-    assert.equal(zeroRisk.buyOrderDelta, 0n);
-    assert.equal(zeroRisk.sellOrderDelta, 0n);
-    await assert.rejects(
-      () =>
-        harness.write.rebuildOrderAggregateCache([[buyer.account.address]], {
-          account: buyer.account,
-        }),
-      /OwnableUnauthorizedAccount/,
-    );
-
-    const fixedImpl = await viem.deployContract("HashPowerPerpsDEX", [vault.address]);
-    const revertingData = encodeFunctionData({
-      abi: fixedImpl.abi,
-      functionName: "setPortfolioMargin",
-      args: [zeroAddress],
-    });
-    await assert.rejects(
-      () =>
-        harness.write.upgradeToAndCall([fixedImpl.address, revertingData], {
-          account: owner.account,
-        }),
-      /ZeroAddress/,
-    );
-    // A failed migration rolls the implementation write back too.
-    await harness.write.clearOrderAggregateCache([buyer.account.address], {
-      account: owner.account,
-    });
-
-    const migrationData = encodeFunctionData({
-      abi: fixedImpl.abi,
-      functionName: "rebuildOrderAggregateCache",
-      args: [[buyer.account.address, buyer.account.address, owner.account.address]],
-    });
-    await harness.write.upgradeToAndCall([fixedImpl.address, migrationData], {
-      account: owner.account,
-    });
-
-    const upgraded = await viem.getContractAt("HashPowerPerpsDEX", perps.address);
-    assert.deepEqual(await upgraded.read.getOrderAggregate([buyer.account.address]), {
-      buyQty,
-      sellQty,
-      buyValue: (buyPrice * buyQty) / 10n ** BigInt(config.quantityDecimals),
-      sellValue: (sellPrice * sellQty) / 10n ** BigInt(config.quantityDecimals),
-    });
-    assert.deepEqual(await upgraded.read.getOrderAggregate([owner.account.address]), {
-      buyQty: 0n,
-      sellQty: 0n,
-      buyValue: 0n,
-      sellValue: 0n,
-    });
-  });
-
-  it("atomically zeros the reused legacy liquidation-fee slot", async function () {
-    const { contracts, accounts } = await networkHelpers.loadFixture(
-      deployPerpsWithCollateralFixture,
-    );
-    const { perps, vault } = contracts;
-    const { owner } = accounts;
-
-    const harnessImpl = await viem.deployContract("HashPowerPerpsDEXMigrationHarness", [
-      vault.address,
-    ]);
-    await perps.write.upgradeToAndCall([harnessImpl.address, "0x"], {
-      account: owner.account,
-    });
-    const harness = await viem.getContractAt(
-      "HashPowerPerpsDEXMigrationHarness",
-      perps.address,
-    );
-    await harness.write.setLegacyRevenueSlot([123_456n], { account: owner.account });
-    assert.equal(await harness.read.legacyRevenueSlot(), 123_456n);
-
-    const fixedImpl = await viem.deployContract("HashPowerPerpsDEX", [vault.address]);
-    const migrationData = encodeFunctionData({
-      abi: fixedImpl.abi,
-      functionName: "initializeV3",
-    });
-    await harness.write.upgradeToAndCall([fixedImpl.address, migrationData], {
-      account: owner.account,
-    });
-
-    const upgraded = await viem.getContractAt("HashPowerPerpsDEX", perps.address);
-    // Live fee-pot view is the vault balance (empty here); the gapped slot was zeroed.
-    assert.equal(await upgraded.read.collectedFeesBalance(), 0n);
-    const publicClient = await viem.getPublicClient();
-    const legacySlot = await publicClient.getStorageAt({
-      address: perps.address,
-      slot: "0x2",
-    });
-    assert.equal(BigInt(legacySlot ?? "0x0"), 0n);
-    await assert.rejects(
-      () => upgraded.write.initializeV3({ account: owner.account }),
-      /InvalidInitialization/,
-    );
-  });
-
   it("keeps mixed aggregates exact across create, reduce, cancel, fill, and self-cross", async function () {
     const { contracts, accounts, config } = await networkHelpers.loadFixture(
       deployPerpsWithCollateralFixture,
@@ -189,7 +52,7 @@ describe("HashPowerPerpsDEX order aggregate cache migration", function () {
     await perps.write.createOrder([price + tick, -4n * qty, TimeInForce.GTC], {
       account: buyer.account,
     });
-    await assertCacheMatchesScan(perps, buyer.account.address, config.quantityDecimals);
+    await assertCacheMatchesScan(perps, buyer.account.address);
 
     const buyerIds = await perps.read.getUserOrders([buyer.account.address]);
     const orders = await Promise.all(buyerIds.map((id) => perps.read.getOrder([id])));
@@ -201,7 +64,7 @@ describe("HashPowerPerpsDEX order aggregate cache migration", function () {
       account: buyer.account,
     });
     await perps.write.cancelOrder([buyerIds[sellIndex]], { account: buyer.account });
-    await assertCacheMatchesScan(perps, buyer.account.address, config.quantityDecimals);
+    await assertCacheMatchesScan(perps, buyer.account.address);
 
     await perps.write.createOrder([price + 2n * tick, -3n * qty, TimeInForce.GTC], {
       account: seller.account,
@@ -209,11 +72,11 @@ describe("HashPowerPerpsDEX order aggregate cache migration", function () {
     await perps.write.createOrder([price + 2n * tick, qty, TimeInForce.GTC], {
       account: buyer.account,
     });
-    await assertCacheMatchesScan(perps, seller.account.address, config.quantityDecimals);
+    await assertCacheMatchesScan(perps, seller.account.address);
     await perps.write.createOrder([price + 2n * tick, 2n * qty, TimeInForce.GTC], {
       account: buyer.account,
     });
-    await assertCacheMatchesScan(perps, seller.account.address, config.quantityDecimals);
+    await assertCacheMatchesScan(perps, seller.account.address);
 
     await perps.write.createOrder([price + 3n * tick, -3n * qty, TimeInForce.GTC], {
       account: buyer.account,
@@ -221,11 +84,11 @@ describe("HashPowerPerpsDEX order aggregate cache migration", function () {
     await perps.write.createOrder([price + 3n * tick, qty, TimeInForce.GTC], {
       account: buyer.account,
     });
-    await assertCacheMatchesScan(perps, buyer.account.address, config.quantityDecimals);
+    await assertCacheMatchesScan(perps, buyer.account.address);
   });
 
   it("uses canonical remaining-order rounding after partial and full fills", async function () {
-    const { contracts, accounts, config } = await networkHelpers.loadFixture(
+    const { contracts, accounts } = await networkHelpers.loadFixture(
       deployPerpsWithCollateralFixture,
     );
     const { perps } = contracts;
@@ -238,15 +101,15 @@ describe("HashPowerPerpsDEX order aggregate cache migration", function () {
     await perps.write.createOrder([price, 1n, TimeInForce.GTC], {
       account: buyer.account,
     });
-    await assertCacheMatchesScan(perps, seller.account.address, config.quantityDecimals);
+    await assertCacheMatchesScan(perps, seller.account.address);
 
     await perps.write.createOrder([price, 2n, TimeInForce.GTC], {
       account: buyer.account,
     });
-    await assertCacheMatchesScan(perps, seller.account.address, config.quantityDecimals);
+    await assertCacheMatchesScan(perps, seller.account.address);
   });
 
-  it("clears both aggregate sides during resetState", async function () {
+  it("clears both aggregate sides during forceCancelOrders", async function () {
     const { contracts, accounts, config } = await networkHelpers.loadFixture(
       deployPerpsWithCollateralFixture,
     );
@@ -263,16 +126,11 @@ describe("HashPowerPerpsDEX order aggregate cache migration", function () {
       [price + config.minimumPriceIncrement, -qty, TimeInForce.GTC],
       { account: buyer.account },
     );
-    await perps.write.resetState([[buyer.account.address]], {
+    await perps.write.forceCancelOrders([[buyer.account.address]], {
       account: owner.account,
     });
 
-    assert.deepEqual(await perps.read.getOrderAggregate([buyer.account.address]), {
-      buyQty: 0n,
-      sellQty: 0n,
-      buyValue: 0n,
-      sellValue: 0n,
-    });
+    assert.deepEqual(await perps.read.getOrderAggregate([buyer.account.address]), EMPTY_AGGREGATE);
     assert.equal((await perps.read.getUserOrders([buyer.account.address])).length, 0);
   });
 });

@@ -69,7 +69,7 @@ jobs:
           ORDER_FEE: ${{ vars.ORDER_FEE }}
           PERPS_ADDRESS: ${{ vars.PERPS_ADDRESS }}
           PERPS_START_BLOCK: ${{ vars.PERPS_START_BLOCK }}
-          PRICE_ORACLE_ADDRESS: ${{ vars.PRICE_ORACLE_ADDRESS }}
+          MARK_ORACLE_ADDRESS: ${{ vars.MARK_ORACLE_ADDRESS }}
           DEPLOYER_PRIVATEKEY: ${{ secrets.DEPLOYER_PRIVATEKEY }}
           ETH_NODE_ADDRESS: ${{ secrets.ETH_NODE_ADDRESS }}
           ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}

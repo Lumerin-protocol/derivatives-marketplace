@@ -99,18 +99,23 @@ async function benchmarkViews() {
     ["FUNDING_DECIMALS()", "FUNDING_DECIMALS", []],
     ["MAX_ORACLE_STALENESS()", "MAX_ORACLE_STALENESS", []],
     ["MAX_ORDERS_PER_PARTICIPANT()", "MAX_ORDERS_PER_PARTICIPANT", []],
+    ["MAX_ORDER_QUANTITY()", "MAX_ORDER_QUANTITY", []],
+    ["MAX_PRICE()", "MAX_PRICE", []],
     ["MAX_PRICE_LEVELS_PER_SIDE()", "MAX_PRICE_LEVELS_PER_SIDE", []],
     ["QUANTITY_DECIMALS()", "QUANTITY_DECIMALS", []],
     ["UPGRADE_INTERFACE_VERSION()", "UPGRADE_INTERFACE_VERSION", []],
     ["VERSION()", "VERSION", []],
     ["collectedFeesBalance()", "collectedFeesBalance", []],
+    ["cumulativeDriftPerUnit()", "cumulativeDriftPerUnit", []],
     ["cumulativeFundingPerUnit()", "cumulativeFundingPerUnit", []],
     ["fundingPeriod()", "fundingPeriod", []],
     ["fundingRateMaxBps()", "fundingRateMaxBps", []],
+    ["getExposureView(address)", "getExposureView", [user]],
     ["getMarketPrice()", "getMarketPrice", []],
     ["getOrder(bytes32)", "getOrder", [orderId]],
     ["getOrderAggregate(address)", "getOrderAggregate", [user]],
     ["getOrderBookPrices(uint256)", "getOrderBookPrices", [200n]],
+    ["getPendingDrift(address)", "getPendingDrift", [user]],
     ["getPendingFunding(address)", "getPendingFunding", [user]],
     ["getQuantityAtPrice(uint256,bool)", "getQuantityAtPrice", [mark - tick, true]],
     ["getRiskView(address)", "getRiskView", [user]],
@@ -137,7 +142,8 @@ async function benchmarkViews() {
   }
 }
 
-/** Risk view cost as a participant's resting book grows, up to `MAX_ORDERS_PER_PARTICIPANT`. */
+/** Risk view cost as a participant's resting book grows, up to `MAX_ORDERS_PER_PARTICIPANT`;
+ *  `getExposureView` is the engine's read, `getRiskView` the deprecated one. */
 async function benchmarkScaledRiskViews() {
   for (const count of [0, 1, 10, 50, 100]) {
     const data = await fresh();
@@ -149,6 +155,7 @@ async function benchmarkScaledRiskViews() {
     for (let i = 0; i < intents.length; i += 10) {
       await perps.write.createOrders([intents.slice(i, i + 10)], { account: buyer.account });
     }
+    await recordView(pc, perps, "getExposureView(address)", "getExposureView", [buyer.account.address], `${count}-orders`);
     await recordView(pc, perps, "getRiskView(address)", "getRiskView", [buyer.account.address], `${count}-orders`);
   }
 }
@@ -224,6 +231,103 @@ async function benchmarkOrderPlacement() {
   }
 }
 
+/** Fee average at the 2026 level, about 150 T difficulty and BTC at $100,000: an index near $42. */
+const HASHPRICE_FEES = 3_150_000n;
+const HASHPRICE_DIFFICULTY = 150_000_000_000_000n;
+const BTC_USD = 10_000_000_000_000n;
+
+type FeedSetup = "index feed" | "glide feed, before the glide" | "glide feed, during the glide";
+
+/**
+ * Perps on the real oracle chain: `HashpriceBTCMock` (any Bitcoin height) → `HashpriceUSD` →
+ * `HashpriceGlideUSD`, the engine on `HashpriceUSD`. The mock reads more storage than the real
+ * `HashpriceBTC` cache, so absolute costs here run high; the difference between the setups is what
+ * the glide feed and drift funding add.
+ */
+async function feedFixture(setup: FeedSetup) {
+  const data = await fresh();
+  const { perps, pme } = data.contracts;
+  const { owner } = data.accounts;
+  const btc = await viem.deployContract("HashpriceBTCMock", []);
+  const btcUsd = await viem.deployContract("PriceOracleMock", [BTC_USD, 8]);
+  const hashpriceUSD = await viem.deployContract("HashpriceUSD", [btc.address, btcUsd.address]);
+  const glideUSD = await viem.deployContract("HashpriceGlideUSD", [hashpriceUSD.address]);
+  const halving = 5n * (await glideUSD.read.HALVING_INTERVAL());
+  const glideBlocks = await glideUSD.read.GLIDE_BLOCKS();
+  const glideStart = halving - glideBlocks - (await glideUSD.read.GLIDE_END_BLOCKS());
+  const relay = (height: bigint) => btc.write.setBlock([Number(height), HASHPRICE_FEES, HASHPRICE_DIFFICULTY]);
+  // 30 days before the glide: far enough that the feed promises a fixed factor.
+  const start = glideStart - 30n * 144n;
+  await relay(start);
+  await pme.write.setOracle([hashpriceUSD.address], { account: owner.account });
+  await perps.write.setOracle([setup === "index feed" ? hashpriceUSD.address : glideUSD.address], {
+    account: owner.account,
+  });
+  // Into the glide at the target block time, as the relay would deliver it.
+  const enterGlide = async () => {
+    if (setup !== "glide feed, during the glide") return;
+    const height = glideStart + glideBlocks / 2n;
+    await networkHelpers.time.increase(Number((height - start) * 600n));
+    await relay(height);
+    await btcUsd.write.setPrice([BTC_USD, 8]);
+  };
+  return { ...data, btcUsd, enterGlide };
+}
+
+async function benchmarkOracleFeeds() {
+  const setups: FeedSetup[] = ["index feed", "glide feed, before the glide", "glide feed, during the glide"];
+  for (const setup of setups) {
+    {
+      const data = await feedFixture(setup);
+      const { perps } = data.contracts;
+      const { seller, buyer, pc } = data.accounts;
+      await fund(data, [seller, buyer]);
+      const one = units(data, "1");
+      const mark = await perps.read.getMarketPrice();
+      await perps.write.createOrder([mark, -one, TimeInForce.GTC], { account: seller.account });
+      await perps.write.createOrder([mark, one, TimeInForce.GTC], { account: buyer.account });
+      await data.enterGlide();
+      const glideMark = await perps.read.getMarketPrice();
+      const tick = data.config.minimumPriceIncrement;
+      await recordTransaction(
+        pc,
+        "createOrder(uint256,int256,uint8)",
+        `${setup}: resting order, new level`,
+        perps.write.createOrder([glideMark - 5n * tick, one, TimeInForce.GTC], { account: buyer.account }),
+      );
+      await perps.write.createOrder([glideMark, -one, TimeInForce.GTC], { account: seller.account });
+      await recordTransaction(
+        pc,
+        "createOrder(uint256,int256,uint8)",
+        `${setup}: full match, both sides holding positions`,
+        perps.write.createOrder([glideMark, one, TimeInForce.GTC], { account: buyer.account }),
+      );
+      await recordView(pc, perps, "getExposureView(address)", "getExposureView", [buyer.account.address], `${setup}: position and order`);
+      await recordTransaction(pc, "updateFunding()", `${setup}: no book`, perps.write.updateFunding({ account: buyer.account }));
+    }
+    {
+      const data = await feedFixture(setup);
+      const { perps, vault } = data.contracts;
+      const { owner, seller, buyer, buyer2, pc } = data.accounts;
+      const one = units(data, "1");
+      const mark = await perps.read.getMarketPrice();
+      await perps.write.setLiquidationFeeBps([100], { account: owner.account });
+      await vault.write.deposit([data.utils.getMinimumCollateral(mark, one)], { account: seller.account });
+      await vault.write.deposit([parseUnits("1000", 6)], { account: buyer.account });
+      await perps.write.createOrder([mark, -one, TimeInForce.GTC], { account: seller.account });
+      await perps.write.createOrder([mark, one, TimeInForce.GTC], { account: buyer.account });
+      await data.enterGlide();
+      await data.btcUsd.write.setPrice([BTC_USD * 2n, 8]);
+      await recordTransaction(
+        pc,
+        "liquidatePosition(address,uint256)",
+        `${setup}: full close`,
+        perps.write.liquidatePosition([seller.account.address, one], { account: buyer2.account }),
+      );
+    }
+  }
+}
+
 async function benchmarkOrderMaintenance() {
   const restingBook = async () => {
     const data = await fresh();
@@ -291,19 +395,19 @@ async function benchmarkOrderMaintenance() {
   }
 }
 
-/** Seller short one contract on minimum collateral; doubling the mark leaves it underwater. */
-async function underwaterSeller(withRestingOrders: boolean) {
+/** Seller short `quantity` on minimum collateral; doubling the mark leaves it underwater. */
+async function underwaterSeller(withRestingOrders: boolean, quantity = "1") {
   const data = await fresh();
   const { perps, priceOracle, vault } = data.contracts;
   const { owner, seller, buyer } = data.accounts;
-  const one = units(data, "1");
+  const positionQuantity = units(data, quantity);
   const mark = await perps.read.getMarketPrice();
   const tick = data.config.minimumPriceIncrement;
-  const minimum = data.utils.getMinimumCollateral(mark, one);
+  const minimum = data.utils.getMinimumCollateral(mark, positionQuantity);
   await perps.write.setLiquidationFeeBps([100], { account: owner.account });
   await vault.write.deposit([withRestingOrders ? minimum * 2n : minimum], { account: seller.account });
   await vault.write.deposit([minimum * 3n], { account: buyer.account });
-  await openPosition(data, one);
+  await openPosition(data, positionQuantity);
   if (withRestingOrders) {
     const rest = units(data, "0.1");
     await perps.write.createOrder([mark + 5n * tick, -rest, TimeInForce.GTC], { account: seller.account });
@@ -326,15 +430,31 @@ async function benchmarkLiquidations() {
     );
   }
   {
-    const data = await underwaterSeller(false);
-    const { perps } = data.contracts;
+    const data = await underwaterSeller(false, "2");
+    const { perps, vault } = data.contracts;
     const { seller, buyer2, pc } = data.accounts;
+    const closeQuantity = units(data, "0.5");
     await recordTransaction(
       pc,
       "liquidatePosition(address,uint256)",
-      "partial close",
-      perps.write.liquidatePosition([seller.account.address, units(data, "0.5")], { account: buyer2.account }),
+      "partial close, first debt accrual",
+      perps.write.liquidatePosition([seller.account.address, closeQuantity], { account: buyer2.account }),
     );
+    const firstDebt = await vault.read.accountDebt([seller.account.address]);
+    assert.ok(firstDebt > 0n);
+    // Restore the same amount of spendable collateral the first close began with. The
+    // account remains underwater because its debt is part of MM, while the second close
+    // measures the established-account path (existing debt and backstop position).
+    const movedMark = await perps.read.getMarketPrice();
+    const initialCollateral = data.utils.getMinimumCollateral(movedMark / 2n, units(data, "2"));
+    await vault.write.deposit([initialCollateral], { account: seller.account });
+    await recordTransaction(
+      pc,
+      "liquidatePosition(address,uint256)",
+      "partial close, subsequent debt accrual",
+      perps.write.liquidatePosition([seller.account.address, closeQuantity], { account: buyer2.account }),
+    );
+    assert.ok((await vault.read.accountDebt([seller.account.address])) > firstDebt);
   }
   {
     const data = await underwaterSeller(true);
@@ -471,21 +591,11 @@ async function benchmarkAdminAndLifecycle() {
     const users = [data.accounts.seller.account.address, data.accounts.buyer.account.address];
     await recordTransaction(
       data.accounts.pc,
-      "rebuildOrderAggregateCache(address[])",
+      "forceCancelOrders(address[])",
       "two users with one order each",
-      perps.write.rebuildOrderAggregateCache([users], owner(data)),
-    );
-    await recordTransaction(
-      data.accounts.pc,
-      "resetState(address[])",
-      "two participants with order-and-position state",
-      perps.write.resetState([users], owner(data)),
+      perps.write.forceCancelOrders([users], owner(data)),
     );
   }
-  await admin("initializeV2(address,address)", "fresh proxy", (d) =>
-    d.contracts.perps.write.initializeV2([d.contracts.vault.address, d.contracts.pme.address], owner(d)),
-  );
-  await admin("initializeV3()", "fresh proxy", (d) => d.contracts.perps.write.initializeV3(owner(d)));
   {
     const data = await fresh();
     const implementation = await viem.deployContract("HashPowerPerpsDEX", [data.contracts.vault.address]);
@@ -511,10 +621,11 @@ describe("Perps gas benchmark", () => {
     await benchmarkLiquidations();
     await benchmarkFunding();
     await benchmarkAdminAndLifecycle();
+    await benchmarkOracleFeeds();
 
     const snapshot = gas.snapshot();
     const coverage = assertAbiFunctionCoverage(HashPowerPerpsDEXAbi, snapshot, exclusions);
-    assert.equal(coverage.covered.length, 65);
+    assert.equal(coverage.covered.length, 67);
     assert.deepEqual(coverage.excluded, ["initialize(address,address)", "proxiableUUID()"]);
 
     await mkdir(fileURLToPath(new URL("../../benchmarks", import.meta.url)), { recursive: true });

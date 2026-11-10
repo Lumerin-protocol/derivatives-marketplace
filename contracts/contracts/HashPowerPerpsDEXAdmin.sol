@@ -2,18 +2,22 @@
 pragma solidity ^0.8.20;
 
 import { AggregatorV3Interface } from "./interfaces/AggregatorV3Interface.sol";
+import { ICollateralVault } from "collateral-margin/contracts/contracts/interfaces/ICollateralVault.sol";
 import { IPortfolioMarginEngine } from "collateral-margin/contracts/contracts/interfaces/IPortfolioMarginEngine.sol";
-import { IPointsHook } from "collateral-margin/contracts/contracts/interfaces/IPointsHook.sol";
 import { HashPowerPerpsDEXBase } from "./HashPowerPerpsDEXBase.sol";
+import { HashPowerPerpsDEXAdminModule } from "./HashPowerPerpsDEXAdminModule.sol";
 
 /// @title HashPowerPerpsDEXAdmin — owner-only governance surface for {HashPowerPerpsDEX}
 /// @notice Every entry point here is `onlyOwner`, plus the UUPS upgrade authorization
 ///         hook. Splitting them out keeps {HashPowerPerpsDEX} to the permissionless
 ///         surface — trading, liquidation and views — so a reader can tell at a glance
 ///         which calls a counterparty can make and which only governance can.
-/// @dev The initializers stay in {HashPowerPerpsDEX}: `initializeV2` is `onlyOwner` too,
-///      but it belongs with `initialize` as deployment/upgrade lifecycle rather than
-///      ongoing governance, and splitting the two apart would read worse than either.
+///         Apart from `setOracle` (which `initialize` calls) the bodies live in
+///         {HashPowerPerpsDEXAdminModule}, so the implementation fits EIP-170: each entry
+///         point here forwards its calldata there by delegatecall, in the proxy's storage,
+///         and the module checks `onlyOwner`.
+/// @dev `initialize` stays in {HashPowerPerpsDEX} as deployment lifecycle rather than
+///      ongoing governance.
 /// @dev Declares **no storage**. It sits between {HashPowerPerpsDEXBase} and
 ///      {HashPowerPerpsDEX} purely to partition the function surface, and a stateless
 ///      layer cannot move a slot: state is laid out in linearization order and every
@@ -23,192 +27,122 @@ import { HashPowerPerpsDEXBase } from "./HashPowerPerpsDEXBase.sol";
 ///      needed, declare it in {HashPowerPerpsDEXBase} at the end alongside the existing
 ///      gap slots.
 abstract contract HashPowerPerpsDEXAdmin is HashPowerPerpsDEXBase {
+    /// @dev Created with this implementation and the same vault, so its immutables match.
+    ///      Bytecode, not storage: the layout is unchanged.
+    /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
+    address private immutable adminModule;
+
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor(ICollateralVault _vault) {
+        adminModule = address(new HashPowerPerpsDEXAdminModule(_vault));
+    }
+
     /// @notice Authorize upgrade (only owner)
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
 
     // ── Dependencies ──────────────────────────────────────────────────────────
 
-    /// @notice Set the portfolio margin engine for cross-product margin checks.
-    /// @dev Every order and every liquidation routes through the engine, and the venue
-    ///      never null-checks it, so a wrong address here bricks the book. The engine must
-    ///      also aggregate this venue's own vault and answer every risk-parameter read used
-    ///      by the venue.
-    function setPortfolioMargin(IPortfolioMarginEngine _pm) external onlyOwner {
-        if (address(_pm) == address(0)) revert ZeroAddress();
-        _setPortfolioMargin(_pm);
+    /// @notice See {HashPowerPerpsDEXAdminModule-setPortfolioMargin}.
+    function setPortfolioMargin(IPortfolioMarginEngine _pm) external {
+        _pm;
+        _delegateToAdminModule();
     }
 
-    /// @notice Set (or clear) the points/rewards hook. Pass `address(0)` to disable points.
-    /// @dev The venue proxy must hold `HOOK_CALLER_ROLE` on the hook BEFORE it is plugged in:
-    ///      hook calls are not try/catch-isolated, so a hook that reverts (e.g. missing role,
-    ///      or after the POINTS token is finalized) would block fills and liquidations. Clear
-    ///      the hook with `address(0)` to disable points instantly.
-    function setHook(address _hook) external onlyOwner {
-        // Only a code check: `IPointsHook` exposes nothing readable, and both of its entry
-        // points mutate state, so a setter has nothing it can safely probe.
-        if (_hook != address(0)) _requireContract(_hook);
-
-        hook = IPointsHook(_hook);
-        emit HookUpdated(_hook);
+    /// @notice See {HashPowerPerpsDEXAdminModule-setHook}.
+    function setHook(address _hook) external {
+        _hook;
+        _delegateToAdminModule();
     }
 
-    /// @notice Set the price oracle.
-    /// @dev Smoke-tests the feed before adopting it. Requires it to already serve a
-    ///      positive, initialized round: a feed that never answers reads as price 0,
-    ///      which would mark every position at zero.
-    /// @dev `public` rather than `external` because `initialize` wires the first feed
-    ///      through here — it runs after `__Ownable_init`, so `onlyOwner` is satisfied.
-    function setOracle(AggregatorV3Interface _oracle) public onlyOwner {
-        address oracle = address(_oracle);
-        if (oracle == address(0)) revert InvalidOracle();
-        _requireContract(oracle);
-
-        int256 answer;
-        uint256 updatedAt;
-        try _oracle.latestRoundData() returns (uint80, int256 _answer, uint256, uint256 _updatedAt, uint80) {
-            answer = _answer;
-            updatedAt = _updatedAt;
-        } catch {
-            revert InvalidDependency();
-        }
-        _validateOracleRound(answer, updatedAt);
-
-        uint8 dec;
-        try _oracle.decimals() returns (uint8 _dec) {
-            dec = _dec;
-        } catch {
-            revert InvalidDependency();
-        }
-
-        priceOracle = _oracle;
-        oracleDecimals = dec;
-        emit OracleUpdated(oracle);
+    /// @notice See {HashPowerPerpsDEXAdminModule-setOracle}. `initialize` reaches it through
+    ///      `_delegateCallAdminModule`, since a stub forwards the transaction's own calldata.
+    function setOracle(AggregatorV3Interface _oracle) external {
+        _oracle;
+        _delegateToAdminModule();
     }
 
     // ── Fees ──────────────────────────────────────────────────────────────────
 
-    /// @notice Set maker fee in basis points
-    /// @param _makerFeeBps Maker fee (e.g., 0 = 0%). Bounded by {_validateFees}.
-    function setMakerFeeBps(int16 _makerFeeBps) external onlyOwner {
-        _validateFees(_makerFeeBps, takerFeeBps);
-        makerFeeBps = _makerFeeBps;
-        emit MakerFeeBpsUpdated(_makerFeeBps);
+    /// @notice See {HashPowerPerpsDEXAdminModule-setMakerFeeBps}.
+    function setMakerFeeBps(int16 _makerFeeBps) external {
+        _makerFeeBps;
+        _delegateToAdminModule();
     }
 
-    /// @notice Set taker fee in basis points
-    /// @param _takerFeeBps Taker fee (e.g., 5 = 0.05%). Bounded by {_validateFees}.
-    function setTakerFeeBps(int16 _takerFeeBps) external onlyOwner {
-        _validateFees(makerFeeBps, _takerFeeBps);
-        takerFeeBps = _takerFeeBps;
-        emit TakerFeeBpsUpdated(_takerFeeBps);
+    /// @notice See {HashPowerPerpsDEXAdminModule-setTakerFeeBps}.
+    function setTakerFeeBps(int16 _takerFeeBps) external {
+        _takerFeeBps;
+        _delegateToAdminModule();
     }
 
-    /// @notice Withdraw accrued trading and liquidation revenue to the venue owner.
-    /// @dev Drains the venue's vault account (the fee pot). No separate accumulator.
-    function withdrawCollectedFees() external onlyOwner {
-        vault.withdrawTo(owner(), _vaultBalance(address(this)));
+    /// @notice See {HashPowerPerpsDEXAdminModule-withdrawCollectedFees}.
+    function withdrawCollectedFees() external {
+        _delegateToAdminModule();
     }
 
-    /// @notice Set the liquidation fee in basis points on the liquidated notional.
-    /// @param _bps Fee in bps (e.g., 50 = 0.5% of the closed position or cancelled order value).
-    ///         Capped at `BPS` (100% of notional); same bound as {setLiquidatorShareBps}.
-    function setLiquidationFeeBps(uint16 _bps) external onlyOwner {
-        _validateBPS(_bps);
-        liquidationFeeBps = _bps;
-        emit LiquidationFeeBpsUpdated(_bps);
+    /// @notice See {HashPowerPerpsDEXAdminModule-setLiquidationFeeBps}.
+    function setLiquidationFeeBps(uint16 _bps) external {
+        _bps;
+        _delegateToAdminModule();
     }
 
-    /// @notice Set the liquidator's share of the liquidation fee in basis points.
-    /// @param _bps Share in bps (e.g., 5000 = 50% to liquidator, remainder to venue revenue).
-    function setLiquidatorShareBps(uint16 _bps) external onlyOwner {
-        _validateBPS(_bps);
-        liquidatorShareBps = _bps;
-        emit LiquidatorShareBpsUpdated(_bps);
+    /// @notice See {HashPowerPerpsDEXAdminModule-setLiquidatorShareBps}.
+    function setLiquidatorShareBps(uint16 _bps) external {
+        _bps;
+        _delegateToAdminModule();
     }
 
     // ── Risk parameters ───────────────────────────────────────────────────────
 
-    /// @notice Set the deprecated minimum-margin compatibility value.
-    /// @dev Retained with its event for ABI and storage compatibility. Order placement and
-    ///      reduction do not enforce this value; portfolio IM is the canonical requirement.
-    /// @param _minimumMarginPerOrder Compatibility value reported by the legacy getter.
-    function setMinimumMarginPerOrder(uint256 _minimumMarginPerOrder) external onlyOwner {
-        minimumMarginPerOrder = _minimumMarginPerOrder;
-        emit MinimumMarginPerOrderUpdated(_minimumMarginPerOrder);
+    /// @notice See {HashPowerPerpsDEXAdminModule-setMinimumMarginPerOrder}.
+    function setMinimumMarginPerOrder(uint256 _minimumMarginPerOrder) external {
+        _minimumMarginPerOrder;
+        _delegateToAdminModule();
     }
 
-    /// @notice Set funding rate parameters
-    /// @param _fundingRateMaxBps Max absolute funding rate per period in basis points (e.g., 100 = 1%)
-    /// @param _fundingPeriod Time period for max funding rate in seconds (e.g., 86400 = 24 hours)
-    function setFundingParameters(uint256 _fundingRateMaxBps, uint256 _fundingPeriod) external onlyOwner {
-        if (_fundingPeriod == 0) {
-            revert InvalidFundingParameters();
-        }
-
-        // Settle any accrued funding before changing parameters
-        _updateGlobalFunding();
-
-        fundingRateMaxBps = _fundingRateMaxBps;
-        fundingPeriod = _fundingPeriod;
-
-        // Initialize timestamp on first call to prevent retroactive accrual
-        if (lastFundingUpdateTime == 0) {
-            lastFundingUpdateTime = block.timestamp;
-        }
-
-        emit FundingParametersUpdated(_fundingRateMaxBps, _fundingPeriod);
-    }
-
-    // ── Upgrade migrations ────────────────────────────────────────────────────
-
-    /// @notice Rebuild all order aggregate fields for accounts with orders predating v2.13.
-    /// @dev Call through `upgradeToAndCall` so legacy orders are migrated atomically
-    ///      with the implementation upgrade.
-    function rebuildOrderAggregateCache(address[] calldata _users) external onlyOwner {
-        _rebuildOrderAggregateCaches(_users);
-    }
-
-    function _rebuildOrderAggregateCaches(address[] calldata _users) internal {
-        uint256 len = _users.length;
-        for (uint256 i = 0; i < len; i++) {
-            _rebuildOrderAggregateCache(_users[i]);
-        }
+    /// @notice See {HashPowerPerpsDEXAdminModule-setFundingParameters}.
+    function setFundingParameters(uint256 _fundingRateMaxBps, uint256 _fundingPeriod) external {
+        (_fundingRateMaxBps, _fundingPeriod);
+        _delegateToAdminModule();
     }
 
     // ── Escape hatch ──────────────────────────────────────────────────────────
 
-    /// @notice Close the given users' positions at the current mark, realizing PnL against the
-    ///         insurance fund. No fee, no backstop hand-off: the fund's implicit position closes
-    ///         with the users'. Emits `PositionLiquidated` so indexers need nothing new.
-    /// @dev Only while the vault is halted, so no fill can land between users. Funding is settled
-    ///      per user first. Flat users are skipped. Resting orders are left alone; they carry no
-    ///      exposure until they fill.
-    function forceClosePositions(address[] calldata _users) external onlyOwner {
-        if (!vault.halted()) revert NotHalted();
-        _updateGlobalFunding();
-        uint256 mark = _marketPrice();
-        for (uint256 i = 0; i < _users.length; i++) {
-            address user = _users[i];
-            _settleFunding(user);
-            Position memory position = positions[user];
-            if (position.netQuantity == 0) continue;
-            int256 pnl = _signedValue(mark, position.netQuantity) - position.netEntryValue;
-            _transferPnl(_insuranceFundAccount(), user, pnl);
-            delete positions[user];
-            emit PositionLiquidated(user, _msgSender(), position.netQuantity, pnl, 0);
+    /// @notice See {HashPowerPerpsDEXAdminModule-forceClosePositions}.
+    function forceClosePositions(address[] calldata _users) external {
+        _users;
+        _delegateToAdminModule();
+    }
+
+    /// @notice See {HashPowerPerpsDEXAdminModule-forceCancelOrders}.
+    function forceCancelOrders(address[] calldata _users) external {
+        _users;
+        _delegateToAdminModule();
+    }
+
+    /// @dev Run this call's calldata in the admin module, in this contract's storage, and
+    ///      return or revert with its result. The stubs keep their parameter names for the ABI
+    ///      and name them once only so the compiler does not report them unused; the module
+    ///      decodes the calldata itself.
+    function _delegateToAdminModule() private {
+        address module = adminModule;
+        assembly ("memory-safe") {
+            calldatacopy(0, 0, calldatasize())
+            let ok := delegatecall(gas(), module, 0, calldatasize(), 0, 0)
+            returndatacopy(0, 0, returndatasize())
+            if iszero(ok) { revert(0, returndatasize()) }
+            return(0, returndatasize())
         }
     }
 
-    // ── Testnet maintenance ───────────────────────────────────────────────────
-
-    /// @notice Clear orders, position, and funding snapshot for explicit participants.
-    /// @dev Intended for testnet resets and migrations. The caller must supply the complete
-    ///      participant set; the contract deliberately performs no global enumeration.
-    ///      Global funding, configuration, collateral balances, and the order nonce are untouched.
-    function resetState(address[] calldata _participants) external onlyOwner {
-        uint256 len = _participants.length;
-        for (uint256 i = 0; i < len; i++) {
-            _resetStateForParticipant(_participants[i]);
+    /// @dev `_delegateToAdminModule` for a call made from inside this contract, whose calldata
+    ///      is not the transaction's: runs `data` in the admin module and reverts with its error.
+    function _delegateCallAdminModule(bytes memory data) internal {
+        (bool ok, bytes memory result) = adminModule.delegatecall(data);
+        if (!ok) {
+            assembly ("memory-safe") {
+                revert(add(result, 32), mload(result))
+            }
         }
     }
 }

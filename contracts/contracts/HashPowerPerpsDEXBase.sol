@@ -10,6 +10,7 @@ import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/I
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import { AggregatorV3Interface } from "./interfaces/AggregatorV3Interface.sol";
+import { IScheduledMarkOracle } from "./interfaces/IScheduledMarkOracle.sol";
 import { ICollateralVault } from "collateral-margin/contracts/contracts/interfaces/ICollateralVault.sol";
 import { IPortfolioMarginEngine } from "collateral-margin/contracts/contracts/interfaces/IPortfolioMarginEngine.sol";
 import { IPointsHook } from "collateral-margin/contracts/contracts/interfaces/IPointsHook.sol";
@@ -32,12 +33,27 @@ abstract contract HashPowerPerpsDEXBase is
     using StructuredLinkedList for StructuredLinkedList.List;
 
     // Constants
-    uint256 public constant MAX_ORACLE_STALENESS = 3600; // 1 hour
+    uint256 public constant MAX_ORACLE_STALENESS = 7200; // 2 hours: hashprice updates only on a Bitcoin block
     uint8 public constant FUNDING_DECIMALS = 18;
     uint8 public constant MAX_ORDERS_PER_PARTICIPANT = 100;
     uint8 public constant QUANTITY_DECIMALS = 6;
     uint256 public constant MAX_PRICE_LEVELS_PER_SIDE = 200;
+    /// @notice Largest |quantity| a single order may carry (raw, `QUANTITY_DECIMALS`; 1e12
+    ///         contracts).
+    /// @dev Two overflow bounds rest on it. The margin engine lifts summed order quantity to
+    ///      WAD and stresses it as int256, so the sum must stay below 2^255. And with
+    ///      `MAX_PRICE` and `MAX_ORDERS_PER_PARTICIPANT` it keeps `MathLib.fillLossBound`'s
+    ///      `qty · Σq(p−m)²` (≤ (Σq·p)² ≈ 1e60) within uint256.
+    uint256 public constant MAX_ORDER_QUANTITY = 1e18;
+    /// @notice Largest price any calculation accepts, in token decimals ($10,000 per contract,
+    ///         ~20x the all-time hashprice high): order prices and the oracle mark alike.
+    /// @dev Keeps every price-derived `int256` (entry value, PnL, fees) far below 2^255, so the
+    ///      plain casts can never wrap, and keeps the `Σ price²·qty` order moment and
+    ///      `MathLib.fillLossBound` within uint256. A feed above it reverts like a stale one.
+    uint256 public constant MAX_PRICE = 1e10;
     uint256 internal constant BPS = 10_000; // Basis points denominator
+    uint256 internal constant WAD = 1e18; // Fixed-point unit of the oracle's schedule factors
+    uint8 internal constant DRIFT_DECIMALS = 12; // Extra precision of the per-unit drift sum
     /// @notice Hard ceiling on |makerFeeBps| and |takerFeeBps|: 100 bps (1%).
     /// @dev Keeps a trading fee at most a fifth of the 5% MM spot shock, so the argument
     ///      that the MM floor already covers the unreserved fee holds by construction
@@ -138,7 +154,9 @@ abstract contract HashPowerPerpsDEXBase is
     mapping(address => uint256) internal userBuyOrderQty;
     mapping(address => uint256) internal userSellOrderQty;
 
-    /// @notice Canonical cached totals for a user's remaining resting orders.
+    /// @notice Pre-6.10 cached totals for a user's resting orders.
+    /// @dev Dead since 6.10, superseded by {RestingOrderAggregate}. Kept only so the legacy mapping's
+    ///      type, and therefore the storage layout, is unchanged.
     struct OrderAggregate {
         uint256 buyQty;
         uint256 sellQty;
@@ -146,8 +164,60 @@ abstract contract HashPowerPerpsDEXBase is
         uint256 sellValue;
     }
 
-    /// @dev Appended at the storage tail in v2.13. Never move above the four legacy mappings.
+    /// @dev Dead since 6.10 (appended in v2.13). Never read or written; slot retained for proxy
+    ///      storage compatibility. Never move above the four legacy mappings.
     mapping(address => OrderAggregate) internal userOrderAggregate;
+
+    /// @notice Canonical cached totals for a user's remaining resting orders, per side: the
+    ///         quantity and the first two price moments.
+    /// @dev A moment is a quantity-weighted sum of a power of price, `Σ q·p^k`. The quantity is
+    ///      the zeroth; the first gives a side's average price and the second its spread, which
+    ///      yields the side's distance from any mark in constant time — the inputs of
+    ///      `MathLib.fillLossBound`. The spread is what stops a deep decoy hiding a marketable
+    ///      order.
+    struct RestingOrderAggregate {
+        /// Σ |qty| over resting bids, in `QUANTITY_DECIMALS`.
+        uint256 buyQty;
+        /// Σ |qty| over resting asks, in `QUANTITY_DECIMALS`.
+        uint256 sellQty;
+        /// First moment of resting bids, Σ price·qty. Price in token decimals, qty in
+        /// `QUANTITY_DECIMALS`, unscaled (no `10^QUANTITY_DECIMALS` division) so the bound's
+        /// spread term stays exact.
+        uint256 buyPQ;
+        /// Second moment of resting bids, Σ price²·qty, same units with price squared.
+        uint256 buyP2Q;
+        /// First moment of resting asks, Σ price·|qty|, unscaled like `buyPQ`.
+        uint256 sellPQ;
+        /// Second moment of resting asks, Σ price²·|qty|.
+        uint256 sellP2Q;
+    }
+
+    /// @dev Appended at the storage tail in 6.10. Starts empty on upgrade, so an upgrade from
+    ///      before 6.10 runs `forceCancelOrders` for every user with resting orders. A pre-6.10
+    ///      order removed any other way (cancel, fill) would underflow it.
+    mapping(address => RestingOrderAggregate) internal userRestingOrderAggregate;
+
+    /// @dev Drift funding state, one slot so a feed without a schedule costs a single read:
+    ///      Σ of the mark's scheduled decline paid to longs per unit (token decimals ×
+    ///      10^DRIFT_DECIMALS; at `MAX_PRICE` int80 holds about 120 halvings), the oracle's
+    ///      schedule factor and end factor (WAD) at the last accrual and its epoch, whether the
+    ///      oracle has a schedule (set by `setOracle`), and whether any drift ever accrued.
+    struct DriftState {
+        int80 cumulativePerUnit;
+        uint64 factor;
+        uint64 endFactor;
+        uint32 epoch;
+        bool scheduled;
+        bool accrued;
+    }
+
+    /// @dev Appended at the storage tail in 6.16, with the mapping below.
+    DriftState internal driftState;
+    /// @dev Per-user snapshot of `DriftState.cumulativePerUnit`, like `userFundingSnapshot`.
+    mapping(address => int256) internal userDriftSnapshot;
+    /// @dev The feed's `factorFixedUntil` at the last accrual: until then the factor cannot change,
+    ///      so funding updates skip reading the feed for drift. Appended in 6.17.0.
+    uint256 internal driftFixedUntil;
 
     /// @notice Represents an order in the order book
     struct Order {
@@ -219,6 +289,9 @@ abstract contract HashPowerPerpsDEXBase is
     event FundingUpdated(int256 fundingRate, int256 cumulativeFundingPerUnit, uint256 timestamp);
     event FundingSettled(address indexed user, int256 amount);
     event FundingParametersUpdated(uint256 maxBps, uint256 period);
+    event DriftUpdated(int256 delta, int256 cumulativePerUnit);
+    /// @param amount Drift folded into the position's entry value; positive = the user gains.
+    event DriftSettled(address indexed user, int256 amount);
     /// @dev Deprecated compatibility event retained with the legacy setter.
     event MinimumMarginPerOrderUpdated(uint256 newMinimumMarginPerOrder);
     /// @notice Emitted whenever the points hook address changes.
@@ -324,8 +397,7 @@ abstract contract HashPowerPerpsDEXBase is
     }
 
     /// @dev Validate every read the venue relies on before adopting a portfolio margin
-    ///      engine. The zero address is handled by callers because initializeV2 deliberately
-    ///      permits it while the ongoing governance setter does not.
+    ///      engine. The zero address is rejected by the governance setter.
     function _setPortfolioMargin(IPortfolioMarginEngine _pm) internal {
         address pm = address(_pm);
         _requireContract(pm);
@@ -383,12 +455,14 @@ abstract contract HashPowerPerpsDEXBase is
         return true;
     }
 
-    /// @dev Soft oracle → venue price. Returns 0 when the round is unusable (never reverts).
-    ///      Used by points bonus and funding accrual so a stale feed cannot brick cancels.
+    /// @dev Soft oracle → venue price. Returns 0 when the round is unusable or the price is
+    ///      above `MAX_PRICE` (never reverts). Used by points bonus and funding accrual so a bad
+    ///      feed cannot brick cancels.
     function _softMarketPrice() internal view returns (uint256) {
         (, int256 answer,, uint256 updatedAt,) = priceOracle.latestRoundData();
         if (!_isUsableOracleRound(answer, updatedAt)) return 0;
-        return _getMarketPrice(uint256(answer));
+        uint256 price = _getMarketPrice(uint256(answer));
+        return price > MAX_PRICE ? 0 : price;
     }
 
     /// @dev Oracle reference price for the points price-improvement multiplier, in the same
@@ -445,9 +519,11 @@ abstract contract HashPowerPerpsDEXBase is
         return M.roundToNearest(scaled, minimumPriceIncrement);
     }
 
-    /// @dev Body of {getMarketPrice}: hard-validated oracle price in venue units.
-    function _marketPrice() internal view returns (uint256) {
-        return _getMarketPrice(_getPrice());
+    /// @dev Body of {getMarketPrice}: hard-validated oracle price in venue units. Capped at
+    ///      `MAX_PRICE` like order prices, so every price-derived cast and product stays in range.
+    function _marketPrice() internal view returns (uint256 price) {
+        price = _getMarketPrice(_getPrice());
+        if (price > MAX_PRICE) revert InvalidOracle();
     }
 
     function _activePricesSlice(StructuredLinkedList.List storage priceList, uint256 _maxLevels)
@@ -476,7 +552,7 @@ abstract contract HashPowerPerpsDEXBase is
     /// @dev Absolute qty of resting orders that reduce `_net`.
     function _restingReduceAbs(address _user, int256 _net) internal view returns (uint256 total) {
         if (_net == 0) return 0;
-        OrderAggregate storage aggregate = userOrderAggregate[_user];
+        RestingOrderAggregate storage aggregate = userRestingOrderAggregate[_user];
         return _net > 0 ? aggregate.sellQty : aggregate.buyQty;
     }
 
@@ -661,67 +737,71 @@ abstract contract HashPowerPerpsDEXBase is
 
     /// @dev Add one canonical remaining order to the aggregate.
     function _addOrderAggregate(address _user, bool _isBuy, uint256 _price, uint256 _absQty) internal {
-        OrderAggregate storage aggregate = userOrderAggregate[_user];
-        uint256 value = _calculateValue(_price, _absQty);
+        RestingOrderAggregate storage aggregate = userRestingOrderAggregate[_user];
+        uint256 pq = _price * _absQty;
         if (_isBuy) {
             aggregate.buyQty += _absQty;
-            aggregate.buyValue += value;
+            aggregate.buyPQ += pq;
+            aggregate.buyP2Q += pq * _price;
         } else {
             aggregate.sellQty += _absQty;
-            aggregate.sellValue += value;
+            aggregate.sellPQ += pq;
+            aggregate.sellP2Q += pq * _price;
         }
     }
 
     /// @dev Replace an order's old remaining quantity with a smaller canonical remainder.
-    ///      Subtracting `value(old) - value(new)` keeps the cache exactly equal to a full
-    ///      scan while leaving fill notional and fee rounding unchanged.
+    ///      Moments are subtracted for exactly the removed quantity, so the cache stays equal
+    ///      to a full scan.
     function _subtractOrderAggregate(address _user, bool _isBuy, uint256 _price, uint256 _oldAbsQty, uint256 _newAbsQty)
         internal
     {
-        OrderAggregate storage aggregate = userOrderAggregate[_user];
+        RestingOrderAggregate storage aggregate = userRestingOrderAggregate[_user];
         uint256 qtyReduction = _oldAbsQty - _newAbsQty;
-        uint256 valueReduction = _calculateValue(_price, _oldAbsQty) - _calculateValue(_price, _newAbsQty);
+        uint256 pq = _price * qtyReduction;
         if (_isBuy) {
             aggregate.buyQty -= qtyReduction;
-            aggregate.buyValue -= valueReduction;
+            aggregate.buyPQ -= pq;
+            aggregate.buyP2Q -= pq * _price;
         } else {
             aggregate.sellQty -= qtyReduction;
-            aggregate.sellValue -= valueReduction;
+            aggregate.sellPQ -= pq;
+            aggregate.sellP2Q -= pq * _price;
         }
     }
 
-    /// @dev Replace all four fields from canonical remaining orders. This also removes any
-    ///      historical value dust accumulated by the deprecated incremental mappings.
-    function _rebuildOrderAggregateCache(address _user) internal {
-        OrderAggregate memory aggregate;
-        EnumerableSet.Bytes32Set storage ids = participantOrderIdsIndex[_user];
-        uint256 len = ids.length();
-        for (uint256 i = 0; i < len; i++) {
-            Order storage order = orders[ids.at(i)];
-            int256 quantity = order.quantity;
-            if (quantity > 0) {
-                uint256 absQty = uint256(quantity);
-                aggregate.buyQty += absQty;
-                aggregate.buyValue += _calculateValue(order.price, absQty);
-            } else if (quantity < 0) {
-                uint256 absQty = M.abs(quantity);
-                aggregate.sellQty += absQty;
-                aggregate.sellValue += _calculateValue(order.price, absQty);
-            }
-        }
-        userOrderAggregate[_user] = aggregate;
+    /// @dev Unindex a resting order, drop its price level if now empty, and announce it
+    ///      cancelled. Callers own the authorization decision; this only performs the removal.
+    ///      Pass `_subtractAggregate = false` only when the caller clears the owner's whole
+    ///      aggregate afterwards.
+    function _dropRestingOrder(bytes32 _orderId, bool _subtractAggregate) internal {
+        Order storage order = orders[_orderId];
+        address participant = order.participant;
+        uint256 price = order.price;
+        int256 quantity = order.quantity;
+        bool isBid = quantity > 0;
+        if (_subtractAggregate) _subtractOrderAggregate(participant, isBid, price, M.abs(quantity), 0);
+        _unlinkRestingOrder(_orderId, participant, price, isBid);
+        _removePriceLevelIfEmpty(_priceOrderIds(price, isBid), price, isBid);
+        emit OrderCancelled(_orderId, participant);
     }
 
     /// @dev Remove one canonical resting order from every per-order accounting structure.
-    ///      Price-ladder cleanup stays with the caller because matching and reset walk a whole
-    ///      level and deliberately remove that level only after its queue traversal finishes.
-    ///      Callers emit `OrderUpdated` / `OrderCancelled` themselves (matches Futures).
+    ///      Price-ladder cleanup stays with the caller because matching walks a whole level and
+    ///      deliberately removes that level only after its queue traversal finishes. Callers
+    ///      emit their own event; single-order removals go through `_dropRestingOrder`.
     function _removeRestingOrder(bytes32 _orderId, address _participant, uint256 _price, int256 _quantity)
         internal
     {
         bool isBid = _quantity > 0;
         _subtractOrderAggregate(_participant, isBid, _price, M.abs(_quantity), 0);
-        _priceOrderIds(_price, isBid).remove(uint256(_orderId));
+        _unlinkRestingOrder(_orderId, _participant, _price, isBid);
+    }
+
+    /// @dev Take an order out of its price queue and its owner's index, and delete it. Leaves
+    ///      the aggregate to the caller.
+    function _unlinkRestingOrder(bytes32 _orderId, address _participant, uint256 _price, bool _isBid) internal {
+        _priceOrderIds(_price, _isBid).remove(uint256(_orderId));
         participantOrderIdsIndex[_participant].remove(_orderId);
         delete orders[_orderId];
     }
@@ -805,6 +885,7 @@ abstract contract HashPowerPerpsDEXBase is
             position.netQuantity = _quantity;
             position.netEntryValue = tradeValue;
             userFundingSnapshot[_user] = cumulativeFundingPerUnit;
+            _snapshotDrift(_user);
             return;
         }
 
@@ -841,6 +922,7 @@ abstract contract HashPowerPerpsDEXBase is
             position.netQuantity = openQty;
             position.netEntryValue = _signedValue(_tradePrice, openQty);
             userFundingSnapshot[_user] = cumulativeFundingPerUnit;
+            _snapshotDrift(_user);
         } else if (position.netQuantity + _quantity == 0) {
             position.netQuantity = 0;
             position.netEntryValue = 0;
@@ -852,18 +934,6 @@ abstract contract HashPowerPerpsDEXBase is
 
     // ── Internal helpers: margin / liquidation ────────────────────────────────
 
-    /// @dev The backstop inherits the liquidated quantity (same sign as the user's position) so
-    ///      positions keep summing to zero: the user's counterparties are untouched and the
-    ///      backstop now faces them. Funding is settled first so the inherited size accrues from
-    ///      now. An opposite backstop leg nets and realizes against the fund; what the backstop
-    ///      cannot pay is recorded as `BadDebt` by the vault. No margin check: the backstop is a
-    ///      ledger for protocol exposure, not a margined trader.
-    function _handOffToBackstop(address _user, int256 _signedClose, uint256 _mark) internal {
-        _settleFunding(BACKSTOP);
-        _updateUserPosition(BACKSTOP, _signedClose, _mark, false);
-        emit BackstopAssigned(_user, _signedClose, _mark);
-    }
-
     /// @dev Limit price `_bps` away from `_mark` on the taker's side, rounded to the tick toward
     ///      the mark so the result is always inside the band and always tick-aligned.
     function _bandPrice(uint256 _mark, bool _isBuy, uint16 _bps) internal pure returns (uint256) {
@@ -872,55 +942,29 @@ abstract contract HashPowerPerpsDEXBase is
         return raw / minimumPriceIncrement * minimumPriceIncrement;
     }
 
-    /// @dev Closes `_closeAbs` (< |netQuantity|) of a verified-underwater user's position at the
-    ///      mark, realizes PnL on the closed slice via {_settleReducedPosition}, and scales
-    ///      the exact entry value with `netQuantity`. Does NOT pay the fee and does NOT
-    ///      emit — the caller applies the incentive gate and emits `PositionLiquidated`.
-    ///      Returns the realized `pnl` on the closed slice and the SIGNED closed quantity (same
-    ///      sign as the position). Callers MUST have already checked the underwater / orders-clear
-    ///      / partial invariants.
-    function _doPartialLiquidatePosition(
-        address _user,
-        Position memory _position,
-        uint256 _closeAbs,
-        uint256 _currentPrice
-    )
-        internal
-        returns (int256 pnl, int256 signedClose)
-    {
-        bool isLong = _position.netQuantity > 0;
-        signedClose = M.toSigned(isLong, _closeAbs);
-        int256 entryValue = _position.netEntryValue;
-        uint256 absNet = M.abs(_position.netQuantity);
-        int256 remainingEntryValue = (entryValue * int256(absNet - _closeAbs)) / int256(absNet);
-
-        pnl = _settleReducedPosition(_user, _currentPrice, signedClose, entryValue - remainingEntryValue, false);
-
-        // signedClose has the position's sign, so subtracting it moves netQuantity toward zero.
+    /// @dev The one path that closes a user's position outside the book (liquidation and
+    ///      `forceClosePositions`): closes `_signedClose` (same sign as the position) at `_mark`,
+    ///      realizing the exact entry-value slice against the fund, and the backstop inherits it so
+    ///      positions keep summing to zero: the user's counterparties are untouched and the
+    ///      backstop now faces them. The backstop's funding is settled first so the inherited size
+    ///      accrues from now; an opposite backstop leg nets and realizes against the fund, and what
+    ///      it cannot pay is recorded as `BadDebt` by the vault. No fee and no margin check: the
+    ///      backstop is a ledger for protocol exposure, not a margined trader.
+    function _closeToBackstop(address _user, int256 _signedClose, uint256 _mark) internal returns (int256 pnl) {
         Position storage position = positions[_user];
-        position.netQuantity = _position.netQuantity - signedClose;
-        position.netEntryValue = remainingEntryValue;
-    }
-
-    /// @dev Closes the user's position and settles PnL against the insurance fund. Caller must
-    ///      have verified all predicates. Charges a liquidation fee on the closed notional
-    ///      (computed as `currentPrice * |closedQuantity| / 10^QUANTITY_DECIMALS`).
-    ///      Does NOT emit — caller runs the over-liquidation guard, then emits/notifies.
-    function _doLiquidatePosition(address _user, uint256 _currentPrice)
-        internal
-        returns (int256 pnl, int256 closedQuantity, uint256 liqFee)
-    {
-        Position memory position = positions[_user];
+        int256 netQuantity = position.netQuantity;
         int256 entryValue = position.netEntryValue;
-        closedQuantity = position.netQuantity;
-        pnl = _signedValue(_currentPrice, closedQuantity) - entryValue;
+        int256 remainingEntryValue = (entryValue * (netQuantity - _signedClose)) / netQuantity;
 
-        _transferPnl(_insuranceFundAccount(), _user, pnl);
+        pnl = _settleReducedPosition(_user, _mark, _signedClose, entryValue - remainingEntryValue, false);
 
-        uint256 closedNotional = _calculateValue(_currentPrice, M.abs(closedQuantity));
-        liqFee = _chargeLiquidationFee(_user, closedNotional);
+        // _signedClose has the position's sign, so subtracting it moves netQuantity toward zero.
+        position.netQuantity = netQuantity - _signedClose;
+        position.netEntryValue = remainingEntryValue;
 
-        delete positions[_user];
+        _settleFunding(BACKSTOP);
+        _updateUserPosition(BACKSTOP, _signedClose, _mark, false);
+        emit BackstopAssigned(_user, _signedClose, _mark);
     }
 
     /// @notice Settle a reduced portion of a position (when offsetting)
@@ -1042,11 +1086,11 @@ abstract contract HashPowerPerpsDEXBase is
     }
 
     function _validateQty(int256 _quantity) internal pure {
-        if (_quantity == 0) revert InvalidQty();
+        if (_quantity == 0 || M.abs(_quantity) > MAX_ORDER_QUANTITY) revert InvalidQty();
     }
 
     function _validatePrice(uint256 _price) internal pure {
-        if (_price == 0) revert InvalidPrice();
+        if (_price == 0 || _price > MAX_PRICE) revert InvalidPrice();
         if (_price % minimumPriceIncrement != 0) revert InvalidPrice();
     }
 
@@ -1157,6 +1201,7 @@ abstract contract HashPowerPerpsDEXBase is
     ///      two-sided but the oracle round is unusable, skip entirely (do not advance
     ///      `lastFundingUpdateTime`) so a later live update can catch up the elapsed window.
     function _updateGlobalFunding() internal {
+        uint256 scheduledMark = _updateDrift();
         if (lastFundingUpdateTime == 0 || fundingPeriod == 0) return;
 
         // Accrual needs a mid and an index. Empty book → no accrual but still bump the
@@ -1166,7 +1211,7 @@ abstract contract HashPowerPerpsDEXBase is
         uint256 bestAsk = _bestAskPrice();
         uint256 indexPrice;
         if (bestBid != 0 && bestAsk != 0) {
-            indexPrice = _softMarketPrice();
+            indexPrice = scheduledMark != 0 ? scheduledMark : _softMarketPrice();
             if (indexPrice == 0) return;
         }
 
@@ -1186,6 +1231,7 @@ abstract contract HashPowerPerpsDEXBase is
     /// @dev Must be called before any position change so funding is settled at the old size.
     /// @param _user The user whose funding is being settled
     function _settleFunding(address _user) internal {
+        _settleDrift(_user);
         // When funding isn't configured, skip storage reads and calculations.
         if (lastFundingUpdateTime == 0 || fundingPeriod == 0) return;
 
@@ -1232,31 +1278,163 @@ abstract contract HashPowerPerpsDEXBase is
         return (position.netQuantity * delta) / (int256(10 ** QUANTITY_DECIMALS) * int256(10 ** FUNDING_DECIMALS));
     }
 
-    // ── Internal helpers: admin ───────────────────────────────────────────────
+    // ── Internal helpers: drift funding ───────────────────────────────────────
 
-    /// @dev Clear one explicitly supplied participant without touching global funding or
-    ///      the monotonic order nonce. Duplicate participants are safe because every cleanup
-    ///      operation is idempotent once the participant has no remaining state.
-    function _resetStateForParticipant(address _participant) internal {
-        // Historical orders can predate the aggregate cache. Rebuild before subtracting
-        // each order so an atomic upgrade reset cannot underflow on legacy state.
-        _rebuildOrderAggregateCache(_participant);
-        bytes32[] memory orderIds = participantOrderIdsIndex[_participant].values();
-        uint256 len = orderIds.length;
-        for (uint256 i = 0; i < len; i++) {
-            bytes32 orderId = orderIds[i];
-            Order storage order = orders[orderId];
-            uint256 price = order.price;
-            int256 quantity = order.quantity;
-            bool isBid = quantity > 0;
-            StructuredLinkedList.List storage queue = _priceOrderIds(price, isBid);
-            _removeRestingOrder(orderId, _participant, price, quantity);
-            _removePriceLevelIfEmpty(queue, price, isBid);
-        }
-
-        delete userOrderAggregate[_participant];
-        delete positions[_participant];
-        delete userFundingSnapshot[_participant];
+    /// @dev Drift funding: a mark that follows the index times a known schedule (a halving glide)
+    ///      falls by the schedule while the index stands still. Longs are paid that decline and
+    ///      shorts pay it, so holding through the schedule is neutral and no one, the backstop
+    ///      included, carries it. Paid per unit at the index: a factor move from f0 to f1 is worth
+    ///      index × (f0 − f1) = mark × (f0 − f1) / f1, exact while the index is unchanged between
+    ///      accruals. When the epoch changes the old segment is first paid down to its end factor,
+    ///      at the index before the step (the new index / that end factor), then the new one from 1.
+    ///      Folded into each position's entry value rather than settled in cash: the counterparty's
+    ///      matching mark gain is unrealized, so cash would put it in debt mid-position.
+    /// @dev The mark and the drift state as of now, from one feed read when the feed has a schedule
+    ///      (otherwise the plain mark and the stored state). `_hard` validates the mark like
+    ///      `_marketPrice()` and reverts; soft returns mark 0 and the stored state on an unusable
+    ///      feed. Drift is unchanged when the schedule or the mark is unusable.
+    function _markAndDrift(bool _hard) internal view returns (uint256 mark, DriftState memory state) {
+        (mark, state,) = _markDriftAndFixedUntil(_hard);
     }
 
+    /// @dev {_markAndDrift} plus the feed's `factorFixedUntil` (0 without a schedule or on an
+    ///      unusable feed).
+    function _markDriftAndFixedUntil(bool _hard)
+        internal
+        view
+        returns (uint256 mark, DriftState memory state, uint256 fixedUntil)
+    {
+        state = driftState;
+        if (!state.scheduled) return (_hard ? _marketPrice() : _softMarketPrice(), state, 0);
+
+        int256 answer;
+        uint256 updatedAt;
+        uint256 factor;
+        uint256 endFactor;
+        uint256 epoch;
+        if (_hard) {
+            (answer, updatedAt, factor, endFactor, epoch, fixedUntil) =
+                IScheduledMarkOracle(address(priceOracle)).latestMarkAndSchedule();
+            _validateOracleRound(answer, updatedAt);
+            mark = _getMarketPrice(uint256(answer));
+            if (mark > MAX_PRICE) revert InvalidOracle();
+        } else {
+            try IScheduledMarkOracle(address(priceOracle)).latestMarkAndSchedule() returns (
+                int256 readMark,
+                uint256 readUpdatedAt,
+                uint256 readFactor,
+                uint256 readEndFactor,
+                uint256 readEpoch,
+                uint256 readFixedUntil
+            ) {
+                (answer, updatedAt, factor, endFactor, epoch, fixedUntil) =
+                    (readMark, readUpdatedAt, readFactor, readEndFactor, readEpoch, readFixedUntil);
+            } catch {
+                return (0, state, 0);
+            }
+            if (!_isUsableOracleRound(answer, updatedAt)) return (0, state, 0);
+            mark = _getMarketPrice(uint256(answer));
+            if (mark > MAX_PRICE) return (0, state, 0);
+        }
+        if (!_validSchedule(factor, endFactor, epoch)) return (mark, state, 0);
+
+        int256 m = int256(mark);
+        int256 f = int256(factor);
+        int256 scale = int256(10 ** DRIFT_DECIMALS);
+        int256 f0 = int256(uint256(state.factor));
+        int256 drift;
+        if (epoch == state.epoch) {
+            drift = m * (f0 - f) * scale / f;
+        } else {
+            int256 e0 = int256(uint256(state.endFactor));
+            drift = m * int256(WAD) * (f0 - e0) / f * scale / e0 + m * (int256(WAD) - f) * scale / f;
+        }
+        int256 cumulative = state.cumulativePerUnit + drift;
+        if (cumulative > type(int80).max || cumulative < type(int80).min) revert InvalidOracle();
+        state.cumulativePerUnit = int80(cumulative);
+        state.factor = uint64(factor);
+        state.endFactor = uint64(endFactor);
+        state.epoch = uint32(epoch);
+        if (drift != 0) state.accrued = true;
+    }
+
+    function _validSchedule(uint256 _factor, uint256 _endFactor, uint256 _epoch) internal pure returns (bool) {
+        return _factor != 0 && _factor <= WAD && _endFactor != 0 && _endFactor <= WAD && _epoch != 0
+            && _epoch <= type(uint32).max;
+    }
+
+    /// @notice Accrue drift up to now (writes state). Skips the feed while its factor is fixed: the
+    ///      feed stops promising that `FACTOR_FIXED_MIN_LEAD` (3 days) before the glide, so blocks
+    ///      would have to arrive 3 days early for a skipped read to miss a factor change.
+    /// @return mark The soft mark read for it (0 when not read or on an unusable feed)
+    function _updateDrift() internal returns (uint256 mark) {
+        DriftState memory before = driftState;
+        if (!before.scheduled || block.timestamp < driftFixedUntil) return 0;
+        DriftState memory state;
+        uint256 fixedUntil;
+        (mark, state, fixedUntil) = _markDriftAndFixedUntil(false);
+        int256 delta = int256(state.cumulativePerUnit) - before.cumulativePerUnit;
+        if (delta != 0) emit DriftUpdated(delta, state.cumulativePerUnit);
+        driftState = state;
+        // Reads happen only once the stored time has passed, so this writes at most once per span.
+        if (fixedUntil != 0) driftFixedUntil = fixedUntil;
+    }
+
+    /// @dev Start the drift schedule of a newly set oracle, keeping the sum already accrued. A
+    ///      feed without a schedule, or with an unusable one, pays no drift.
+    function _resetDrift(AggregatorV3Interface _oracle) internal {
+        DriftState memory state = driftState;
+        state.scheduled = false;
+        uint256 fixedUntil;
+        try IScheduledMarkOracle(address(_oracle)).latestMarkAndSchedule() returns (
+            int256, uint256, uint256 f, uint256 e, uint256 ep, uint256 readFixedUntil
+        ) {
+            if (_validSchedule(f, e, ep)) {
+                state.factor = uint64(f);
+                state.endFactor = uint64(e);
+                state.epoch = uint32(ep);
+                state.scheduled = true;
+                fixedUntil = readFixedUntil;
+            }
+        } catch { }
+        driftFixedUntil = fixedUntil;
+        driftState = state;
+    }
+
+    /// @dev Start a new position's drift at the current sum. Before any drift has accrued every
+    ///      snapshot is unused (settlement and the views skip them), so nothing is written.
+    function _snapshotDrift(address _user) internal {
+        DriftState memory state = driftState;
+        if (state.accrued) userDriftSnapshot[_user] = state.cumulativePerUnit;
+    }
+
+    /// @notice Fold a user's accrued drift into its position's entry value.
+    /// @dev Must run before any position change, like funding, so drift is paid at the old size.
+    ///      Until any drift has accrued every snapshot is 0, so the per-user read is skipped.
+    function _settleDrift(address _user) internal {
+        DriftState memory state = driftState;
+        if (!state.accrued) return;
+        int256 snapshot = userDriftSnapshot[_user];
+        if (snapshot == state.cumulativePerUnit) return;
+        userDriftSnapshot[_user] = state.cumulativePerUnit;
+
+        Position storage position = positions[_user];
+        if (position.netQuantity == 0) return;
+        int256 drift = _driftOn(position.netQuantity, state.cumulativePerUnit - snapshot);
+        if (drift == 0) return;
+        position.netEntryValue -= drift;
+        emit DriftSettled(_user, drift);
+    }
+
+    /// @dev Drift a user has accrued and not yet folded in, given the current drift state (token
+    ///      units; positive = the user gains). Part of the position's unrealized PnL.
+    function _pendingDrift(address _user, DriftState memory _state) internal view returns (int256) {
+        int256 netQuantity = positions[_user].netQuantity;
+        if (netQuantity == 0 || !_state.accrued) return 0;
+        return _driftOn(netQuantity, _state.cumulativePerUnit - userDriftSnapshot[_user]);
+    }
+
+    function _driftOn(int256 _netQuantity, int256 _deltaPerUnit) internal pure returns (int256) {
+        return (_netQuantity * _deltaPerUnit) / (int256(10 ** QUANTITY_DECIMALS) * int256(10 ** DRIFT_DECIMALS));
+    }
 }

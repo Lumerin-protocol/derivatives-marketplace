@@ -6,26 +6,22 @@ import { txUrl, addrUrl } from "../lib/explorer.ts";
 import { logTitle, logInfo, logStep, logSuccess, logPrompt } from "../lib/log.ts";
 
 /**
- * Point HashPowerPerpsDEX at a new Chainlink-style hashprice oracle.
+ * Point HashPowerPerpsDEX at the feed it marks against.
  *
  * Env:
- *   PERPS_ADDRESS          — venue proxy (required)
- *   HASHPRICE_USD_ADDRESS  — new AggregatorV3 oracle (required)
+ *   PERPS_ADDRESS        — venue proxy (required)
+ *   MARK_ORACLE_ADDRESS  — `HashpriceGlideUSD`, as on futures (required)
  */
 async function main() {
   logTitle("HashPowerPerpsDEX setOracle");
 
-  const env = requireEnvsSet("PERPS_ADDRESS");
-  const oracleRaw = process.env.HASHPRICE_USD_ADDRESS ?? process.env.PRICE_ORACLE_ADDRESS;
-  if (!oracleRaw) {
-    throw new Error("HASHPRICE_USD_ADDRESS or PRICE_ORACLE_ADDRESS is required");
-  }
-  if (!isAddress(oracleRaw)) {
-    throw new Error(`Oracle address is not valid: ${oracleRaw}`);
+  const env = requireEnvsSet("PERPS_ADDRESS", "MARK_ORACLE_ADDRESS");
+  if (!isAddress(env.MARK_ORACLE_ADDRESS)) {
+    throw new Error(`MARK_ORACLE_ADDRESS is not valid: ${env.MARK_ORACLE_ADDRESS}`);
   }
 
   const proxyAddress = getAddress(env.PERPS_ADDRESS);
-  const oracleAddress = getAddress(oracleRaw);
+  const oracleAddress = getAddress(env.MARK_ORACLE_ADDRESS);
 
   const { viem } = await network.connect();
   const [deployer] = await viem.getWalletClients();

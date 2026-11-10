@@ -14,7 +14,7 @@ describe("HashPowerPerpsDEX - Admin Functions", function () {
       const { perps } = contracts;
       const { owner } = accounts;
 
-      const newPrice = parseUnits("100000", 6);
+      const newPrice = parseUnits("100", 6);
       const newOracle = await viem.deployContract("PriceOracleMock", [newPrice, 6]);
 
       await perps.write.setOracle([newOracle.address], { account: owner.account });

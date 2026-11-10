@@ -50,7 +50,7 @@ export async function deployOrderBookFixture(conn: NetworkConnection) {
 const YEAR_LATER = BigInt(Math.floor(Date.now() / 1000) + 365 * 86400);
 
 export const defaultSeries = {
-  strikeE8: 50000_00000000n, // $50,000
+  strikeE8: 50_00000000n, // $50
   expiryTs: YEAR_LATER,
   isCall: true,
   tickSizeE8: 1_000_000, // $0.01 in 1e8
@@ -128,7 +128,7 @@ async function _deployVaultAndPME(
 // ── MarginEngine fixtures ─────────────────────────────────────────────────
 
 export const ORACLE_DECIMALS = 8;
-export const INITIAL_PRICE_E8 = 50000_00000000n; // $50,000
+export const INITIAL_PRICE_E8 = 50_00000000n; // $50
 
 /** Spot index for Hashpower / hashrate instruments: USD per 1 PH/s per day (index scale 1e8). */
 export const HASHRATE_USD_PER_PH_DAY = "42.1" as const;

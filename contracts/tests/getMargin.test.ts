@@ -80,11 +80,13 @@ describe("HashPowerPerpsDEX - Margin View Functions", function () {
           `seller: ${filled} ask(s) filled pushed IM from ${sellerImBefore} to ${sellerImAfter}`,
         );
 
-        // The bound is tight, not merely safe: a filled bid moves its delta from
+        // Nearly tight, not merely safe: a filled bid moves its delta from
         // `buyOrderDelta` into `netPositionDelta`, which leaves the `netDelta + buy`
-        // leg at exactly the same place. Charging any less would leave a gap.
-        assert.equal(buyerImAfter, buyerImBefore);
-        assert.equal(sellerImAfter, sellerImBefore);
+        // leg at exactly the same place. The only slack is the fill-loss bound's
+        // over-reserve on a multi-level side (CF-007), which shrinks as levels fill.
+        const tolerance = parseUnits("0.01", 6);
+        assert.ok(buyerImBefore - buyerImAfter <= tolerance, "buyer IM dropped by more than the bound's slack");
+        assert.ok(sellerImBefore - sellerImAfter <= tolerance, "seller IM dropped by more than the bound's slack");
 
         // Sanity: the fills really happened.
         const risk = await perps.read.getRiskView([buyer.account.address]);
