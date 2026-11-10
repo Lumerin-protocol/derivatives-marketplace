@@ -30,8 +30,8 @@ importers:
         specifier: github:Lumerin-protocol/collateral-margin#a5112c30418813c7a8dbc0af34594f2923b0f1a0
         version: https://codeload.github.com/Lumerin-protocol/collateral-margin/tar.gz/a5112c30418813c7a8dbc0af34594f2923b0f1a0
       hashprice-oracle:
-        specifier: github:Lumerin-protocol/hashprice-oracle#450400dbd39c0b085963aa2be06f2a48ed0df753
-        version: https://codeload.github.com/Lumerin-protocol/hashprice-oracle/tar.gz/450400dbd39c0b085963aa2be06f2a48ed0df753
+        specifier: github:Lumerin-protocol/hashprice-oracle#70e5a697f61077d60cef91b1079bb87be8c91030
+        version: https://codeload.github.com/Lumerin-protocol/hashprice-oracle/tar.gz/70e5a697f61077d60cef91b1079bb87be8c91030
       multicall3:
         specifier: github:mds1/multicall3
         version: '@multicall/multicall3@https://codeload.github.com/mds1/multicall3/tar.gz/b667d67ecfa5361a81e8f110234ce242613b0012'
@@ -1788,8 +1788,8 @@ packages:
   hash.js@1.1.7:
     resolution: {integrity: sha512-taOaskGt4z4SOANNseOviYDvjEJinIkRgmp7LbKP2YTTmVxWBl87s/uzK9r+44BclBSp2X7K1hqeNfz9JbBeXA==}
 
-  hashprice-oracle@https://codeload.github.com/Lumerin-protocol/hashprice-oracle/tar.gz/450400dbd39c0b085963aa2be06f2a48ed0df753:
-    resolution: {gitHosted: true, integrity: sha512-AC1OMiONFqKIPk5u3u/FJAfAeD/oX80BgXLeSUzgPaGSj5uuMBNo7YKeAEitz0zF4vbkbdJ0lTHwT2bRyKMXUg==, tarball: https://codeload.github.com/Lumerin-protocol/hashprice-oracle/tar.gz/450400dbd39c0b085963aa2be06f2a48ed0df753}
+  hashprice-oracle@https://codeload.github.com/Lumerin-protocol/hashprice-oracle/tar.gz/70e5a697f61077d60cef91b1079bb87be8c91030:
+    resolution: {gitHosted: true, integrity: sha512-a+AgKN7MVxbLYYxNiO612tYrd4bHfoAnoUnxb68WkaVquxmRSfan/wCqYEgyTy9qj5gOPNsxJyWvJjBzoPSiBA==, tarball: https://codeload.github.com/Lumerin-protocol/hashprice-oracle/tar.gz/70e5a697f61077d60cef91b1079bb87be8c91030}
     version: 1.0.0
 
   hasown@2.0.2:
@@ -5064,7 +5064,7 @@ snapshots:
       inherits: 2.0.4
       minimalistic-assert: 1.0.1
 
-  hashprice-oracle@https://codeload.github.com/Lumerin-protocol/hashprice-oracle/tar.gz/450400dbd39c0b085963aa2be06f2a48ed0df753: {}
+  hashprice-oracle@https://codeload.github.com/Lumerin-protocol/hashprice-oracle/tar.gz/70e5a697f61077d60cef91b1079bb87be8c91030: {}
 
   hasown@2.0.2:
     dependencies:

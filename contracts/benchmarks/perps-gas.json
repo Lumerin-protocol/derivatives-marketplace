@@ -100,28 +100,28 @@
     },
     {
       "function": "createOrder(uint256,int256,uint8)",
-      "gas": "257343",
+      "gas": "257307",
       "id": "createOrder(uint256,int256,uint8)::glide feed, before the glide: full match, both sides holding positions",
       "kind": "transaction",
       "scenario": "glide feed, before the glide: full match, both sides holding positions"
     },
     {
       "function": "createOrder(uint256,int256,uint8)",
-      "gas": "522409",
+      "gas": "522364",
       "id": "createOrder(uint256,int256,uint8)::glide feed, before the glide: resting order, new level",
       "kind": "transaction",
       "scenario": "glide feed, before the glide: resting order, new level"
     },
     {
       "function": "createOrder(uint256,int256,uint8)",
-      "gas": "270587",
+      "gas": "270622",
       "id": "createOrder(uint256,int256,uint8)::glide feed, during the glide: full match, both sides holding positions",
       "kind": "transaction",
       "scenario": "glide feed, during the glide: full match, both sides holding positions"
     },
     {
       "function": "createOrder(uint256,int256,uint8)",
-      "gas": "566096",
+      "gas": "566140",
       "id": "createOrder(uint256,int256,uint8)::glide feed, during the glide: resting order, new level",
       "kind": "transaction",
       "scenario": "glide feed, during the glide: resting order, new level"
@@ -261,14 +261,14 @@
     },
     {
       "function": "getExposureView(address)",
-      "gas": "95969",
+      "gas": "95923",
       "id": "getExposureView(address)::glide feed, before the glide: position and order",
       "kind": "view",
       "scenario": "glide feed, before the glide: position and order"
     },
     {
       "function": "getExposureView(address)",
-      "gas": "98355",
+      "gas": "98377",
       "id": "getExposureView(address)::glide feed, during the glide: position and order",
       "kind": "view",
       "scenario": "glide feed, during the glide: position and order"
@@ -443,14 +443,14 @@
     },
     {
       "function": "liquidatePosition(address,uint256)",
-      "gas": "328341",
+      "gas": "328318",
       "id": "liquidatePosition(address,uint256)::glide feed, before the glide: full close",
       "kind": "transaction",
       "scenario": "glide feed, before the glide: full close"
     },
     {
       "function": "liquidatePosition(address,uint256)",
-      "gas": "391801",
+      "gas": "391867",
       "id": "liquidatePosition(address,uint256)::glide feed, during the glide: full close",
       "kind": "transaction",
       "scenario": "glide feed, during the glide: full close"
@@ -646,7 +646,7 @@
     },
     {
       "function": "updateFunding()",
-      "gas": "70057",
+      "gas": "70079",
       "id": "updateFunding()::glide feed, during the glide: no book",
       "kind": "transaction",
       "scenario": "glide feed, during the glide: no book"

@@ -54,7 +54,7 @@
     "@openzeppelin/contracts-upgradeable": "5.1.0",
     "@openzeppelin/hardhat-upgrades": "^3.9.1",
     "collateral-margin": "github:Lumerin-protocol/collateral-margin#a5112c30418813c7a8dbc0af34594f2923b0f1a0",
-    "hashprice-oracle": "github:Lumerin-protocol/hashprice-oracle#450400dbd39c0b085963aa2be06f2a48ed0df753",
+    "hashprice-oracle": "github:Lumerin-protocol/hashprice-oracle#70e5a697f61077d60cef91b1079bb87be8c91030",
     "multicall3": "github:mds1/multicall3",
     "solidity-linked-list": "^6.5.0"
   },
