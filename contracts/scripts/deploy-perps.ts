@@ -6,6 +6,7 @@ import { writeAndWait } from "../lib/writeContract.ts";
 import { verifyContract } from "../lib/verify.ts";
 import { txUrl, addrUrl } from "../lib/explorer.ts";
 import { logTitle, logInfo, logStep, logSuccess, logPrompt } from "../lib/log.ts";
+import { engineIndexOracle } from "./lib/engine-index.ts";
 
 function readOptionalAddress(name: string): Address | undefined {
   const raw = process.env[name];
@@ -167,6 +168,7 @@ async function main() {
     const pme = await viem.getContractAt("PortfolioMarginEngine", MARGIN_ENGINE_ADDRESS);
     const pmeOwner = await pme.read.owner();
     const deployerIsPmeOwner = getAddress(pmeOwner) === getAddress(deployer.account.address);
+    const indexOracle = await engineIndexOracle(pc, env.PRICE_ORACLE_ADDRESS as Address);
 
     logInfo("HashPowerPerpsDEX.setPortfolioMargin", { marginEngine: MARGIN_ENGINE_ADDRESS });
     await logPrompt("Proceed?");
@@ -183,9 +185,9 @@ async function main() {
       const receipt = await writeAndWait(deployer, sim);
       logStep("Done", txUrl(pc, receipt.transactionHash));
 
-      logInfo("PME.setOracle", { oracle: env.PRICE_ORACLE_ADDRESS });
+      logInfo("PME.setOracle", { oracle: indexOracle });
       await logPrompt("Proceed?");
-      const oracleSim = await pme.simulate.setOracle([env.PRICE_ORACLE_ADDRESS as Address]);
+      const oracleSim = await pme.simulate.setOracle([indexOracle]);
       const oracleReceipt = await writeAndWait(deployer, oracleSim);
       logStep("Done", txUrl(pc, oracleReceipt.transactionHash));
     } else {
@@ -197,11 +199,11 @@ async function main() {
       const oracleData = encodeFunctionData({
         abi: pme.abi,
         functionName: "setOracle",
-        args: [env.PRICE_ORACLE_ADDRESS as Address],
+        args: [indexOracle],
       });
       logInfo("PME wiring (run as PME owner)", { "PME address": pme.address, "PME owner": pmeOwner });
       logStep(`PME.addLinearMarket(${perps.address})`, data);
-      logStep(`PME.setOracle(${env.PRICE_ORACLE_ADDRESS})`, oracleData);
+      logStep(`PME.setOracle(${indexOracle})`, oracleData);
     }
 
     if (deployerIsVaultOwner) {
