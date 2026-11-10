@@ -106,20 +106,23 @@ async function main() {
   }
 
   await logPrompt("Force-close the open positions, then reset the orders?");
+  // A load-balanced RPC can report a head older than the receipts, so verify at the last receipt.
+  let after = snapshot;
   for (const batch of chunk(open.map((h) => h.user), batchSize)) {
     const hash = await deployer.writeContract({ address: perps, abi: RETIRED_PERPS_ABI, functionName: "forceClosePositions", args: [batch] });
     const receipt = await pc.waitForTransactionReceipt({ hash });
     if (receipt.status !== "success") throw new Error(`forceClosePositions reverted: ${txUrl(pc, hash)}`);
+    after = receipt.blockNumber;
     logStep(`forceClosePositions(${batch.length})`, txUrl(pc, hash));
   }
   for (const batch of chunk(withOrders.map((h) => h.user), batchSize)) {
     const hash = await deployer.writeContract({ address: perps, abi: RETIRED_PERPS_ABI, functionName: "resetState", args: [batch] });
     const receipt = await pc.waitForTransactionReceipt({ hash });
     if (receipt.status !== "success") throw new Error(`resetState reverted: ${txUrl(pc, hash)}`);
+    after = receipt.blockNumber;
     logStep(`resetState(${batch.length})`, txUrl(pc, hash));
   }
 
-  const after = await pc.getBlockNumber();
   const left = (await readHoldings(pc, perps, participants, after)).filter((h) => h.netQuantity !== 0n || h.orders > 0);
   if (left.length > 0) throw new Error(`${left.length} participant(s) still hold a position or orders`);
   const fundAfter = await pc.readContract({ address: vault, abi: VAULT_ABI, functionName: "insuranceFundBalance", blockNumber: after });
