@@ -7,7 +7,6 @@ import { StructuredLinkedList } from "solidity-linked-list/contracts/StructuredL
 import { AggregatorV3Interface } from "./interfaces/AggregatorV3Interface.sol";
 import { ICollateralVault } from "collateral-margin/contracts/contracts/interfaces/ICollateralVault.sol";
 import { ILinearMarket } from "collateral-margin/contracts/contracts/interfaces/ILinearMarket.sol";
-import { ILinearMarketExposure } from "collateral-margin/contracts/contracts/interfaces/ILinearMarketExposure.sol";
 import { IPortfolioMarginEngine } from "collateral-margin/contracts/contracts/interfaces/IPortfolioMarginEngine.sol";
 import { MathLib as M } from "./libs/MathLib.sol";
 import { HashPowerPerpsDEXBase } from "./HashPowerPerpsDEXBase.sol";
@@ -457,11 +456,11 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         return positions[_user];
     }
 
-    /// @notice ILinearMarketExposure: all per-user margin inputs in a single call, with the
+    /// @notice ILinearMarket: all per-user margin inputs in a single call, with the
     ///         position and resting orders valued at the mark (contracts × mark).
     /// @dev The engine reads this and shocks the exposure by a percentage, so the mark need not
     ///      be the index it stresses.
-    function getExposureView(address _user) external view returns (ILinearMarketExposure.ExposureView memory view_) {
+    function getExposureView(address _user) external view returns (ILinearMarket.ExposureView memory view_) {
         (ILinearMarket.RiskView memory risk, uint256 mark) = _riskView(_user);
         uint256 scale = 10 ** QUANTITY_DECIMALS;
         view_.netPositionExposure = risk.netPositionDelta * int256(mark) / int256(scale);
