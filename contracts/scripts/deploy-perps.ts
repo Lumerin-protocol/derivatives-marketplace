@@ -25,7 +25,7 @@ async function main() {
   // its underlying ERC20 (and decimals) from the vault.
   const env = requireEnvsSet(
     "VAULT_ADDRESS",
-    "PRICE_ORACLE_ADDRESS",
+    "MARK_ORACLE_ADDRESS",
     "TAKER_FEE_BPS",
     "MAKER_FEE_BPS",
     "LIQUIDATION_FEE_BPS",
@@ -68,7 +68,7 @@ async function main() {
   // Verify price oracle
   const priceOracle = await viem.getContractAt(
     "AggregatorV3Interface",
-    env.PRICE_ORACLE_ADDRESS as Address,
+    env.MARK_ORACLE_ADDRESS as Address,
   );
   const [, answer, , updatedAt] = await priceOracle.read.latestRoundData();
   logInfo("oracle", {
@@ -106,14 +106,14 @@ async function main() {
   logInfo("Deploy HashPowerPerpsDEX proxy", {
     implementation: perpsImpl.address,
     vault: vault.address,
-    priceOracle: env.PRICE_ORACLE_ADDRESS,
+    priceOracle: env.MARK_ORACLE_ADDRESS,
   });
   await logPrompt("Proceed?");
   console.log("Deploying HashPowerPerpsDEX proxy...");
   const encodedInitFn = encodeFunctionData({
     abi: perpsImpl.abi,
     functionName: "initialize",
-    args: [env.PRICE_ORACLE_ADDRESS as Address, vault.address],
+    args: [env.MARK_ORACLE_ADDRESS as Address, vault.address],
   });
 
   const perpsProxy = await viem.deployContract("ERC1967Proxy", [
@@ -168,7 +168,7 @@ async function main() {
     const pme = await viem.getContractAt("PortfolioMarginEngine", MARGIN_ENGINE_ADDRESS);
     const pmeOwner = await pme.read.owner();
     const deployerIsPmeOwner = getAddress(pmeOwner) === getAddress(deployer.account.address);
-    const indexOracle = await engineIndexOracle(pc, env.PRICE_ORACLE_ADDRESS as Address);
+    const indexOracle = await engineIndexOracle(pc, env.MARK_ORACLE_ADDRESS as Address);
 
     logInfo("HashPowerPerpsDEX.setPortfolioMargin", { marginEngine: MARGIN_ENGINE_ADDRESS });
     await logPrompt("Proceed?");
