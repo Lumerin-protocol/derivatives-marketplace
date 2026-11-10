@@ -47,7 +47,7 @@ export async function verifyContract(
   for (const provider of providers) {
     console.log(`\nVerifying ${args.address} on ${provider}...`);
     try {
-      await hreVerify({ ...args, provider }, hre);
+      await verifyOnceIndexed({ ...args, provider });
       console.log(`  ${provider}: verified.`);
       if (provider === "etherscan") etherscanOk = true;
     } catch (err) {
@@ -61,4 +61,24 @@ export async function verifyContract(
     }
   }
   return etherscanOk;
+}
+
+const INDEX_RETRY_MS = 15_000;
+const INDEX_TIMEOUT_MS = 300_000;
+
+/// An explorer indexes a new contract a minute or so after it is mined and
+/// until then reports that the address has no bytecode.
+async function verifyOnceIndexed(args: VerifyContractArgs): Promise<void> {
+  const deadline = Date.now() + INDEX_TIMEOUT_MS;
+  for (;;) {
+    try {
+      await hreVerify(args, hre);
+      return;
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      if (!msg.includes("does not have bytecode") || Date.now() > deadline) throw err;
+      console.log(`  ${args.provider}: not indexed yet; retrying in ${INDEX_RETRY_MS / 1000}s`);
+      await new Promise((resolve) => setTimeout(resolve, INDEX_RETRY_MS));
+    }
+  }
 }
