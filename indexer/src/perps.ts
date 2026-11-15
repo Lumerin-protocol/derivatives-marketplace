@@ -24,6 +24,8 @@ import {
   PortfolioMarginUpdated,
   FundingUpdated,
   FundingSettled,
+  DriftUpdated,
+  DriftSettled,
   FundingParametersUpdated,
   MinimumMarginPerOrderUpdated,
   HashPowerPerpsDEX as PerpsContract,
@@ -37,6 +39,8 @@ import {
   PriceLevel,
   FundingUpdate,
   FundingSettlement,
+  DriftUpdate,
+  DriftSettlement,
   LiquidationTx,
   PositionSession,
   BackstopUnwind,
@@ -99,6 +103,7 @@ function getOrCreatePerps(): Perps {
     perps.fundingPeriod = BigInt.zero();
     perps.cumulativeFundingPerUnit = BigInt.zero();
     perps.lastFundingUpdateTime = BigInt.zero();
+    perps.cumulativeDriftPerUnit = BigInt.zero();
     perps.minimumMarginPerOrder = BigInt.zero();
     perps.reservePoolBalance = BigInt.zero();
     perps.collectedFeesBalance = BigInt.zero();
@@ -187,6 +192,11 @@ function loadPerpsFromContract(perps: Perps): void {
     perps.lastFundingUpdateTime = lastFundingUpdateTime.value;
   }
 
+  const cumulativeDriftPerUnit = contract.try_cumulativeDriftPerUnit();
+  if (!cumulativeDriftPerUnit.reverted) {
+    perps.cumulativeDriftPerUnit = cumulativeDriftPerUnit.value;
+  }
+
   const minimumMarginPerOrder = contract.try_minimumMarginPerOrder();
   if (!minimumMarginPerOrder.reverted) {
     perps.minimumMarginPerOrder = minimumMarginPerOrder.value;
@@ -232,6 +242,8 @@ function getOrCreateUser(address: Address, timestamp: BigInt): User {
     user.realizedPnl = BigInt.zero();
     user.totalFundingPaid = BigInt.zero();
     user.totalFundingReceived = BigInt.zero();
+    user.totalDriftPaid = BigInt.zero();
+    user.totalDriftReceived = BigInt.zero();
     user.lastCreatedOrderId = Bytes.empty();
     user.createdAt = timestamp;
     user.lastActivityAt = timestamp;
@@ -896,6 +908,7 @@ function handleFlip(
   newSession.maxQuantity = absBigInt(newNetQuantity);
   newSession.tradingFees = zero;
   newSession.fundingFees = zero;
+  newSession.driftPayments = zero;
   newSession.liquidatedQuantity = zero;
   newSession.openedAt = timestamp;
   newSession.lastTradeAt = timestamp;
@@ -985,6 +998,7 @@ function handleNonFlip(
     session.maxQuantity = zero;
     session.tradingFees = zero;
     session.fundingFees = zero;
+    session.driftPayments = zero;
     session.liquidatedQuantity = zero;
     user.currentSessionId = id;
   } else {
@@ -1312,6 +1326,7 @@ function applyBackstopLeg(
     session.maxQuantity = zero;
     session.tradingFees = zero;
     session.fundingFees = zero;
+    session.driftPayments = zero;
     session.liquidatedQuantity = zero;
     user.currentSessionId = id;
   } else {
@@ -1437,15 +1452,104 @@ export function handleFundingSettled(event: FundingSettled): void {
     }
   }
 
-  settlement.save();
-
   if (received.gt(BigInt.zero())) {
     user.totalFundingReceived = user.totalFundingReceived.plus(received);
   } else {
     user.totalFundingPaid = user.totalFundingPaid.plus(received.neg());
   }
+  settlement.cumulativeFundingPaid = user.totalFundingPaid;
+  settlement.cumulativeFundingReceived = user.totalFundingReceived;
+  settlement.save();
+
   user.lastActivityAt = event.block.timestamp;
   user.save();
+}
+
+// ============ Drift Event Handlers ============
+
+export function handleDriftUpdated(event: DriftUpdated): void {
+  log.info("Drift updated: delta {} cumulative {}", [
+    event.params.delta.toString(),
+    event.params.cumulativePerUnit.toString(),
+  ]);
+
+  const eventId = createEventId(event.transaction.hash, event.logIndex);
+  const driftUpdate = new DriftUpdate(eventId);
+  driftUpdate.delta = event.params.delta;
+  driftUpdate.cumulativePerUnit = event.params.cumulativePerUnit;
+  driftUpdate.timestamp = event.block.timestamp;
+  driftUpdate.blockNumber = event.block.number;
+  driftUpdate.transactionHash = event.transaction.hash;
+  driftUpdate.save();
+
+  const perps = getOrCreatePerps();
+  perps.cumulativeDriftPerUnit = event.params.cumulativePerUnit;
+  perps.lastUpdatedAt = event.block.timestamp;
+  perps.save();
+}
+
+export function handleDriftSettled(event: DriftSettled): void {
+  log.info("Drift settled: user {} amount {}", [
+    event.params.user.toHexString(),
+    event.params.amount.toString(),
+  ]);
+
+  const user = getOrCreateUser(event.params.user, event.block.timestamp);
+  // Same sign as the entities: positive = the user gains.
+  const received = event.params.amount;
+  const zero = BigInt.zero();
+
+  const eventId = createEventId(event.transaction.hash, event.logIndex);
+  const settlement = new DriftSettlement(eventId);
+  settlement.user = user.id;
+  settlement.amount = received;
+  settlement.timestamp = event.block.timestamp;
+  settlement.blockNumber = event.block.number;
+  settlement.transactionHash = event.transaction.hash;
+
+  // The contract does `netEntryValue -= drift` and moves no collateral, so the
+  // drift reaches the balance through the PnL of the next reducing fill. Fold it
+  // into the entry here too, or that fill would price against the pre-drift
+  // entry until a later OrderMatched resynced it from `entryPriceAfter`.
+  const newEntryPrice = entryPriceAfterDrift(user, received);
+  user.aggregatedEntryPrice = newEntryPrice;
+
+  if (user.currentSessionId.length > 0) {
+    const session = PositionSession.load(user.currentSessionId);
+    if (session) {
+      settlement.positionSession = session.id;
+      session.driftPayments = session.driftPayments.plus(received);
+      session.entryPrice = newEntryPrice;
+      session.save();
+    }
+  }
+
+  if (received.gt(zero)) {
+    user.totalDriftReceived = user.totalDriftReceived.plus(received);
+  } else {
+    user.totalDriftPaid = user.totalDriftPaid.plus(received.neg());
+  }
+  settlement.cumulativeDriftPaid = user.totalDriftPaid;
+  settlement.cumulativeDriftReceived = user.totalDriftReceived;
+  settlement.save();
+
+  user.lastActivityAt = event.block.timestamp;
+  user.save();
+}
+
+/**
+ * The entry price once `drift` is taken off the position's entry value, as the
+ * contract does. Rebuilt from the stored price, so it can be a unit off the
+ * contract's exact `netEntryValue`; the next fill's `entryPriceAfter` resyncs it.
+ */
+function entryPriceAfterDrift(user: User, drift: BigInt): BigInt {
+  const netQuantity = user.netQuantity;
+  if (netQuantity.equals(BigInt.zero())) return user.aggregatedEntryPrice;
+
+  const perps = getOrCreatePerps();
+  const quantityScale = BigInt.fromI32(10).pow(u8(perps.quantityDecimals));
+  const entryValue = user.aggregatedEntryPrice.times(netQuantity).div(quantityScale);
+  return absBigInt(entryValue.minus(drift)).times(quantityScale).div(absBigInt(netQuantity));
 }
 
 // ============ Config Event Handlers ============

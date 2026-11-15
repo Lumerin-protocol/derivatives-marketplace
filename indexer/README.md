@@ -17,7 +17,8 @@ A Graph Protocol subgraph that indexes the `HashPowerPerpsDEX` contract, turning
 | **Fill** | immutable | One per user per `OrderMatched` leg: the individual execution against a counterparty, with both sides' orders, price, signed quantity, fee, and realized PnL. Keyed by tx hash + log index + leg suffix so a reopen leg cannot collide with the maker. A forced close has no matched counterparty order, so it produces a Trade but no Fill. |
 | **PositionSession** | mutable | One continuous position from open to flat. Carries entry price, realized PnL, and liquidated quantity; ends when net quantity returns to zero. |
 | **PriceLevel** | mutable | Aggregated order book level: total quantity and order count at a given price and side (bid/ask). |
-| **FundingUpdate** / **FundingSettlement** | immutable | Funding rate updates and their per-user settlements. |
+| **FundingUpdate** / **FundingSettlement** | immutable | Funding rate updates and their per-user settlements. Each settlement snapshots the user's running paid/received totals, so a window's funding costs one baseline row. |
+| **DriftUpdate** / **DriftSettlement** | immutable | Halving-glide drift accruals and their per-user settlements, snapshotted the same way. Drift moves no collateral: it is folded into the entry price, so it is already inside realized PnL. |
 | **ReservePoolEvent** | immutable | Reserve pool inflows and outflows. |
 | **LiquidationTx** | immutable | Per-tx sentinel keyed by tx hash. Carries no data; its existence lets `Perps.totalLiquidations` count liquidation transactions rather than legs. |
 
@@ -28,6 +29,7 @@ The subgraph listens to all `HashPowerPerpsDEX` contract events:
 - **Order events** — `OrderCreated`, `OrderCancelled`, `OrderLiquidated`, `OrderUpdated`, `OrderMatched`
 - **Position events** — `PositionLiquidated`
 - **Funding events** — `FundingUpdated`, `FundingSettled`
+- **Drift events** — `DriftUpdated`, `DriftSettled`
 - **Config events** — `MakerFeeBpsUpdated`, `TakerFeeBpsUpdated`, `LiquidationFeeBpsUpdated`, `LiquidatorShareBpsUpdated`, `OracleUpdated`, `PortfolioMarginUpdated`, `FundingParametersUpdated`, `MinimumMarginPerOrderUpdated`
 - **Lifecycle events** — `Initialized`, `Upgraded`
 
