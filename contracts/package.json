@@ -18,7 +18,6 @@
     "storage:check": "hardhat compile && node scripts/check-perps-storage-layout.mjs",
     "storage:baseline": "hardhat compile && node scripts/check-perps-storage-layout.mjs --write",
     "clean": "rm -rf abi artifacts cache",
-    "aderyn": "aderyn",
     "run:dev": "hardhat run --env dev",
     "run:prod": "hardhat run --env prd",
     "deploy:perps": "hardhat run scripts/deploy-perps.ts",
@@ -31,7 +30,6 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.2.4",
-    "@cyfrin/aderyn": "^0.5.13",
     "@lsheva/evm-gas-benchmark": "github:lsheva/evm-gas-benchmark#v1.0.2&path:packages/evm-gas-benchmark",
     "@nomicfoundation/hardhat-toolbox-viem": "^5.0.7",
     "@nomicfoundation/hardhat-verify": "^3.0.17",
