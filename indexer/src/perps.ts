@@ -1539,8 +1539,10 @@ export function handleDriftSettled(event: DriftSettled): void {
 
 /**
  * The entry price once `drift` is taken off the position's entry value, as the
- * contract does. Rebuilt from the stored price, so it can be a unit off the
- * contract's exact `netEntryValue`; the next fill's `entryPriceAfter` resyncs it.
+ * contract does: |entry × qty − drift × scale| / |qty|. The entry value is never
+ * rounded on its own, which would cost up to `scale / qty` of price on a small
+ * position. The stored price is already floored, so the result can still be a
+ * unit off the contract's; the next fill's `entryPriceAfter` resyncs it.
  */
 function entryPriceAfterDrift(user: User, drift: BigInt): BigInt {
   const netQuantity = user.netQuantity;
@@ -1548,8 +1550,10 @@ function entryPriceAfterDrift(user: User, drift: BigInt): BigInt {
 
   const perps = getOrCreatePerps();
   const quantityScale = BigInt.fromI32(10).pow(u8(perps.quantityDecimals));
-  const entryValue = user.aggregatedEntryPrice.times(netQuantity).div(quantityScale);
-  return absBigInt(entryValue.minus(drift)).times(quantityScale).div(absBigInt(netQuantity));
+  const scaledEntryValue = user.aggregatedEntryPrice
+    .times(netQuantity)
+    .minus(drift.times(quantityScale));
+  return absBigInt(scaledEntryValue).div(absBigInt(netQuantity));
 }
 
 // ============ Config Event Handlers ============

@@ -121,6 +121,22 @@ describe("handleDriftSettled", () => {
 
     assert.fieldEquals("User", trader.toHexString(), "aggregatedEntryPrice", entry.plus(gain).toString());
   });
+
+  test("a small position's entry stays within a unit of the contract's", () => {
+    const trader = userAddress(1);
+    const maker = userAddress(2);
+    // Contract: netEntryValue 10 on 3 units of 1e-6 reports entry floor(10e6 / 3).
+    const qty = BigInt.fromI32(3);
+    const entry = BigInt.fromI32(3333333);
+    const gain = BigInt.fromI32(1);
+
+    match(trader, maker, entry, qty, qty, entry, orderId(1), orderId(100), 1);
+    handleDriftSettled(createDriftSettledEvent(trader, gain, 2));
+
+    // Contract: netEntryValue 9, so entry 9e6 / 3 = 3000000. Rounding the entry
+    // value before taking the drift off would land on 2666666 instead.
+    assert.fieldEquals("User", trader.toHexString(), "aggregatedEntryPrice", "2999999");
+  });
 });
 
 describe("handleDriftUpdated", () => {
