@@ -126,6 +126,12 @@ describe("handleFundingSettled", () => {
     assert.fieldEquals("User", trader.toHexString(), "totalFundingPaid", fundingPaid.abs().toString());
     assert.fieldEquals("User", trader.toHexString(), "totalFundingReceived", fundingReceived.toString());
     assert.fieldEquals("User", trader.toHexString(), "lastActivityAt", settle2.block.timestamp.toString());
+
+    // Each settlement snapshots the running totals after itself.
+    assert.fieldEquals("FundingSettlement", mockEventId(2), "cumulativeFundingPaid", fundingPaid.abs().toString());
+    assert.fieldEquals("FundingSettlement", mockEventId(2), "cumulativeFundingReceived", "0");
+    assert.fieldEquals("FundingSettlement", mockEventId(3), "cumulativeFundingPaid", fundingPaid.abs().toString());
+    assert.fieldEquals("FundingSettlement", mockEventId(3), "cumulativeFundingReceived", fundingReceived.toString());
   });
 
   test("funding settled before close is linked to the session being closed", () => {

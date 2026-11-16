@@ -32,6 +32,8 @@ dataSources:
         - LiquidationTx
         - FundingUpdate
         - FundingSettlement
+        - DriftUpdate
+        - DriftSettlement
         - ReservePoolEvent
       abis:
         - name: HashPowerPerpsDEX
@@ -59,6 +61,11 @@ dataSources:
           handler: handleFundingUpdated
         - event: FundingSettled(indexed address,int256)
           handler: handleFundingSettled
+        # Drift events
+        - event: DriftUpdated(int256,int256)
+          handler: handleDriftUpdated
+        - event: DriftSettled(indexed address,int256)
+          handler: handleDriftSettled
         # Config events
         - event: MakerFeeBpsUpdated(int16)
           handler: handleMakerFeeBpsUpdated
