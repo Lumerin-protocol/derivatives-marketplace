@@ -6,7 +6,6 @@ import {
   encodeFunctionData,
   getAddress,
   isAddress,
-  parseAbi,
   zeroAddress,
 } from "viem";
 import { estimateContractGas, simulateContract } from "viem/actions";
@@ -23,17 +22,31 @@ import {
 import { SafeWallet } from "../lib/safe.ts";
 import { verifyContract } from "../lib/verify.ts";
 import { writeAndWait } from "../lib/writeContract.ts";
+import {
+  DEFAULT_BLOCK_CHUNK,
+  collectParticipants,
+  fetchDeploymentBlockFromEtherscan,
+} from "./lib/participants.ts";
+import { requireUpgradeDependencies } from "./lib/dependencies.ts";
+import { ensureVaultHalted } from "./lib/halt.ts";
+import {
+  assertNoRestingOrders,
+  chunk,
+  usersWithRestingOrders,
+} from "./lib/resting-orders.ts";
 
-// Initializers are versioned and must run in order: `initializeV2` (reinitializer 2)
-// then `initializeV3` (reinitializer 3). Calling V3 first from version 1 permanently
-// skips V2. Fresh proxies from `deploy-perps.ts` already sit on 3.
-const TARGET_CODE_VERSION = "6.8.0";
+// Upgrades run no initializer, so the proxy's init version must not move.
+//
+// 6.10 starts a new resting-order aggregate, so orders placed before it must not survive the
+// upgrade: with the shared vault halted, the upgrade call is `forceCancelOrders` for every user
+// with resting orders (further batches follow while still halted). Resume the vault only once
+// every venue is upgraded and verified (`VERIFY_ONLY=true` checks a venue without upgrading).
+// The vault and the engine are upgraded before the venues; `requireUpgradeDependencies`
+// enforces it.
+const DEFAULT_FORCE_CANCEL_BATCH_SIZE = 20;
+const TARGET_CODE_VERSION = "6.17.0";
 const UPGRADE_CONFIRMATIONS = 5;
 const DEFAULT_SAFE_GAS_OVERHEAD = 150_000n;
-// 6.8.0 calls the engine's `reduceLimits` / `meetsTradeMargin` on every order. Against an
-// older engine every order reverts, so the engine has to be upgraded first.
-const MIN_ENGINE_VERSION = "2.2.0";
-const VERSION_ABI = parseAbi(["function VERSION() view returns (string)"]);
 
 // ERC-7201 namespaced storage slot for OpenZeppelin's `Initializable`.
 const INITIALIZABLE_STORAGE_SLOT: Hex =
@@ -67,47 +80,12 @@ async function readInitializedVersion(
   return BigInt(raw) & 0xffffffffffffffffn;
 }
 
-/** Dotted-version comparison; an unreadable version never passes. */
-function versionAtLeast(version: string, min: string): boolean {
-  const have = version.split(".").map(Number);
-  const want = min.split(".").map(Number);
-  for (let i = 0; i < want.length; i++) {
-    const part = have[i] ?? 0;
-    if (part !== want[i]) return part > want[i];
-  }
-  return true;
-}
-
-async function requireEngineVersion(
-  pc: PublicClient,
-  engine: Address,
-  blockNumber?: bigint,
-): Promise<void> {
-  const version = await pc
-    .readContract({
-      address: engine,
-      abi: VERSION_ABI,
-      functionName: "VERSION",
-      blockNumber,
-    })
-    .catch(() => "unknown");
-  if (!versionAtLeast(version, MIN_ENGINE_VERSION)) {
-    throw new Error(
-      `PortfolioMarginEngine ${engine} is at ${version}; upgrade it to ${MIN_ENGINE_VERSION} or later before this venue`,
-    );
-  }
-}
-
 async function main() {
   logTitle("HashPowerPerpsDEX Upgrade");
 
   const env = requireEnvsSet("PERPS_ADDRESS", "VAULT_ADDRESS");
   const proxyAddress = getAddress(env.PERPS_ADDRESS);
   const vaultAddress = getAddress(env.VAULT_ADDRESS);
-  const pmeAddress =
-    readOptionalAddress("PME_ADDRESS") ??
-    readOptionalAddress("MARGIN_ENGINE_ADDRESS") ??
-    zeroAddress;
   const configuredSafe = readOptionalAddress("SAFE_OWNER_ADDRESS");
   const pointsHookAddress = readOptionalAddress("HOOK_ADDRESS");
   const existingImpl = readOptionalAddress("PERPS_IMPL_ADDRESS");
@@ -129,22 +107,18 @@ async function main() {
     proxyAddress,
     snapshotBlock,
   );
-  const needsInitializeV2 = currentInitVersion < 2n;
-  const needsInitializeV3 = currentInitVersion < 3n;
 
   const wiredEngine = getAddress(
     await perps.read
       .portfolioMargin({ blockNumber: snapshotBlock })
       .catch(() => zeroAddress),
   );
-  const engines = new Set([
-    wiredEngine,
-    needsInitializeV2 ? pmeAddress : zeroAddress,
-  ]);
-  engines.delete(zeroAddress);
-  for (const engine of engines) {
-    await requireEngineVersion(pc, engine, snapshotBlock);
-  }
+  await requireUpgradeDependencies(pc, {
+    venue: proxyAddress,
+    vault: vaultAddress,
+    engines: wiredEngine === zeroAddress ? [] : [wiredEngine],
+    blockNumber: snapshotBlock,
+  });
 
   if (configuredSafe && configuredSafe !== currentOwner) {
     throw new Error(
@@ -166,13 +140,8 @@ async function main() {
     Owner: currentOwner,
     Version: currentCodeVersion,
     InitVersion: currentInitVersion.toString(),
-    initializeV2: needsInitializeV2 ? "yes" : "skip (already >= 2)",
-    initializeV3: needsInitializeV3 ? "yes" : "skip (already >= 3)",
     Vault: addrUrl(pc, vaultAddress),
-    PME:
-      pmeAddress === zeroAddress
-        ? "(none — wire later)"
-        : addrUrl(pc, pmeAddress),
+    PME: wiredEngine === zeroAddress ? "(none wired)" : addrUrl(pc, wiredEngine),
     "Snapshot block": snapshotBlock,
   });
 
@@ -181,6 +150,54 @@ async function main() {
       `Configured upgrade caller ${upgradeCaller} is not HashPowerPerpsDEX owner ${currentOwner}`,
     );
   }
+
+  const startBlock =
+    readOptionalBigInt("START_BLOCK") ??
+    (await fetchDeploymentBlockFromEtherscan(pc, proxyAddress));
+  const blockChunk = readOptionalBigInt("BLOCK_CHUNK_SIZE") ?? DEFAULT_BLOCK_CHUNK;
+  if (process.env.VERIFY_ONLY === "true") {
+    if (currentCodeVersion !== TARGET_CODE_VERSION) {
+      throw new Error(
+        `Proxy VERSION is ${currentCodeVersion}, expected ${TARGET_CODE_VERSION}; has the upgrade executed?`,
+      );
+    }
+    const candidates = await collectParticipants(pc, proxyAddress, {
+      startBlock,
+      endBlock: snapshotBlock,
+      blockChunk,
+    });
+    await assertNoRestingOrders(pc, proxyAddress, candidates, snapshotBlock);
+    logSuccess(
+      `No resting orders at block ${snapshotBlock} (${candidates.length} participants checked)`,
+    );
+    return;
+  }
+
+  // Listed only once halted, so no user can place an order the cancellation would miss.
+  const ordersBlock = await ensureVaultHalted(pc, vaultAddress, deployer);
+  const candidates = await collectParticipants(pc, proxyAddress, {
+    startBlock,
+    endBlock: ordersBlock,
+    blockChunk,
+  });
+  const usersWithOrders = await usersWithRestingOrders(
+    pc,
+    proxyAddress,
+    candidates,
+    ordersBlock,
+  );
+  const cancelBatches = chunk(
+    usersWithOrders,
+    Number(
+      readOptionalBigInt("FORCE_CANCEL_BATCH_SIZE") ??
+        BigInt(DEFAULT_FORCE_CANCEL_BATCH_SIZE),
+    ),
+  );
+  logInfo("resting orders", {
+    "Orders block": ordersBlock,
+    "Users with resting orders": usersWithOrders.length,
+    "forceCancelOrders batches": cancelBatches.length,
+  });
 
   await logPrompt("Preflight complete. Deploy implementation?");
   const newImpl = existingImpl
@@ -193,10 +210,18 @@ async function main() {
     existingImpl ? "Using existing implementation" : "Deployed",
     addrUrl(pc, newImpl.address),
   );
-  if (!existingImpl) {
-    await verifyContract(newImpl.address, [vaultAddress]);
-    logStep("Verified", addrUrl(pc, newImpl.address));
+  const verified = await verifyContract(
+    newImpl.address,
+    [vaultAddress],
+    undefined,
+    { contract: "contracts/HashPowerPerpsDEX.sol:HashPowerPerpsDEX" },
+  );
+  if (!verified) {
+    throw new Error(
+      `Basescan did not verify implementation ${newImpl.address}`,
+    );
   }
+  logStep("Verified", addrUrl(pc, newImpl.address));
 
   const implVersion = await newImpl.read.VERSION();
   if (implVersion !== TARGET_CODE_VERSION) {
@@ -205,26 +230,17 @@ async function main() {
     );
   }
 
-  // reinitializer(n) permanently skips any lower n. If we still need V2, it
-  // must run before V3 — otherwise initializeV2 is locked out forever.
-  const upgradeCalldata = needsInitializeV2
+  const [firstBatch, ...followUpBatches] = cancelBatches;
+  const upgradeCalldata = firstBatch
     ? encodeFunctionData({
         abi: newImpl.abi,
-        functionName: "initializeV2",
-        args: [vaultAddress, pmeAddress],
+        functionName: "forceCancelOrders",
+        args: [firstBatch],
       })
-    : needsInitializeV3
-      ? encodeFunctionData({
-          abi: newImpl.abi,
-          functionName: "initializeV3",
-        })
-      : "0x";
-  const upgradeCall = needsInitializeV2
-    ? "initializeV2"
-    : needsInitializeV3
-      ? "initializeV3"
-      : "(none)";
-  const needsFollowUpInitializeV3 = needsInitializeV2 && needsInitializeV3;
+    : "0x";
+  const upgradeCall = firstBatch
+    ? `forceCancelOrders(${firstBatch.length} users)`
+    : "(none)";
 
   const upgradeArgs = [newImpl.address, upgradeCalldata] as const;
   await simulateContract(pc, {
@@ -259,7 +275,7 @@ async function main() {
   if (requiredBlockGas > maxAtomicUpgradeGas) {
     throw new Error(
       `Upgrade cannot fit: estimate ${estimatedUpgradeGas} + Safe overhead ${safeGasOverhead} ` +
-        `= ${requiredBlockGas}, limit ${maxAtomicUpgradeGas}.`,
+        `= ${requiredBlockGas}, limit ${maxAtomicUpgradeGas}. Lower FORCE_CANCEL_BATCH_SIZE.`,
     );
   }
   logInfo("upgrade preflight", {
@@ -291,23 +307,21 @@ async function main() {
     logStep("Safe TX hash", upgradeTxHash);
     logStep("Safe UI URL", safe.getSafeUITxUrl(upgradeTxHash));
 
-    if (needsFollowUpInitializeV3) {
-      logInfo("Propose initializeV3 via Safe", {
-        note: "Execute after the upgrade transaction",
-      });
-      await logPrompt("Proceed?");
-      const initV3Data = encodeFunctionData({
-        abi: newImpl.abi,
-        functionName: "initializeV3",
-      });
-      const initV3TxHash = await safe.proposeTransaction({
-        data: initV3Data,
+    for (const [i, batch] of followUpBatches.entries()) {
+      const cancelTxHash = await safe.proposeTransaction({
+        data: encodeFunctionData({
+          abi: newImpl.abi,
+          functionName: "forceCancelOrders",
+          args: [batch],
+        }),
         to: proxyAddress,
         value: "0",
         operation: OperationType.Call,
       });
-      logStep("Safe TX hash", initV3TxHash);
-      logStep("Safe UI URL", safe.getSafeUITxUrl(initV3TxHash));
+      logStep(
+        `forceCancelOrders batch ${i + 2}/${cancelBatches.length}`,
+        safe.getSafeUITxUrl(cancelTxHash),
+      );
     }
 
     if (pointsHookAddress) {
@@ -341,38 +355,14 @@ async function main() {
       `${txUrl(pc, receipt.transactionHash)} block ${receipt.blockNumber}`,
     );
 
-    let postInitVersion = await readInitializedVersion(
+    const postInitVersion = await readInitializedVersion(
       pc,
       proxyAddress,
       receipt.blockNumber,
     );
-    if (needsInitializeV2 && postInitVersion < 2n) {
+    if (postInitVersion !== currentInitVersion) {
       throw new Error(
-        `initializeV2 did not advance init version (still ${postInitVersion})`,
-      );
-    }
-
-    if (needsFollowUpInitializeV3 && postInitVersion < 3n) {
-      logInfo("initializeV3", { from: postInitVersion.toString() });
-      await logPrompt("Submit initializeV3?");
-      const initV3Simulation = await perps.simulate.initializeV3();
-      const initV3Receipt = await writeAndWait(
-        deployer,
-        initV3Simulation,
-        UPGRADE_CONFIRMATIONS,
-      );
-      logStep("initializeV3", txUrl(pc, initV3Receipt.transactionHash));
-      postInitVersion = await readInitializedVersion(
-        pc,
-        proxyAddress,
-        initV3Receipt.blockNumber,
-      );
-    }
-
-    const expectedInitVersion = needsInitializeV3 ? 3n : currentInitVersion;
-    if (postInitVersion !== expectedInitVersion) {
-      throw new Error(
-        `Init version ${postInitVersion}, expected ${expectedInitVersion}`,
+        `Init version moved from ${currentInitVersion} to ${postInitVersion}`,
       );
     }
     const postCodeVersion = await perps.read.VERSION({
@@ -387,6 +377,21 @@ async function main() {
     logStep("Init version", postInitVersion.toString());
     logStep("Code version", postCodeVersion);
 
+    let verifyBlock = receipt.blockNumber;
+    for (const [i, batch] of followUpBatches.entries()) {
+      const cancelReceipt = await writeAndWait(
+        deployer,
+        await perps.simulate.forceCancelOrders([batch]),
+      );
+      verifyBlock = cancelReceipt.blockNumber;
+      logStep(
+        `forceCancelOrders batch ${i + 2}/${cancelBatches.length}`,
+        txUrl(pc, cancelReceipt.transactionHash),
+      );
+    }
+    await assertNoRestingOrders(pc, proxyAddress, usersWithOrders, verifyBlock);
+    logStep("Resting orders", `none left (${usersWithOrders.length} users cancelled)`);
+
     if (pointsHookAddress) {
       const currentHook = await perps.read.hook();
       if (currentHook.toLowerCase() !== pointsHookAddress.toLowerCase()) {
@@ -400,6 +405,9 @@ async function main() {
   }
 
   logSuccess(addrUrl(pc, proxyAddress));
+  logInfo("next", {
+    Resume: "resume the vault once every venue is upgraded and has no resting orders left",
+  });
 }
 
 main().catch((error) => {

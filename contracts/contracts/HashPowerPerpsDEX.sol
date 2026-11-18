@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { StructuredLinkedList } from "solidity-linked-list/contracts/StructuredLinkedList.sol";
 import { AggregatorV3Interface } from "./interfaces/AggregatorV3Interface.sol";
 import { ICollateralVault } from "collateral-margin/contracts/contracts/interfaces/ICollateralVault.sol";
@@ -10,6 +11,7 @@ import { IPortfolioMarginEngine } from "collateral-margin/contracts/contracts/in
 import { MathLib as M } from "./libs/MathLib.sol";
 import { HashPowerPerpsDEXBase } from "./HashPowerPerpsDEXBase.sol";
 import { HashPowerPerpsDEXAdmin } from "./HashPowerPerpsDEXAdmin.sol";
+import { HashPowerPerpsDEXAdminModule } from "./HashPowerPerpsDEXAdminModule.sol";
 
 /// @title HashPower Perps DEX
 /// @notice Perpetual trading contract with on-chain order book
@@ -25,10 +27,10 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @dev Lives here rather than in {HashPowerPerpsDEXBase} so that a diff to
     ///      this file and the version it ships under stay in the same place,
     ///      mirroring {Futures}.
-    string public constant VERSION = "6.8.0";
+    string public constant VERSION = "6.17.0";
 
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor(ICollateralVault _vault) HashPowerPerpsDEXBase(_vault) { }
+    constructor(ICollateralVault _vault) HashPowerPerpsDEXBase(_vault) HashPowerPerpsDEXAdmin(_vault) { }
 
     /// @notice Initialize the contract
     /// @param _priceOracle The Chainlink-style price oracle
@@ -39,30 +41,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         __Ownable_init(_msgSender());
         __UUPSUpgradeable_init();
 
-        setOracle(_priceOracle);
-    }
-
-    /// @notice One-shot post-upgrade migration to wire up the portfolio margin engine added in v2.
-    /// @dev Intended to be invoked atomically via `upgradeToAndCall`:
-    ///      `proxy.upgradeToAndCall(newImpl, abi.encodeCall(this.initializeV2, (vault, pm)))`.
-    /// @param _vault Must match the immutable constructor vault. The argument is retained
-    ///        to preserve the historical initializer signature.
-    /// @param _pm The portfolio margin engine (may be `address(0)` to set later via `setPortfolioMargin`).
-    /// @dev A nonzero engine must already expose the complete dependency surface. Pass zero
-    ///      when an atomic upgrade must precede wiring the engine on the other side.
-    function initializeV2(ICollateralVault _vault, IPortfolioMarginEngine _pm) external reinitializer(2) onlyOwner {
-        _validateVault(_vault);
-        if (address(_pm) == address(0)) {
-            portfolioMargin = _pm;
-        } else {
-            _setPortfolioMargin(_pm);
-        }
-    }
-
-    /// @notice One-shot migration that clears the reused legacy flat-liquidation-fee slot.
-    /// @dev Invoke atomically through `upgradeToAndCall` before any v2.15 fee path executes.
-    function initializeV3() external reinitializer(3) onlyOwner {
-        __gap3 = 0;
+        _delegateCallAdminModule(abi.encodeCall(HashPowerPerpsDEXAdminModule.setOracle, (_priceOracle)));
     }
 
     /// @notice Get current market price from oracle
@@ -216,16 +195,12 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @dev Shared cancel body for `cancelOrder` / `updateOrders`. Caller must
     ///      have already updated global funding for this tx when needed.
     function _cancelOrder(address _participant, bytes32 _orderId) internal {
-        Order memory order = orders[_orderId];
+        Order storage order = orders[_orderId];
         if (order.participant != _participant) {
             revert OrderNotBelongToSender();
         }
         if (order.quantity == 0) revert OrderNotExists();
-
-        bool isBid = order.quantity > 0;
-        _removeRestingOrder(_orderId, order.participant, order.price, order.quantity);
-        _removePriceLevelIfEmpty(_priceOrderIds(order.price, isBid), order.price, isBid);
-        emit OrderCancelled(_orderId, order.participant);
+        _dropRestingOrder(_orderId, true);
     }
 
     /// @dev In-place size shrink. Keeps the order id in its price queue slot.
@@ -250,7 +225,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     ///      not of any single venue. Combine it with this view and the position views to
     ///      tell whether this venue holds anything actionable.
     function hasRestingOrderDelta(address _user) external view returns (bool) {
-        OrderAggregate storage aggregate = userOrderAggregate[_user];
+        RestingOrderAggregate storage aggregate = userRestingOrderAggregate[_user];
         return aggregate.buyQty != 0 || aggregate.sellQty != 0;
     }
 
@@ -280,29 +255,16 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         _settleFunding(_user);
         if (!_underwater(_user)) revert NotLiquidatable();
 
-        uint256 absNet = M.abs(position.netQuantity);
-        uint256 closeAbs = _closeQty < absNet ? _closeQty : absNet;
+        uint256 closeAbs = M.min(_closeQty, M.abs(position.netQuantity));
         uint256 currentPrice = getMarketPrice();
 
-        // Full close still runs the portfolio OverLiquidation guard: residual risk can remain
-        // on other venues (Futures / options) sharing this PME. Guard before emit/notify so
-        // an oversize close does not pay log/hook gas on the revert path.
-        if (closeAbs == absNet) {
-            (int256 pnl, int256 closedQuantity, uint256 liqFee) = _doLiquidatePosition(_user, currentPrice);
-            _handOffToBackstop(_user, closedQuantity, currentPrice);
-            _revertIfOverLiquidated(_user);
-            emit PositionLiquidated(_user, _msgSender(), closedQuantity, pnl, liqFee);
-            _notifyLiquidation(_msgSender(), liqFee);
-            return;
-        }
+        int256 signedClose = M.toSigned(position.netQuantity > 0, closeAbs);
+        int256 pnl = _closeToBackstop(_user, signedClose, currentPrice);
+        uint256 liqFee = _chargeLiquidationFee(_user, _calculateValue(currentPrice, closeAbs));
 
-        (int256 pnl, int256 signedClose) = _doPartialLiquidatePosition(_user, position, closeAbs, currentPrice);
-        _handOffToBackstop(_user, signedClose, currentPrice);
-
-        // Charge liquidation fee on the closed notional
-        uint256 closedNotional = _calculateValue(currentPrice, closeAbs);
-        uint256 liqFee = _chargeLiquidationFee(_user, closedNotional);
-
+        // Full closes run the portfolio OverLiquidation guard too: residual risk can remain on
+        // other venues (Futures / options) sharing this PME. Guard before emit/notify so an
+        // oversize close does not pay log/hook gas on the revert path.
         _revertIfOverLiquidated(_user);
 
         emit PositionLiquidated(_user, _msgSender(), signedClose, pnl, liqFee);
@@ -312,11 +274,12 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @notice Reduce the protocol backstop's position by up to `_qty` contracts as a taker, inside
     ///         `mark ± backstopUnwindBandBps`, and pay the caller `backstopUnwindFeeBps` of the
     ///         filled notional at the mark from the fee pot.
-    /// @dev Permissionless and allowed while the vault is halted: unwinding only shrinks protocol
-    ///      exposure. Reduce-only by construction. Reverts `TimeInForceNotFilled` when nothing
+    /// @dev Permissionless. Reverts `TradingHalted` while the vault is halted, since a fill would
+    ///      open positions users cannot reduce until it clears. Reduce-only by construction. Reverts `TimeInForceNotFilled` when nothing
     ///      inside the band fills, so callers can simulate before sending. The fee is capped at
     ///      the fee pot balance. Funding on the backstop is settled before the fill like any taker.
     function unwindBackstop(uint256 _qty) external {
+        _requireTradingOpen();
         if (_qty == 0) revert InvalidQty();
         int256 net = positions[BACKSTOP].netQuantity;
         if (net == 0) revert PositionNotExists();
@@ -350,7 +313,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @notice Force-cancel a single resting order owned by an underwater user. Permissionless.
     function liquidateOrder(address _user, bytes32 _orderId) external {
         if (_user == BACKSTOP) revert BackstopAccount();
-        Order memory order = orders[_orderId];
+        Order storage order = orders[_orderId];
         if (order.participant != _user) revert OrderNotBelongToUser();
         if (order.quantity == 0) revert OrderNotExists();
 
@@ -370,7 +333,7 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         uint256 len = _orderIds.length;
         for (uint256 i = 0; i < len; i++) {
             bytes32 orderId = _orderIds[i];
-            Order memory order = orders[orderId];
+            Order storage order = orders[orderId];
             // Skip raced/stale ids before the expensive portfolio MM check.
             if (order.participant != _user || order.quantity == 0) continue;
             if (!_underwater(_user)) break;
@@ -390,16 +353,12 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
     /// @dev Cancels a single order on behalf of a (verified-underwater) user. Caller must have
     ///      already verified `_underwater(_user)` and that `_order.participant == _user`.
     ///      Charges a liquidation fee on the order's notional value.
-    function _doLiquidateOrder(address _user, bytes32 _orderId, Order memory _order) internal {
-        bool isBid = _order.quantity > 0;
-        uint256 orderAbsQty = M.abs(_order.quantity);
-        uint256 orderNotional = _calculateValue(_order.price, orderAbsQty);
-        _removeRestingOrder(_orderId, _user, _order.price, _order.quantity);
-        _removePriceLevelIfEmpty(_priceOrderIds(_order.price, isBid), _order.price, isBid);
+    function _doLiquidateOrder(address _user, bytes32 _orderId, Order storage _order) internal {
+        uint256 orderNotional = _calculateValue(_order.price, M.abs(_order.quantity));
+        _dropRestingOrder(_orderId, true);
 
         uint256 liqFee = _chargeLiquidationFee(_user, orderNotional);
 
-        emit OrderCancelled(_orderId, _user);
         emit OrderLiquidated(_orderId, _user, _msgSender(), liqFee);
         _notifyLiquidation(_msgSender(), liqFee);
     }
@@ -497,56 +456,95 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         return positions[_user];
     }
 
-    /// @notice ILinearMarket: all per-user margin inputs in a single call
-    ///         (saves the portfolio margin engine external-call gas).
-    /// @dev Resting orders are reported as raw per-side delta and instant fill loss, not as
-    ///      a margin figure. The engine nets the deltas into portfolio net delta before
-    ///      stressing, which is exact and cross-product — the former venue-local
-    ///      "reducing" credit netted only against this venue's position, so an account
-    ///      long perps and short futures had a perps sell order credited as risk-reducing
-    ///      when filling it would take the portfolio genuinely short.
+    /// @notice ILinearMarket: all per-user margin inputs in a single call, with the
+    ///         position and resting orders valued at the mark (contracts × mark).
+    /// @dev The engine reads this and shocks the exposure by a percentage, so the mark need not
+    ///      be the index it stresses.
+    function getExposureView(address _user) external view returns (ILinearMarket.ExposureView memory view_) {
+        (ILinearMarket.RiskView memory risk, uint256 mark) = _riskView(_user);
+        uint256 scale = 10 ** QUANTITY_DECIMALS;
+        view_.netPositionExposure = risk.netPositionDelta * int256(mark) / int256(scale);
+        view_.unrealizedPnl = risk.unrealizedPnl;
+        view_.pendingFunding = risk.pendingFunding;
+        view_.buyOrderExposure = risk.buyOrderDelta * mark / scale;
+        view_.sellOrderExposure = risk.sellOrderDelta * mark / scale;
+        view_.buyOrderFillLoss = risk.buyOrderFillLoss;
+        view_.sellOrderFillLoss = risk.sellOrderFillLoss;
+    }
+
+    /// @notice ILinearMarket: all per-user margin inputs in a single call, with deltas in
+    ///         contracts.
+    /// @dev Deprecated for margin: the engine reads `getExposureView`, and this only for a venue
+    ///      without it, valuing the deltas at its index.
     function getRiskView(address _user) external view returns (ILinearMarket.RiskView memory view_) {
+        (view_,) = _riskView(_user);
+    }
+
+    /// @dev Resting orders are reported as raw per-side delta and instant fill loss, not as
+    ///      a margin figure. The engine nets them into the portfolio before stressing, which
+    ///      is exact and cross-product — the former venue-local "reducing" credit netted only
+    ///      against this venue's position, so an account long perps and short futures had a
+    ///      perps sell order credited as risk-reducing when filling it would take the
+    ///      portfolio genuinely short. Also returns the mark it priced at (0 when the account
+    ///      holds nothing).
+    function _riskView(address _user) private view returns (ILinearMarket.RiskView memory view_, uint256 currentPrice) {
         Position memory position = positions[_user];
-        OrderAggregate storage aggregate = userOrderAggregate[_user];
+        RestingOrderAggregate storage aggregate = userRestingOrderAggregate[_user];
         uint256 buyQty = aggregate.buyQty;
         uint256 sellQty = aggregate.sellQty;
-        if (position.netQuantity == 0 && buyQty == 0 && sellQty == 0) return view_;
+        if (position.netQuantity == 0 && buyQty == 0 && sellQty == 0) return (view_, 0);
 
-        uint256 currentPrice = getMarketPrice();
+        // Drift is part of a position's PnL only; an order-only account skips its state read.
+        DriftState memory drift;
+        if (position.netQuantity != 0) (currentPrice, drift) = _markAndDrift(true);
+        else currentPrice = getMarketPrice();
 
         view_.netPositionDelta = position.netQuantity;
         if (position.netQuantity != 0) {
             // Mark PnL only. Funding travels in `pendingFunding`; netting it in here too
             // would have the engine charge the same debt twice (it adds both terms).
-            // This deliberately differs from `getUnrealizedPnl`, which is a UX view.
-            view_.unrealizedPnl = _calculatePositionPnl(position, currentPrice);
+            // This deliberately differs from `getUnrealizedPnl`, which is a UX view. Drift is
+            // part of the position's PnL (it offsets the mark's scheduled decline), not funding.
+            view_.unrealizedPnl = _calculatePositionPnl(position, currentPrice) + _pendingDrift(_user, drift);
         }
         view_.pendingFunding = _pendingFunding(_user, currentPrice);
 
         view_.buyOrderDelta = buyQty;
         view_.sellOrderDelta = sellQty;
 
-        // Instant mark-to-market loss if a whole side fills. Filling a bid above spot costs
-        // the difference immediately and in full, which the old shock-scaled reservation
-        // charged only a tenth of.
-        //
-        uint256 buyMark = _calculateValue(currentPrice, buyQty);
-        uint256 buyVal = aggregate.buyValue;
-        if (buyVal > buyMark) view_.buyOrderFillLoss = buyVal - buyMark;
-
-        uint256 sellMark = _calculateValue(currentPrice, sellQty);
-        uint256 sellVal = aggregate.sellValue;
-        if (sellMark > sellVal) view_.sellOrderFillLoss = sellMark - sellVal;
+        // Instant mark-to-market loss if any subset of a side fills, bounded from the side's
+        // price spread rather than netted: fills go best price first, so a deep order must
+        // never offset a marketable one's loss.
+        uint256 scale = 10 ** QUANTITY_DECIMALS;
+        view_.buyOrderFillLoss =
+            Math.ceilDiv(M.fillLossBound(buyQty, aggregate.buyPQ, aggregate.buyP2Q, currentPrice, true), scale);
+        view_.sellOrderFillLoss =
+            Math.ceilDiv(M.fillLossBound(sellQty, aggregate.sellPQ, aggregate.sellP2Q, currentPrice, false), scale);
     }
 
     /// @notice Get total unrealized PnL for a user (including pending funding)
     function getUnrealizedPnl(address _user) external view returns (int256) {
         Position memory position = positions[_user];
         if (position.netQuantity == 0) return 0;
-        int256 pnl = _calculatePositionPnl(position, getMarketPrice());
+        (uint256 mark, DriftState memory drift) = _markAndDrift(true);
+        int256 pnl = _calculatePositionPnl(position, mark) + _pendingDrift(_user, drift);
         // Subtract pending funding (positive funding = user owes = reduces PnL)
         pnl -= getPendingFunding(_user);
         return pnl;
+    }
+
+    /// @notice Σ of the mark's scheduled decline paid to longs, per contract (collateral token
+    ///         units × 10^12). Rises when the oracle's schedule factor falls.
+    function cumulativeDriftPerUnit() external view returns (int256) {
+        return driftState.cumulativePerUnit;
+    }
+
+    /// @notice Drift accrued on the user's position and not yet folded into its entry value
+    ///         (collateral token units; positive = the user gains). Included in the PnL views.
+    function getPendingDrift(address _user) external view returns (int256) {
+        DriftState memory drift = driftState;
+        if (drift.scheduled) (, drift) = _markAndDrift(false);
+        return _pendingDrift(_user, drift);
     }
 
     /// @notice Active bid/ask price levels (bids high→low, asks low→high).
@@ -581,8 +579,9 @@ contract HashPowerPerpsDEX is HashPowerPerpsDEXAdmin {
         return total;
     }
 
-    /// @notice Cached resting-order quantities and notionals per side for a user.
-    function getOrderAggregate(address _user) external view returns (OrderAggregate memory aggregate_) {
-        return userOrderAggregate[_user];
+    /// @notice Cached resting-order totals per side for a user: quantity and the first two
+    ///         price moments, the inputs of the fill-loss bound.
+    function getOrderAggregate(address _user) external view returns (RestingOrderAggregate memory aggregate_) {
+        return userRestingOrderAggregate[_user];
     }
 }

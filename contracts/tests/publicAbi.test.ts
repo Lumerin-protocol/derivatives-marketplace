@@ -100,15 +100,15 @@ describe("HashPowerPerpsDEX - public ABI", function () {
     );
   });
 
-  it("exposes only resetState for explicit participant resets", function () {
+  it("exposes no state reset, only forceCancelOrders for explicit users", function () {
     const resetFunctions = (HashPowerPerpsDEXAbi as readonly AbiItem[])
       .filter((item) => item.type === "function" && item.name?.startsWith("reset"))
       .map((item) => item.name);
 
-    assert.deepEqual(resetFunctions, ["resetState"]);
+    assert.deepEqual(resetFunctions, []);
     assert.deepEqual(
-      getItem("function", "resetState").inputs?.map(({ name, type }) => ({ name, type })),
-      [{ name: "_participants", type: "address[]" }],
+      getItem("function", "forceCancelOrders").inputs?.map(({ name, type }) => ({ name, type })),
+      [{ name: "_users", type: "address[]" }],
     );
   });
 });

@@ -6,6 +6,7 @@ import { writeAndWait } from "../lib/writeContract.ts";
 import { verifyContract } from "../lib/verify.ts";
 import { txUrl, addrUrl } from "../lib/explorer.ts";
 import { logTitle, logInfo, logStep, logSuccess, logPrompt } from "../lib/log.ts";
+import { engineIndexOracle } from "./lib/engine-index.ts";
 
 function readOptionalAddress(name: string): Address | undefined {
   const raw = process.env[name];
@@ -24,7 +25,7 @@ async function main() {
   // its underlying ERC20 (and decimals) from the vault.
   const env = requireEnvsSet(
     "VAULT_ADDRESS",
-    "PRICE_ORACLE_ADDRESS",
+    "MARK_ORACLE_ADDRESS",
     "TAKER_FEE_BPS",
     "MAKER_FEE_BPS",
     "LIQUIDATION_FEE_BPS",
@@ -67,7 +68,7 @@ async function main() {
   // Verify price oracle
   const priceOracle = await viem.getContractAt(
     "AggregatorV3Interface",
-    env.PRICE_ORACLE_ADDRESS as Address,
+    env.MARK_ORACLE_ADDRESS as Address,
   );
   const [, answer, , updatedAt] = await priceOracle.read.latestRoundData();
   logInfo("oracle", {
@@ -92,21 +93,27 @@ async function main() {
   logStep("Deployed", addrUrl(pc, perpsImpl.address));
 
   console.log("Verifying HashPowerPerpsDEX implementation...");
-  await verifyContract(perpsImpl.address, args);
+  if (
+    !(await verifyContract(perpsImpl.address, args, undefined, {
+      contract: "contracts/HashPowerPerpsDEX.sol:HashPowerPerpsDEX",
+    }))
+  ) {
+    throw new Error(`Basescan did not verify implementation ${perpsImpl.address}`);
+  }
   logStep("Verified", addrUrl(pc, perpsImpl.address));
 
   // Deploy HashPowerPerpsDEX proxy
   logInfo("Deploy HashPowerPerpsDEX proxy", {
     implementation: perpsImpl.address,
     vault: vault.address,
-    priceOracle: env.PRICE_ORACLE_ADDRESS,
+    priceOracle: env.MARK_ORACLE_ADDRESS,
   });
   await logPrompt("Proceed?");
   console.log("Deploying HashPowerPerpsDEX proxy...");
   const encodedInitFn = encodeFunctionData({
     abi: perpsImpl.abi,
     functionName: "initialize",
-    args: [env.PRICE_ORACLE_ADDRESS as Address, vault.address],
+    args: [env.MARK_ORACLE_ADDRESS as Address, vault.address],
   });
 
   const perpsProxy = await viem.deployContract("ERC1967Proxy", [
@@ -115,13 +122,23 @@ async function main() {
   ]);
   logStep("Deployed", addrUrl(pc, perpsProxy.address));
 
-  const perps = await viem.getContractAt("HashPowerPerpsDEX", perpsProxy.address);
-  // Fresh proxies have a zeroed slot already; consume migration version 3 now so
-  // a later upgrade cannot reset revenue accrued by this deployment.
-  const initV3Res = await perps.simulate.initializeV3();
-  const initV3Receipt = await writeAndWait(deployer, initV3Res);
-  logStep("Initialized revenue slot", txUrl(pc, initV3Receipt.transactionHash));
+  console.log("Verifying HashPowerPerpsDEX proxy...");
+  if (
+    !(await verifyContract(
+      perpsProxy.address,
+      [perpsImpl.address, encodedInitFn],
+      undefined,
+      {
+        contract:
+          "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol:ERC1967Proxy",
+      },
+    ))
+  ) {
+    throw new Error(`Basescan did not verify proxy ${perpsProxy.address}`);
+  }
+  logStep("Verified", addrUrl(pc, perpsProxy.address));
 
+  const perps = await viem.getContractAt("HashPowerPerpsDEX", perpsProxy.address);
   // Set fees
   logInfo("Set fees", {
     takerFeeBps: env.TAKER_FEE_BPS,
@@ -151,6 +168,7 @@ async function main() {
     const pme = await viem.getContractAt("PortfolioMarginEngine", MARGIN_ENGINE_ADDRESS);
     const pmeOwner = await pme.read.owner();
     const deployerIsPmeOwner = getAddress(pmeOwner) === getAddress(deployer.account.address);
+    const indexOracle = await engineIndexOracle(pc, env.MARK_ORACLE_ADDRESS as Address);
 
     logInfo("HashPowerPerpsDEX.setPortfolioMargin", { marginEngine: MARGIN_ENGINE_ADDRESS });
     await logPrompt("Proceed?");
@@ -167,9 +185,9 @@ async function main() {
       const receipt = await writeAndWait(deployer, sim);
       logStep("Done", txUrl(pc, receipt.transactionHash));
 
-      logInfo("PME.setOracle", { oracle: env.PRICE_ORACLE_ADDRESS });
+      logInfo("PME.setOracle", { oracle: indexOracle });
       await logPrompt("Proceed?");
-      const oracleSim = await pme.simulate.setOracle([env.PRICE_ORACLE_ADDRESS as Address]);
+      const oracleSim = await pme.simulate.setOracle([indexOracle]);
       const oracleReceipt = await writeAndWait(deployer, oracleSim);
       logStep("Done", txUrl(pc, oracleReceipt.transactionHash));
     } else {
@@ -181,11 +199,11 @@ async function main() {
       const oracleData = encodeFunctionData({
         abi: pme.abi,
         functionName: "setOracle",
-        args: [env.PRICE_ORACLE_ADDRESS as Address],
+        args: [indexOracle],
       });
       logInfo("PME wiring (run as PME owner)", { "PME address": pme.address, "PME owner": pmeOwner });
       logStep(`PME.addLinearMarket(${perps.address})`, data);
-      logStep(`PME.setOracle(${env.PRICE_ORACLE_ADDRESS})`, oracleData);
+      logStep(`PME.setOracle(${indexOracle})`, oracleData);
     }
 
     if (deployerIsVaultOwner) {

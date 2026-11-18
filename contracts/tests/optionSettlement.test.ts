@@ -110,15 +110,15 @@ describe("OptionSettlement", () => {
 
       await networkHelpers.time.increaseTo(shortExpiry);
 
-      // Observation 1: $50,000
+      // Observation 1: $50
       await settlement.write.initiateSettlement([seriesId]);
 
-      // Observation 2: $51,000
-      await oracle.write.setPrice([51000_00000000n, 8]);
+      // Observation 2: $51
+      await oracle.write.setPrice([51_00000000n, 8]);
       await settlement.write.recordObservation([seriesId]);
 
-      // Observation 3: $52,000
-      await oracle.write.setPrice([52000_00000000n, 8]);
+      // Observation 3: $52
+      await oracle.write.setPrice([52_00000000n, 8]);
       await settlement.write.recordObservation([seriesId]);
 
       // Advance past window
@@ -128,8 +128,8 @@ describe("OptionSettlement", () => {
 
       const s = await registry.read.getSeries([seriesId]);
       assert.equal(s.status, 3); // Settled
-      // TWAP = (50000 + 51000 + 52000) / 3 * 1e8 = 51000 * 1e8
-      const expectedTwap = (50000_00000000n + 51000_00000000n + 52000_00000000n) / 3n;
+      // TWAP = (50 + 51 + 52) / 3 * 1e8 = 51 * 1e8
+      const expectedTwap = (50_00000000n + 51_00000000n + 52_00000000n) / 3n;
       assert.equal(s.settlementPrice, expectedTwap);
     });
 
@@ -235,16 +235,16 @@ describe("OptionSettlement", () => {
 
       const balBefore = await engine.read.getCollateral([traders.trader1.account.address]);
 
-      // Settle at $55,000 (strike $50,000 → ITM by $5,000)
-      await settleWithPrice(fx, 55000_00000000n);
+      // Settle at $55 (strike $50 → ITM by $5)
+      await settleWithPrice(fx, 55_00000000n);
 
       await settlement.write.claimSettlement([seriesId], { account: traders.trader1.account });
 
       const balAfter = await engine.read.getCollateral([traders.trader1.account.address]);
       const pos = await engine.read.getPosition([traders.trader1.account.address, seriesId]);
 
-      // Payoff = (55000 - 50000) * 1e8 * 1e10 / lotSize = 5000e18
-      const expectedPayoff = 5000n * 10n ** 18n;
+      // Payoff = (55 - 50) * 1e8 * 1e10 / lotSize = 5e18
+      const expectedPayoff = 5n * 10n ** 18n;
       assert.equal(balAfter - balBefore, expectedPayoff);
       assert.equal(pos, 0n, "position should be zeroed");
     });
@@ -257,14 +257,14 @@ describe("OptionSettlement", () => {
 
       const balBefore = await engine.read.getCollateral([traders.trader2.account.address]);
 
-      await settleWithPrice(fx, 55000_00000000n);
+      await settleWithPrice(fx, 55_00000000n);
 
       await settlement.write.claimSettlement([seriesId], { account: traders.trader2.account });
 
       const balAfter = await engine.read.getCollateral([traders.trader2.account.address]);
       const pos = await engine.read.getPosition([traders.trader2.account.address, seriesId]);
 
-      const expectedLoss = 5000n * 10n ** 18n;
+      const expectedLoss = 5n * 10n ** 18n;
       assert.equal(balBefore - balAfter, expectedLoss);
       assert.equal(pos, 0n);
     });
@@ -277,8 +277,8 @@ describe("OptionSettlement", () => {
 
       const balBefore = await engine.read.getCollateral([traders.trader1.account.address]);
 
-      // Settle at $48,000 (strike $50,000 → OTM)
-      await settleWithPrice(fx, 48000_00000000n);
+      // Settle at $48 (strike $50 → OTM)
+      await settleWithPrice(fx, 48_00000000n);
 
       await settlement.write.claimSettlement([seriesId], { account: traders.trader1.account });
 
@@ -297,7 +297,7 @@ describe("OptionSettlement", () => {
 
       const balBefore = await engine.read.getCollateral([traders.trader2.account.address]);
 
-      await settleWithPrice(fx, 48000_00000000n);
+      await settleWithPrice(fx, 48_00000000n);
 
       await settlement.write.claimSettlement([seriesId], { account: traders.trader2.account });
 
@@ -320,7 +320,7 @@ describe("OptionSettlement", () => {
       const fx = await networkHelpers.loadFixture(deploySettlementFixture);
       const { settlement, seriesId, traders } = fx;
 
-      await settleWithPrice(fx, 55000_00000000n);
+      await settleWithPrice(fx, 55_00000000n);
 
       // trader3 has no position
       await viem.assertions.revertWithCustomError(
@@ -334,12 +334,12 @@ describe("OptionSettlement", () => {
       const fx = await networkHelpers.loadFixture(deploySettlementFixture);
       const { settlement, engine, traders, seriesId, accounts } = fx;
 
-      await createPositions(fx, 1n, 100n);
+      await createPositions(fx, 1000n, 100n);
 
-      // Settle at extreme ITM: $200,000 (strike $50,000 → payoff = $150,000 per contract)
-      // trader2 deposited ~$50k + received premium ≈ $50k total
+      // Settle at extreme ITM: $200 (strike $50 → payoff = $150 per contract, $150k on 1,000)
+      // trader2 deposited ~$50k + received premium ≈ $51k total
       // So ~$100k bad debt
-      await settleWithPrice(fx, 200000_00000000n);
+      await settleWithPrice(fx, 200_00000000n);
 
       const insuranceBefore = await engine.read.getInsuranceFund();
       const sellerBalBefore = await engine.read.getCollateral([traders.trader2.account.address]);
@@ -516,15 +516,21 @@ describe("Liquidation", () => {
     lots: bigint,
     tick: bigint,
   ) {
-    const { engine, oracle, traders } = fx;
+    const { engine, oracle, pme, vault, traders } = fx;
+    const short = traders.trader1;
 
     await createShortPosition(fx, lots, tick);
 
+    // Leave the short only its initial margin plus $1, so a price spike can sink it.
+    const balance = await vault.read.balanceOf([short.account.address]);
+    const im = await pme.read.computePortfolioIM([short.account.address]);
+    await vault.write.withdraw([balance - im - 1_000_000n], { account: short.account });
+
     // Spike oracle to make MM > collateral. The PME reads the same oracle,
     // so the spiked spot flows into its stress math automatically.
-    // MM ≈ |delta| * F * mmSpotShock (5%) per lot → need lots * F * 0.05 > ~$50k
-    // For 1 lot: F > $1M → use $1.2M. For 2+ lots: $600k is sufficient.
-    const spikePrice = lots === 1n ? 1200000_00000000n : 600000_00000000n;
+    // MM ≈ |delta| * F * mmSpotShock (5%) per lot → $60 per lot at $1,200, far above the
+    // margin held at $50 spot; 2+ lots sink at $600 too.
+    const spikePrice = lots === 1n ? 1200_00000000n : 600_00000000n;
     await oracle.write.setPrice([spikePrice, 8]);
 
     const healthy = await engine.read.isHealthy([traders.trader1.account.address]);

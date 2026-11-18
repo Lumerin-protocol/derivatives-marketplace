@@ -92,6 +92,7 @@ export function mockPerpsContractCallsAsReverted(): void {
     ["fundingPeriod", "fundingPeriod():(uint256)"],
     ["cumulativeFundingPerUnit", "cumulativeFundingPerUnit():(int256)"],
     ["lastFundingUpdateTime", "lastFundingUpdateTime():(uint256)"],
+    ["cumulativeDriftPerUnit", "cumulativeDriftPerUnit():(int256)"],
     ["minimumMarginPerOrder", "minimumMarginPerOrder():(uint256)"],
     ["vault", "vault():(address)"],
     ["portfolioMargin", "portfolioMargin():(address)"],
@@ -119,6 +120,7 @@ export function setupPerps(): void {
   perps.fundingPeriod = BigInt.zero();
   perps.cumulativeFundingPerUnit = BigInt.zero();
   perps.lastFundingUpdateTime = BigInt.zero();
+  perps.cumulativeDriftPerUnit = BigInt.zero();
   perps.minimumMarginPerOrder = BigInt.zero();
   perps.reservePoolBalance = BigInt.zero();
   perps.collectedFeesBalance = BigInt.zero();

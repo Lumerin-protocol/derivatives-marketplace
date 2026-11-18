@@ -27,23 +27,17 @@ locals {
 }
 
 ################################################################################
-# SNS TOPIC
-#
-# Dedicated topic for keeper alerts. To route through the existing
-# Slack pipeline, subscribe the devops-alerts Lambda to this topic:
-#   titanio-{env}-dev-alerts → devops-alerts Lambda → Slack
-# Or replace alarm_actions with the existing topic ARN directly.
+# SNS — look up foundation-core HPDX topics (do not create orphan topics)
 ################################################################################
 
-resource "aws_sns_topic" "perps_keeper_alerts" {
+locals {
+  perps_keeper_alerts_topic_name = var.account_lifecycle == "prd" ? "titanio-${local.keeper_env_suffix}-hpdx-page" : "titanio-${local.keeper_env_suffix}-hpdx-alerts"
+}
+
+data "aws_sns_topic" "perps_keeper_alerts" {
   count    = var.perpskeeper_service.create ? 1 : 0
   provider = aws.use1
-  name     = "perps-keeper-alerts-${local.keeper_env_suffix}"
-
-  tags = merge(var.default_tags, var.foundation_tags, {
-    Name       = "Perps Keeper Alerts"
-    Capability = "Monitoring"
-  })
+  name     = local.perps_keeper_alerts_topic_name
 }
 
 ################################################################################
@@ -342,8 +336,8 @@ resource "aws_cloudwatch_metric_alarm" "keeper_no_resync" {
   statistic           = "Sum"
   threshold           = 1
   treat_missing_data  = "breaching"
-  alarm_actions       = [aws_sns_topic.perps_keeper_alerts[0].arn]
-  ok_actions          = [aws_sns_topic.perps_keeper_alerts[0].arn]
+  alarm_actions       = []
+  ok_actions          = []
 
   tags = merge(var.default_tags, var.foundation_tags, {
     Name       = "Perps Keeper No Resync Alarm"
@@ -365,8 +359,8 @@ resource "aws_cloudwatch_metric_alarm" "keeper_resync_failed" {
   statistic           = "Sum"
   threshold           = 1
   treat_missing_data  = "notBreaching"
-  alarm_actions       = [aws_sns_topic.perps_keeper_alerts[0].arn]
-  ok_actions          = [aws_sns_topic.perps_keeper_alerts[0].arn]
+  alarm_actions       = []
+  ok_actions          = []
 
   tags = merge(var.default_tags, var.foundation_tags, {
     Name       = "Perps Keeper Resync Failed Alarm"
@@ -388,8 +382,8 @@ resource "aws_cloudwatch_metric_alarm" "keeper_price_fail" {
   statistic           = "Sum"
   threshold           = 1
   treat_missing_data  = "notBreaching"
-  alarm_actions       = [aws_sns_topic.perps_keeper_alerts[0].arn]
-  ok_actions          = [aws_sns_topic.perps_keeper_alerts[0].arn]
+  alarm_actions       = []
+  ok_actions          = []
 
   tags = merge(var.default_tags, var.foundation_tags, {
     Name       = "Perps Keeper Price Fail Alarm"
@@ -411,8 +405,8 @@ resource "aws_cloudwatch_metric_alarm" "keeper_event_watcher" {
   statistic           = "Sum"
   threshold           = 1
   treat_missing_data  = "notBreaching"
-  alarm_actions       = [aws_sns_topic.perps_keeper_alerts[0].arn]
-  ok_actions          = [aws_sns_topic.perps_keeper_alerts[0].arn]
+  alarm_actions       = []
+  ok_actions          = []
 
   tags = merge(var.default_tags, var.foundation_tags, {
     Name       = "Perps Keeper Event Watcher Alarm"
@@ -434,8 +428,8 @@ resource "aws_cloudwatch_metric_alarm" "keeper_liq_failed" {
   statistic           = "Sum"
   threshold           = 1
   treat_missing_data  = "notBreaching"
-  alarm_actions       = [aws_sns_topic.perps_keeper_alerts[0].arn]
-  ok_actions          = [aws_sns_topic.perps_keeper_alerts[0].arn]
+  alarm_actions       = []
+  ok_actions          = []
 
   tags = merge(var.default_tags, var.foundation_tags, {
     Name       = "Perps Keeper Liquidation Failure Alarm"
@@ -457,8 +451,8 @@ resource "aws_cloudwatch_metric_alarm" "keeper_error_rate" {
   statistic           = "Sum"
   threshold           = 5
   treat_missing_data  = "notBreaching"
-  alarm_actions       = [aws_sns_topic.perps_keeper_alerts[0].arn]
-  ok_actions          = [aws_sns_topic.perps_keeper_alerts[0].arn]
+  alarm_actions       = []
+  ok_actions          = []
 
   tags = merge(var.default_tags, var.foundation_tags, {
     Name       = "Perps Keeper Error Rate Alarm"
@@ -766,5 +760,30 @@ resource "aws_cloudwatch_dashboard" "perps_keeper" {
         }
       }
     ]
+  })
+}
+
+# Only the composite notifies. Component alarms stay silent.
+resource "aws_cloudwatch_composite_alarm" "keeper_unhealthy" {
+  count             = var.perpskeeper_service.create ? 1 : 0
+  provider          = aws.use1
+  alarm_name        = "perps-keeper-${local.keeper_env_suffix}"
+  alarm_description = "Perps keeper is unhealthy"
+
+  alarm_rule = join(" OR ", [
+    "ALARM(${aws_cloudwatch_metric_alarm.keeper_no_resync[0].alarm_name})",
+    "ALARM(${aws_cloudwatch_metric_alarm.keeper_resync_failed[0].alarm_name})",
+    "ALARM(${aws_cloudwatch_metric_alarm.keeper_price_fail[0].alarm_name})",
+    "ALARM(${aws_cloudwatch_metric_alarm.keeper_event_watcher[0].alarm_name})",
+    "ALARM(${aws_cloudwatch_metric_alarm.keeper_liq_failed[0].alarm_name})",
+    "ALARM(${aws_cloudwatch_metric_alarm.keeper_error_rate[0].alarm_name})",
+  ])
+
+  alarm_actions = [data.aws_sns_topic.perps_keeper_alerts[0].arn]
+  ok_actions    = [data.aws_sns_topic.perps_keeper_alerts[0].arn]
+
+  tags = merge(var.default_tags, var.foundation_tags, {
+    Name       = "Perps Keeper Unhealthy"
+    Capability = "Monitoring"
   })
 }

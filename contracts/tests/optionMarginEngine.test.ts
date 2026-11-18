@@ -362,7 +362,7 @@ describe("OptionMarginEngine", () => {
         account: traders.trader1.account,
       }); // $0.001
       await engine.write.updatePosition(
-        [traders.trader1.account.address, seriesId, -100n],
+        [traders.trader1.account.address, seriesId, -100_000n],
         { account: accounts.owner.account },
       );
 
