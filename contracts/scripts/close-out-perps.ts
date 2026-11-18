@@ -1,8 +1,10 @@
+import { OperationType } from "@safe-global/types-kit";
 import { network } from "hardhat";
-import { type Address, type PublicClient, getAddress, parseAbi } from "viem";
+import { type Address, type PublicClient, encodeFunctionData, getAddress, parseAbi } from "viem";
 import { requireEnvsSet } from "../lib/env.ts";
 import { addrUrl, txUrl } from "../lib/explorer.ts";
 import { logInfo, logPrompt, logStep, logSuccess, logTitle } from "../lib/log.ts";
+import { SafeWallet } from "../lib/safe.ts";
 import {
   DEFAULT_BLOCK_CHUNK,
   collectParticipants,
@@ -13,9 +15,12 @@ import { chunk } from "./lib/resting-orders.ts";
 // Closes out a retired 6.8.0 venue while the vault is halted: every position at the mark through
 // the insurance fund, then every order. 6.8.0's `resetState` also deletes the position without
 // paying its PnL, so it only runs once every position is flat. Dry run unless EXECUTE=true.
+// When the deployer does not own the venue, EXECUTE=true proposes each call to the owner Safe
+// (SAFE_OWNER_ADDRESS) in that order, and VERIFY_ONLY=true checks the result once it executed.
 const RETIRED_VERSION = "6.8.0";
 const RETIRED_PERPS_ABI = parseAbi([
   "function VERSION() view returns (string)",
+  "function owner() view returns (address)",
   "function BACKSTOP() view returns (address)",
   "function getUserPosition(address) view returns ((int256 netQuantity, int256 netEntryValue))",
   "function getUserOrders(address) view returns (bytes32[])",
@@ -66,7 +71,11 @@ async function main() {
   }
   const snapshot = await pc.getBlockNumber();
   if (!(await pc.readContract({ address: vault, abi: VAULT_ABI, functionName: "halted", blockNumber: snapshot }))) {
-    throw new Error("The vault is not halted; run collateral-margin's vault-halt.ts first");
+    // A Safe halt proposed at a lower nonce executes first, but orders placed until then are not reset.
+    if (process.env.QUEUE_BEHIND_HALT !== "true") {
+      throw new Error("The vault is not halted; run collateral-margin's vault-halt.ts first");
+    }
+    logStep("Warning", "vault not halted; proposals queue behind the Safe halt");
   }
 
   const startBlock = process.env.START_BLOCK
@@ -100,27 +109,52 @@ async function main() {
   });
   for (const h of open) logStep(h.user, `position ${h.netQuantity}, ${h.orders} order(s)`);
 
+  if (process.env.VERIFY_ONLY === "true") {
+    if (open.length > 0 || withOrders.length > 0) {
+      throw new Error(`${open.length} open position(s) and ${withOrders.length} user(s) with orders left`);
+    }
+    logSuccess(`No positions or orders left on ${perps} at block ${snapshot}`);
+    return;
+  }
   if (!execute) {
     logSuccess("Dry run; set EXECUTE=true to send");
+    return;
+  }
+
+  const calls = [
+    ...chunk(open.map((h) => h.user), batchSize).map((batch) => ({ functionName: "forceClosePositions" as const, batch })),
+    ...chunk(withOrders.map((h) => h.user), batchSize).map((batch) => ({ functionName: "resetState" as const, batch })),
+  ];
+  const owner = getAddress(await pc.readContract({ address: perps, abi: RETIRED_PERPS_ABI, functionName: "owner" }));
+  if (owner !== getAddress(deployer.account.address)) {
+    const { SAFE_OWNER_ADDRESS, SAFE_API_KEY } = requireEnvsSet("SAFE_OWNER_ADDRESS", "SAFE_API_KEY");
+    if (getAddress(SAFE_OWNER_ADDRESS) !== owner) {
+      throw new Error(`SAFE_OWNER_ADDRESS ${SAFE_OWNER_ADDRESS} is not the perps owner ${owner}`);
+    }
+    const safe = new SafeWallet(owner, deployer, SAFE_API_KEY);
+    await logPrompt(`Propose ${calls.length} transaction(s) to Safe ${owner}, positions before orders?`);
+    for (const { functionName, batch } of calls) {
+      const safeTxHash = await safe.proposeTransaction({
+        to: perps,
+        value: "0",
+        data: encodeFunctionData({ abi: RETIRED_PERPS_ABI, functionName, args: [batch] }),
+        operation: OperationType.Call,
+      });
+      logStep(`${functionName}(${batch.length})`, safe.getSafeUITxUrl(safeTxHash));
+    }
+    logSuccess("Proposed; execute them in nonce order, then re-run with VERIFY_ONLY=true");
     return;
   }
 
   await logPrompt("Force-close the open positions, then reset the orders?");
   // A load-balanced RPC can report a head older than the receipts, so verify at the last receipt.
   let after = snapshot;
-  for (const batch of chunk(open.map((h) => h.user), batchSize)) {
-    const hash = await deployer.writeContract({ address: perps, abi: RETIRED_PERPS_ABI, functionName: "forceClosePositions", args: [batch] });
+  for (const { functionName, batch } of calls) {
+    const hash = await deployer.writeContract({ address: perps, abi: RETIRED_PERPS_ABI, functionName, args: [batch] });
     const receipt = await pc.waitForTransactionReceipt({ hash });
-    if (receipt.status !== "success") throw new Error(`forceClosePositions reverted: ${txUrl(pc, hash)}`);
+    if (receipt.status !== "success") throw new Error(`${functionName} reverted: ${txUrl(pc, hash)}`);
     after = receipt.blockNumber;
-    logStep(`forceClosePositions(${batch.length})`, txUrl(pc, hash));
-  }
-  for (const batch of chunk(withOrders.map((h) => h.user), batchSize)) {
-    const hash = await deployer.writeContract({ address: perps, abi: RETIRED_PERPS_ABI, functionName: "resetState", args: [batch] });
-    const receipt = await pc.waitForTransactionReceipt({ hash });
-    if (receipt.status !== "success") throw new Error(`resetState reverted: ${txUrl(pc, hash)}`);
-    after = receipt.blockNumber;
-    logStep(`resetState(${batch.length})`, txUrl(pc, hash));
+    logStep(`${functionName}(${batch.length})`, txUrl(pc, hash));
   }
 
   const left = (await readHoldings(pc, perps, participants, after)).filter((h) => h.netQuantity !== 0n || h.orders > 0);
