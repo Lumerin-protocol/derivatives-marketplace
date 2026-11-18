@@ -71,7 +71,11 @@ async function main() {
   }
   const snapshot = await pc.getBlockNumber();
   if (!(await pc.readContract({ address: vault, abi: VAULT_ABI, functionName: "halted", blockNumber: snapshot }))) {
-    throw new Error("The vault is not halted; run collateral-margin's vault-halt.ts first");
+    // A Safe halt proposed at a lower nonce executes first, but orders placed until then are not reset.
+    if (process.env.QUEUE_BEHIND_HALT !== "true") {
+      throw new Error("The vault is not halted; run collateral-margin's vault-halt.ts first");
+    }
+    logStep("Warning", "vault not halted; proposals queue behind the Safe halt");
   }
 
   const startBlock = process.env.START_BLOCK
